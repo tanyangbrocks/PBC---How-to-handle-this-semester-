@@ -128,19 +128,32 @@ class TurnEngine:
         # 讓玩家選擇行動，直到時間用完
         remaining_time = time_units
         while remaining_time > 0:
-            print(f"\n⏱ 剩餘時間：{remaining_time} 單位")
+            # 讓玩家在選擇前能看到目前的體力與狀態（初學者較易理解數值變化）
+            display_status(player)
+            
+            print(f"\n⏱ 本週剩餘時間：{remaining_time} 單位")
             print("選擇本週行動：")
             for i, action in enumerate(ACTIONS, start=1):
                 cost = action["stamina_cost"]
                 cost_str = f"體力 {'恢復' if cost < 0 else '消耗'} {abs(cost)}"
                 print(f"  {i}. {action['name']} ({cost_str}) — {action['desc']}")
-            print(f"  {len(ACTIONS)+1}. 結束本週行動")
+            print("  0. 結束本週行動")
 
-            choice = get_player_choice(1, len(ACTIONS) + 1)
-            if choice == len(ACTIONS) + 1:
+            # 修正 get_player_choice 的呼叫方式，只傳入清單（配合 ui.py 的定義）
+            choice = get_player_choice(ACTIONS)
+            
+            # 如果選擇 0 則結束本週行動
+            if choice == 0:
                 break
 
             action = ACTIONS[choice - 1]
+            
+            # 執行前檢查體力（使用簡單的 if 判斷，對初學者很友善）
+            if action["stamina_cost"] > player.stamina:
+                print(f"⚠️  提醒：你的體力剩餘 {player.stamina}，執行此行動會導致生病！")
+                if input("確定要執行嗎？(y/N)：").strip().lower() != 'y':
+                    continue
+
             self._execute_action(action)
             remaining_time -= 1  # 每次行動消耗 1 單位時間
 
