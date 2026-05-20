@@ -12,10 +12,8 @@ class Shop:
     道具商店類別。
     這裡存放了商品的清單，並負責處理購買邏輯。
     """
-
     def __init__(self, player):
         self.player = player
-        # 商品清單：定義每個道具的名稱、價格、描述與效果
         self.items = [
             {
                 "id": "coffee",
@@ -55,17 +53,19 @@ class Shop:
         """
         print("\n🏪 【校園道具店】")
         print(f"  目前餘額：${self.player.money}")
-        
-        while True:
-            # 顯示商品選單
-            display_menu(self.items, title="商品列表")
-            choice = get_player_choice(self.items)
 
+        while True:
+            # 顯示商品選單（含價格）
+            print("\n📋 商品列表")
+            for i, item in enumerate(self.items, start=1):
+                print(f"  {i}. 【{item['name']}】 💲{item['price']} 元　{item['desc']}")
+            print("  0. 離開商店")
+
+            choice = get_player_choice(self.items)
             if choice == 0:
                 print("👋 謝謝光臨，歡迎下次再來！")
                 break
-            
-            # 取得玩家選擇的道具
+
             item = self.items[choice - 1]
             self._buy_item(item)
 
@@ -77,27 +77,22 @@ class Shop:
         if self.player.money < item["price"]:
             print(f"❌ 錢不夠喔！你需要 ${item['price']}，但目前只有 ${self.player.money}。")
             return
-
         # 2. 扣款
         self.player.money -= item["price"]
         print(f"💰 購買了【{item['name']}】，剩餘：${self.player.money}")
-
         # 3. 執行效果
-        # 恢復體力
         if "stamina_restore" in item:
             self.player.restore_stamina(item["stamina_restore"])
             print(f"  ✨ 恢復了 {item['stamina_restore']} 點體力！")
-
-        # 增加智力
         if "intel_gain" in item:
             self.player.intel += item["intel_gain"]
             print(f"  📖 智力提升了 {item['intel_gain']} 點！")
-
-        # 增加滿足感
         if "satisfaction_gain" in item:
             self.player.change_satisfaction(item["satisfaction_gain"])
             print(f"  🎮 感覺心靈得到了昇華（滿足感提升）！")
-
-        # 賦予狀態效果
         if "status" in item:
             self.player.add_status(item["status"], item["duration"])
+             
+             
+
+        
