@@ -26,8 +26,8 @@ class Shop:
                 "id": "energy_drink_monster",
                 "name": "猛獸能量",
                 "price": 60,
-                "desc": "恢復 20 點體力，並獲得「激勵」狀態（2週）。",
-                "stamina_restore": 20,
+                "desc": "恢復 25 點體力，並獲得「激勵」狀態（2週）。",
+                "stamina_restore": 25,
                 "status": "激勵",
                 "duration": 2
             },
@@ -67,6 +67,29 @@ class Shop:
                 "price": 1500,
                 "desc": "自我滿足感大幅提升 50 點。",
                 "satisfaction_gain": 50
+            },
+            {
+                "id": "exam_pencil",
+                "name": "考試鉛筆組",
+                "price": 80,
+                "desc": "運氣提升 1 點（1週）。考前衝刺必備！",
+                "luck_gain": 1,
+                "status": "幸運",
+                "duration": 1
+            },
+            {
+                "id": "temple_amulet",
+                "name": "廟口平安符",
+                "price": 200,
+                "desc": "運氣永久提升 3 點。台灣香火保佑！",
+                "luck_gain": 3
+            },
+            {
+                "id": "lucky_omamori",
+                "name": "幸運御守",
+                "price": 350,
+                "desc": "運氣永久提升 5 點。日式神社加持！",
+                "luck_gain": 5
             }
         ]
 
@@ -81,7 +104,7 @@ class Shop:
             # 顯示商品選單（含價格）
             print("\n📋 商品列表")
             for i, item in enumerate(self.items, start=1):
-                print(f"  {i}. 【{item['name']}】 $ {item['price']} 元　{item['desc']}")
+                print(f"  {i}. 【{item['name']}】 ${item['price']} 元　{item['desc']}")
             print("  0. 離開商店")
 
             choice = get_player_choice(self.items)
@@ -113,5 +136,8 @@ class Shop:
         if "satisfaction_gain" in item:
             self.player.change_satisfaction(item["satisfaction_gain"])
             print(f"  🎮 感覺心靈得到了昇華（滿足感提升）！")
+        if "luck_gain" in item:
+            self.player.luck += item["luck_gain"]
+            print(f"  🍀 運氣提升了 {item['luck_gain']} 點！")
         if "status" in item:
             self.player.add_status(item["status"], item["duration"])
