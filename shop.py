@@ -18,18 +18,27 @@ class Shop:
             {
                 "id": "coffee",
                 "name": "超商咖啡",
-                "price": 50,
-                "desc": "恢復 15 點體力，學生熬夜良伴。",
-                "stamina_restore": 15
+                "price": 10,
+                "desc": "恢復 10 點體力，學生熬夜良伴。",
+                "stamina_restore": 10
             },
             {
-                "id": "energy_drink",
-                "name": "提神飲料",
-                "price": 120,
-                "desc": "恢復 25 點體力，並獲得「激勵」狀態（2週）。",
-                "stamina_restore": 25,
+                "id": "energy_drink_monster",
+                "name": "猛獸能量",
+                "price": 60,
+                "desc": "恢復 20 點體力，並獲得「激勵」狀態（2週）。",
+                "stamina_restore": 20,
                 "status": "激勵",
                 "duration": 2
+            },
+            {
+                "id": "energy_drink_bplus",
+                "name": "爆力打B+",
+                "price": 100,
+                "desc": "恢復 30 點體力，並獲得「激勵」狀態（4週）。",
+                "stamina_restore": 30,
+                "status": "激勵",
+                "duration": 4
             },
             {
                 "id": "textbook_ref",
@@ -39,11 +48,25 @@ class Shop:
                 "intel_gain": 5
             },
             {
+                "id": "memory_toast",
+                "name": "記憶吐司",
+                "price": 500,
+                "desc": "智力永久提升 10 點。",
+                "intel_gain": 10
+            },
+            {
                 "id": "game_console",
                 "name": "新款遊戲機",
-                "price": 500,
+                "price": 1000,
                 "desc": "自我滿足感大幅提升 30 點。",
                 "satisfaction_gain": 30
+            },
+            {
+                "id": "idol_photo",
+                "name": "偶像拍立得",
+                "price": 1500,
+                "desc": "自我滿足感大幅提升 50 點。",
+                "satisfaction_gain": 50
             }
         ]
 
@@ -58,7 +81,7 @@ class Shop:
             # 顯示商品選單（含價格）
             print("\n📋 商品列表")
             for i, item in enumerate(self.items, start=1):
-                print(f"  {i}. 【{item['name']}】 💲{item['price']} 元　{item['desc']}")
+                print(f"  {i}. 【{item['name']}】 $ {item['price']} 元　{item['desc']}")
             print("  0. 離開商店")
 
             choice = get_player_choice(self.items)
@@ -92,7 +115,3 @@ class Shop:
             print(f"  🎮 感覺心靈得到了昇華（滿足感提升）！")
         if "status" in item:
             self.player.add_status(item["status"], item["duration"])
-             
-             
-
-        
