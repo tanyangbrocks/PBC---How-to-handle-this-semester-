@@ -14,6 +14,13 @@ LEVEL_NAMES      = ["新手", "普通", "熟練", "精通"]
 # 各等級的效益乘數（精通時每單位時間效益是新手的 2 倍）
 LEVEL_MULTIPLIERS = [1.0, 1.3, 1.6, 2.0]
 
+# 智力加成門檻
+INTEL_THRESHOLDS = [0, 20, 40, 60, 80]
+INTEL_NAMES = ["障礙", "困擾", "平均", "優秀", "聰明"]
+
+# 各程度的效益乘數
+INTEL_MULTIPLIERS = [0.6, 0.8, 1.0, 1.3, 1.6]
+
 
 class SkillSystem:
     """
@@ -29,7 +36,7 @@ class SkillSystem:
     def gain_exp(self, subject: str, base_amount: int):
         """
         增加某科目的熟練度經驗值。
-        實際獲得的量 = base_amount × 當前等級乘數。
+        實際獲得的量 = base_amount × 當前等級乘數 × 智力乘數。
         subject：科目名稱；base_amount：基礎增加量。
         """
         player = self.player
@@ -38,16 +45,22 @@ class SkillSystem:
         if subject not in self.exp_pool:
             self.exp_pool[subject] = 0
 
-        # 取得當前等級乘數
         level = self._get_level(subject)
-        multiplier = LEVEL_MULTIPLIERS[level]
+        skill_multiplier = LEVEL_MULTIPLIERS[level]
 
-        # 計算實際增加量（int() 捨去小數）
-        actual_gain = int(base_amount * multiplier)
+        # 取得智力加成乘數
+        intel_level = self._get_intel_level()
+        intel_multiplier = INTEL_MULTIPLIERS[intel_level]
+
+        # 計算實際增加量
+        actual_gain = int(base_amount * skill_multiplier * intel_multiplier)
+
         self.exp_pool[subject] = min(100, self.exp_pool[subject] + actual_gain)
-
-        print(f"  📚 【{subject}】熟練度 +{actual_gain}"
-              f"（等級：{LEVEL_NAMES[level]}，目前：{self.exp_pool[subject]}）")
+        
+        print(f"📚 [{subject}] 熟練度 +{actual_gain} "
+            f"(熟練度等級：{LEVEL_NAMES[level]}，"
+            f"智力程度：{INTEL_NAMES[intel_level]}，"
+            f"目前：{self.exp_pool[subject]})")
 
         # 順便同步到 player.subject_exp（其實同一個字典，多此一舉但幫助理解）
         player.subject_exp[subject] = self.exp_pool[subject]
@@ -66,3 +79,22 @@ class SkillSystem:
     def get_level_name(self, subject: str) -> str:
         """回傳科目的等級名稱（方便 UI 顯示）。"""
         return LEVEL_NAMES[self._get_level(subject)]
+
+    def _get_intel_level(self) -> int:
+        """
+        根據玩家智力回傳智力等級索引。
+        0: 障礙, 1: 困擾, 2: 平均, 3: 優秀, 4: 聰明
+        """
+        intel = self.player.intel
+
+        for lvl in range(len(INTEL_THRESHOLDS) - 1, -1, -1):
+            if intel >= INTEL_THRESHOLDS[lvl]:
+                return lvl
+
+        return 0
+
+    def get_intel_level_name(self) -> str:
+        """
+        回傳玩家智力程度名稱，方便 UI 顯示。
+        """
+        return INTEL_NAMES[self._get_intel_level()]

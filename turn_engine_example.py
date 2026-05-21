@@ -98,6 +98,10 @@ class TurnEngine:
         elif week == 16:
             self._final_week()
         else:
+            if week == 9:
+                player.status_effects["疲勞"] = 1
+                print("第 9 週：期中考後太累了，進入【疲勞】狀態，本週有效時間 -2。")
+            
             self._normal_week(week)
 
         # 突發事件（每週都可能觸發）

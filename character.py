@@ -71,6 +71,7 @@ class Character:
             "統計學":       0,
             "經濟學":       0,
             "管理學":       0,
+            "會計學":       0,
         }
 
         # 各科作業、小考等分數（最終計算用）
@@ -182,9 +183,11 @@ class Character:
         """
         base_time = 10
         if self.satisfaction < 60:
-            base_time = 5        # 無力狀態
+            base_time = 5        # 失落狀態
         if "生病" in self.status_effects:
             base_time -= 3       # 生病扣時間
+        if "疲勞" in self.status_effects:
+            base_time -= 2      # 疲勞扣時間
         if "激勵" in self.status_effects:
             base_time += 2       # 激勵加時間
         return max(1, base_time) # 至少 1，避免除以零的問題
