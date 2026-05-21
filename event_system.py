@@ -12,7 +12,7 @@
 # ============================================================
 
 import random
-from character import Character
+from character_example import Character
 
 
 # ── 主事件資料庫（全學期，加權隨機）─────────────────────────────
