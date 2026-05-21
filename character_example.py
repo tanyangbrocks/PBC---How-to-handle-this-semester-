@@ -124,27 +124,7 @@ class Character:
 
         return cls(name, department, stamina, intel, luck, money, talent, chosen_drawbacks)
     
-    def save_initial_stats(self):
-        """保存角色創建完成後的初始屬性，作為第一週初始狀態"""
-        self.initial_stats = {
-            "體力": self.stamina,
-            "智力": self.intelligence,
-            "運氣": self.luck,
-            "金錢": self.money,
-            "自我滿足感": self.satisfaction,
-            "狀態效果": self.status_effects.copy()
-        }
 
-    def get_current_stats(self):
-        """取得角色目前狀態"""
-        return {
-            "體力": self.stamina,
-            "智力": self.intelligence,
-            "運氣": self.luck,
-            "金錢": self.money,
-            "自我滿足感": self.satisfaction,
-            "狀態效果": self.status_effects
-        }
 
     # ────────────────────────────────────────────────────────
     #  角色行為方法
