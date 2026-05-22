@@ -10,7 +10,7 @@ from character import Character          # 角色狀態管理器
 from turn_engine import TurnEngine       # 回合與時間引擎
 from event_system import EventSystem     # 突發事件系統
 from skill_system import SkillSystem     # 養成與熟練度系統
-from shop import Shop                    # 經濟與道具店
+from shop_V03 import Shop                    # 經濟與道具店
 from ui import display_status, display_menu, get_player_choice  # 簡單 UI 工具
 
 

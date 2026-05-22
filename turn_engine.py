@@ -12,9 +12,9 @@
 import random
 import time
 
-from character_example import Character
+from character import Character
 from event_system import EventSystem
-from skill_system_example import SkillSystem
+from skill_system import SkillSystem
 from shop_V03 import Shop
 from ui import get_player_choice, display_status
 
