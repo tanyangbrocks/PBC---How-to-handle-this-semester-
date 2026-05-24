@@ -13,20 +13,21 @@ import queue
 import sys
 
 # ─────────────────────────────────────────
-#  顏色
+#  顏色（奶茶布丁色系）
 # ─────────────────────────────────────────
-WHITE     = (255, 255, 255)
-BLACK     = (  0,   0,   0)
-GRAY      = (160, 160, 160)
-DARK_GRAY = ( 50,  50,  60)
-BG        = ( 28,  28,  38)
-PANEL     = ( 42,  42,  58)
-BTN_N     = ( 60,  90, 140)
-BTN_H     = ( 80, 120, 180)
-GREEN     = ( 80, 200, 120)
-RED       = (210,  70,  70)
-YELLOW    = (220, 195,  80)
-CYAN      = ( 80, 200, 215)
+WHITE     = (255, 253, 208)   # 奶油白 #FFFDD0 — 主要文字
+BLACK     = ( 80,  45,  30)   # 深咖啡 — 輸入框文字
+GRAY      = (180, 148, 110)   # 暖灰棕 — 次要邊框
+DARK_GRAY = ( 58,  36,  20)   # 深暖棕 — 次要按鈕
+BG        = ( 38,  22,  12)   # 濃縮咖啡底
+PANEL     = ( 72,  48,  28)   # 暖棕面板
+BTN_N     = (139,  90,  43)   # 焦糖棕按鈕
+BTN_H     = (190, 140,  78)   # 淺焦糖 hover
+GREEN     = (128, 175,  80)   # 抹茶綠
+RED       = (192,  88,  68)   # 磚紅
+YELLOW    = (230, 185,  75)   # 蜂蜜黃
+CYAN      = (251, 206, 177)   # 杏色 #FBCEB1 — 邊框 / 強調
+MILK      = (255, 248, 230)   # 牛奶白 — 文字輸入框背景
 
 # ─────────────────────────────────────────
 #  版面尺寸
@@ -176,10 +177,27 @@ def _wrap(text: str, font, max_w: int) -> list:
     return lines
 
 
+# 漸層 Surface 快取（由 run_ui() 初始化後填入）
+_grads: dict = {}
+
+
+def _gradient_surf(w: int, h: int, c1: tuple, c2: tuple) -> pygame.Surface:
+    """縱向漸層 Surface（c1 在上，c2 在下）。純 Python，不依賴第三方套件。"""
+    surf = pygame.Surface((w, h))
+    for i in range(h):
+        t   = i / max(h - 1, 1)
+        col = tuple(int(c1[j] + (c2[j] - c1[j]) * t) for j in range(3))
+        pygame.draw.line(surf, col, (0, i), (w - 1, i))
+    return surf
+
+
 def _draw_status(surf, fs, fm, player, rect):
     """上方狀態欄。"""
-    pygame.draw.rect(surf, PANEL, rect)
-    pygame.draw.rect(surf, CYAN, rect, 2)
+    if "status" in _grads:
+        surf.blit(_grads["status"], rect.topleft)
+    else:
+        pygame.draw.rect(surf, PANEL, rect)
+    pygame.draw.rect(surf, CYAN, rect, 2, border_radius=10)
     x, y = rect.x + 12, rect.y + 8
     gap = 5
 
@@ -222,7 +240,7 @@ def _draw_status(surf, fs, fm, player, rect):
 def _draw_log(surf, fs, log, scroll, rect):
     """中間訊息紀錄區。"""
     pygame.draw.rect(surf, BG, rect)
-    pygame.draw.rect(surf, GRAY, rect, 1)
+    pygame.draw.rect(surf, GRAY, rect, 1, border_radius=6)
 
     lh  = fs.get_height() + 3
     vis = rect.height // lh
@@ -247,8 +265,11 @@ def _draw_log(surf, fs, log, scroll, rect):
 
 def _draw_input(surf, fm, fs, mode, choices, prompt, tvalue, rect, mpos):
     """下方輸入區：依 mode 顯示按鈕或文字輸入框。"""
-    pygame.draw.rect(surf, PANEL, rect)
-    pygame.draw.rect(surf, GRAY, rect, 1)
+    if "input" in _grads:
+        surf.blit(_grads["input"], rect.topleft)
+    else:
+        pygame.draw.rect(surf, PANEL, rect)
+    pygame.draw.rect(surf, CYAN, rect, 2, border_radius=10)
     rects = []
 
     if mode == "choices":
@@ -265,8 +286,8 @@ def _draw_input(surf, fm, fs, mode, choices, prompt, tvalue, rect, mpos):
             rects.append((br, idx))   # 0 = 返回，1..n = 1-based 選擇
             hover = br.collidepoint(mpos)
             col   = BTN_H if hover else (DARK_GRAY if idx == 0 else BTN_N)
-            pygame.draw.rect(surf, col, br, border_radius=5)
-            pygame.draw.rect(surf, GRAY, br, 1, border_radius=5)
+            pygame.draw.rect(surf, col, br, border_radius=12)
+            pygame.draw.rect(surf, GRAY, br, 1, border_radius=12)
             t = fs.render(label, True, WHITE)
             surf.blit(t, (br.x + (bw - t.get_width()) // 2,
                           br.y + (bh - t.get_height()) // 2))
@@ -277,7 +298,7 @@ def _draw_input(surf, fm, fs, mode, choices, prompt, tvalue, rect, mpos):
             br = pygame.Rect(rect.x + 10 + i * 130, rect.y + 62, 110, 44)
             rects.append((br, val))
             hover = br.collidepoint(mpos)
-            pygame.draw.rect(surf, BTN_H if hover else BTN_N, br, border_radius=5)
+            pygame.draw.rect(surf, BTN_H if hover else BTN_N, br, border_radius=12)
             t = fm.render(label, True, WHITE)
             surf.blit(t, (br.x + (110 - t.get_width()) // 2,
                           br.y + (44 - t.get_height()) // 2))
@@ -285,10 +306,10 @@ def _draw_input(surf, fm, fs, mode, choices, prompt, tvalue, rect, mpos):
     elif mode == "text":
         surf.blit(fs.render(prompt[0], True, WHITE), (rect.x + 10, rect.y + 12))
         ir = pygame.Rect(rect.x + 10, rect.y + 44, rect.width - 20, 36)
-        pygame.draw.rect(surf, WHITE, ir, border_radius=4)
-        # 已確認文字（黑色）+ 組字預覽（藍色）+ 游標
+        pygame.draw.rect(surf, MILK, ir, border_radius=10)
+        # 已確認文字（深咖啡）+ 組字預覽（暖紫）+ 游標
         t_done = fm.render(tvalue[0], True, BLACK)
-        t_comp = fm.render(_composing[0], True, (60, 80, 200)) if _composing[0] else None
+        t_comp = fm.render(_composing[0], True, (150, 90, 180)) if _composing[0] else None
         t_cur  = fm.render("|", True, BLACK)
         x_off  = ir.x + 6
         surf.blit(t_done, (x_off, ir.y + 5))
@@ -299,7 +320,7 @@ def _draw_input(surf, fm, fs, mode, choices, prompt, tvalue, rect, mpos):
         surf.blit(t_cur, (x_off, ir.y + 5))
         ok = pygame.Rect(rect.x + 10, rect.y + 96, 100, 36)
         hover = ok.collidepoint(mpos)
-        pygame.draw.rect(surf, BTN_H if hover else BTN_N, ok, border_radius=5)
+        pygame.draw.rect(surf, BTN_H if hover else BTN_N, ok, border_radius=12)
         t = fm.render("確認", True, WHITE)
         surf.blit(t, (ok.x + (100 - t.get_width()) // 2,
                       ok.y + (36 - t.get_height()) // 2))
@@ -309,18 +330,21 @@ def _draw_input(surf, fm, fs, mode, choices, prompt, tvalue, rect, mpos):
 
 def _draw_start(surf, fm, fl, mpos):
     """開始畫面：遊戲標題 + 開始遊戲按鈕，回傳按鈕 Rect。"""
-    surf.fill(BG)
+    if "start" in _grads:
+        surf.blit(_grads["start"], (0, 0))
+    else:
+        surf.fill(BG)
     # 標題
     title = fl.render("如何渡過這學期？", True, CYAN)
     surf.blit(title, ((WIN_W - title.get_width()) // 2, WIN_H // 3 - 20))
     # 副標
-    sub = fm.render("一款大學生存模擬遊戲", True, GRAY)
-    surf.blit(sub, ((WIN_W - sub.get_width()) // 2, WIN_H // 3 + 55))
+    sub = fm.render("一款大學生存模擬遊戲", True, YELLOW)
+    surf.blit(sub, ((WIN_W - sub.get_width()) // 2, WIN_H // 3 + 58))
     # 按鈕
     btn = pygame.Rect((WIN_W - 220) // 2, WIN_H // 2 + 50, 220, 56)
     hover = btn.collidepoint(mpos)
-    pygame.draw.rect(surf, BTN_H if hover else BTN_N, btn, border_radius=10)
-    pygame.draw.rect(surf, CYAN, btn, 2, border_radius=10)
+    pygame.draw.rect(surf, BTN_H if hover else BTN_N, btn, border_radius=16)
+    pygame.draw.rect(surf, CYAN, btn, 2, border_radius=16)
     t = fm.render("開始遊戲", True, WHITE)
     surf.blit(t, (btn.x + (220 - t.get_width()) // 2,
                   btn.y + (56  - t.get_height()) // 2))
@@ -329,20 +353,26 @@ def _draw_start(surf, fm, fl, mpos):
 
 def _draw_end(surf, fm, fs, lr, mpos):
     """結束畫面：保留 log（可看最終成績）+ 再來一次按鈕。"""
-    surf.fill(BG)
+    if "start" in _grads:
+        surf.blit(_grads["start"], (0, 0))
+    else:
+        surf.fill(BG)
     # 沿用 log 區，讓玩家還能看到最終成績
     _draw_log(surf, fs, _log, _scroll[0], lr)
     # 下方面板
     ir = pygame.Rect(0, lr.y + lr.height, WIN_W, WIN_H - lr.y - lr.height)
-    pygame.draw.rect(surf, PANEL, ir)
-    pygame.draw.rect(surf, CYAN, ir, 2)
+    if "input" in _grads:
+        surf.blit(_grads["input"], ir.topleft)
+    else:
+        pygame.draw.rect(surf, PANEL, ir)
+    pygame.draw.rect(surf, CYAN, ir, 2, border_radius=10)
     title = fm.render("🎓 學期結束！感謝遊玩《如何渡過這學期？》", True, YELLOW)
     surf.blit(title, ((WIN_W - title.get_width()) // 2, ir.y + 14))
     # 按鈕
     btn = pygame.Rect((WIN_W - 220) // 2, ir.y + 60, 220, 50)
     hover = btn.collidepoint(mpos)
-    pygame.draw.rect(surf, BTN_H if hover else BTN_N, btn, border_radius=10)
-    pygame.draw.rect(surf, CYAN, btn, 2, border_radius=10)
+    pygame.draw.rect(surf, BTN_H if hover else BTN_N, btn, border_radius=16)
+    pygame.draw.rect(surf, CYAN, btn, 2, border_radius=16)
     t = fm.render("再來一次", True, WHITE)
     surf.blit(t, (btn.x + (220 - t.get_width()) // 2,
                   btn.y + (50  - t.get_height()) // 2))
@@ -371,6 +401,12 @@ def run_ui():
 
     # 道具店快捷按鈕固定在狀態欄右下角
     shop_btn_rect = pygame.Rect(WIN_W - 120, STATUS_H - 46, 110, 36)
+
+    # ── 預先計算漸層 Surface（只算一次，之後每幀 blit）────────
+    _grads["bg"]     = _gradient_surf(WIN_W, WIN_H,    ( 48,  28,  14), ( 20,  10,   4))
+    _grads["status"] = _gradient_surf(WIN_W, STATUS_H, ( 90,  60,  34), ( 62,  40,  22))
+    _grads["input"]  = _gradient_surf(WIN_W, INPUT_H,  ( 62,  40,  22), ( 90,  60,  34))
+    _grads["start"]  = _gradient_surf(WIN_W, WIN_H,    ( 62,  38,  18), ( 28,  14,   6))
 
     running = True
     while running:
@@ -421,7 +457,7 @@ def run_ui():
         elif _phase[0] == "end":
             end_btn = _draw_end(screen, fm, fs, lr, mpos)
         else:   # "game"
-            screen.fill(BG)
+            screen.blit(_grads["bg"], (0, 0))
             _draw_status(screen, fs, fm, _player[0], sr)
             _draw_log(screen, fs, _log, _scroll[0], lr)
             btn_rects = _draw_input(screen, fm, fs, _mode[0], _choices,
@@ -429,8 +465,8 @@ def run_ui():
 
             # 道具店快捷按鈕（亮色 = 可點，暗色 = 目前不在行動選單）
             _shop_col = BTN_N if shop_active else DARK_GRAY
-            pygame.draw.rect(screen, _shop_col, shop_btn_rect, border_radius=5)
-            pygame.draw.rect(screen, GRAY, shop_btn_rect, 1, border_radius=5)
+            pygame.draw.rect(screen, _shop_col, shop_btn_rect, border_radius=12)
+            pygame.draw.rect(screen, CYAN, shop_btn_rect, 1, border_radius=12)
             _shop_txt = fs.render("🏪 道具店", True, WHITE if shop_active else GRAY)
             screen.blit(_shop_txt, (
                 shop_btn_rect.x + (shop_btn_rect.width  - _shop_txt.get_width())  // 2,
