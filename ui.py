@@ -53,7 +53,8 @@ _mode    = [None]   # "choices" | "yn" | "text" | None
 _choices = []       # 選項標籤列表
 _prompt  = [""]     # yn / text 提示文字
 _tvalue  = [""]     # text 模式的目前輸入內容
-_scroll  = [0]      # 訊息區往上捲動的行數
+_scroll    = [0]      # 訊息區往上捲動的行數
+_composing = [""]   # IME 組字預覽（輸入法尚未確認的字）
 
 # ─────────────────────────────────────────
 #  供其他模組呼叫的 API
@@ -262,7 +263,17 @@ def _draw_input(surf, fm, fs, mode, choices, prompt, tvalue, rect, mpos):
         surf.blit(fs.render(prompt[0], True, WHITE), (rect.x + 10, rect.y + 12))
         ir = pygame.Rect(rect.x + 10, rect.y + 44, rect.width - 20, 36)
         pygame.draw.rect(surf, WHITE, ir, border_radius=4)
-        surf.blit(fm.render(tvalue[0] + "|", True, BLACK), (ir.x + 6, ir.y + 5))
+        # 已確認文字（黑色）+ 組字預覽（藍色）+ 游標
+        t_done = fm.render(tvalue[0], True, BLACK)
+        t_comp = fm.render(_composing[0], True, (60, 80, 200)) if _composing[0] else None
+        t_cur  = fm.render("|", True, BLACK)
+        x_off  = ir.x + 6
+        surf.blit(t_done, (x_off, ir.y + 5))
+        x_off += t_done.get_width()
+        if t_comp:
+            surf.blit(t_comp, (x_off, ir.y + 5))
+            x_off += t_comp.get_width()
+        surf.blit(t_cur, (x_off, ir.y + 5))
         ok = pygame.Rect(rect.x + 10, rect.y + 96, 100, 36)
         hover = ok.collidepoint(mpos)
         pygame.draw.rect(surf, BTN_H if hover else BTN_N, ok, border_radius=5)
@@ -280,6 +291,7 @@ def _draw_input(surf, fm, fs, mode, choices, prompt, tvalue, rect, mpos):
 def run_ui():
     """啟動 pygame 視窗並進入主迴圈，直到視窗關閉。"""
     pygame.init()
+    pygame.key.set_repeat(400, 50)  # 長按重複：400ms 後開始，每 50ms 一次（backspace 連刪）
     screen = pygame.display.set_mode((WIN_W, WIN_H))
     pygame.display.set_caption("如何渡過這學期？")
     clock  = pygame.time.Clock()
@@ -315,6 +327,7 @@ def run_ui():
                 _prompt[0] = cmd[1]
                 _tvalue[0] = cmd[2] if len(cmd) > 2 else ""
                 _mode[0] = "text"
+                pygame.key.start_text_input()  # Windows IME 必須主動開啟
 
         # ── 繪製 ─────────────────────────────────────────────
         screen.fill(BG)
@@ -341,6 +354,8 @@ def run_ui():
                         if _mode[0] == "text" and val == "__ok__":
                             _reply_val[0] = _tvalue[0]
                             _mode[0] = None
+                            _composing[0] = ""
+                            pygame.key.stop_text_input()
                             _reply_event.set()
                         elif _mode[0] in ("choices", "yn"):
                             _reply_val[0] = val
@@ -348,16 +363,30 @@ def run_ui():
                             _choices.clear()
                             _reply_event.set()
 
+            elif ev.type == pygame.TEXTEDITING:
+                # 輸入法組字中（例如注音還沒按確認）：只更新預覽，不寫入正文
+                if _mode[0] == "text":
+                    _composing[0] = ev.text
+
+            elif ev.type == pygame.TEXTINPUT:
+                # 輸入法確認（或直接打英數）：寫入正文，清除組字預覽
+                if _mode[0] == "text":
+                    _tvalue[0] += ev.text
+                    _composing[0] = ""
+
             elif ev.type == pygame.KEYDOWN:
                 if _mode[0] == "text":
                     if ev.key == pygame.K_RETURN:
                         _reply_val[0] = _tvalue[0]
                         _mode[0] = None
+                        _composing[0] = ""
+                        pygame.key.stop_text_input()
                         _reply_event.set()
                     elif ev.key == pygame.K_BACKSPACE:
-                        _tvalue[0] = _tvalue[0][:-1]
-                    elif ev.unicode and ev.unicode.isprintable():
-                        _tvalue[0] += ev.unicode
+                        if _composing[0]:
+                            _composing[0] = ""  # 先清組字預覽
+                        else:
+                            _tvalue[0] = _tvalue[0][:-1]
 
         clock.tick(30)
 
