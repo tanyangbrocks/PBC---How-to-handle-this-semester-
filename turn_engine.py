@@ -70,6 +70,14 @@ ACTIONS = [
         "satisfaction": 12,
         "desc": "花時間陪伴身邊的人，自我滿足感大增。",
     },
+    {
+        "id": "shop",
+        "name": "🏪 前往道具店",
+        "stamina_cost": 0,
+        "exp_gain": 0,
+        "satisfaction": 0,
+        "desc": "前往校園道具店購買道具（不消耗時間單位）。",
+    },
 ]
 
 
@@ -190,14 +198,11 @@ class TurnEngine:
             # print("  🍃 本週校園風平浪靜，照著自己的步調前進吧。")  # 因套用pygame而調整
             notify("  🍃 本週校園風平浪靜，照著自己的步調前進吧。")
 
-        # ── 道具店 ────────────────────────────────────────
+        # ── 行動選擇 ──────────────────────────────────────
+        # （道具店已整合進行動選單，不再額外詢問）
         time_units = player.get_effective_time()
         # print(f"\n本週可支配時間：{time_units} 單位")  # 因套用pygame而調整
         notify(f"\n本週可支配時間：{time_units} 單位")
-
-        # if input("\n要去道具店嗎？(y/N)：").strip().lower() == "y":  # 因套用pygame而調整
-        if ask_yn("要去道具店嗎？"):
-            self.shop.open_shop()
 
         # ── 行動選擇迴圈 ──────────────────────────────────
         remaining_time = time_units
@@ -225,6 +230,11 @@ class TurnEngine:
                 break
 
             action = ACTIONS[choice - 1]
+
+            # 道具店：不消耗時間單位，直接開店再回到行動選單
+            if action["id"] == "shop":
+                self.shop.open_shop()
+                continue
 
             if action["stamina_cost"] > player.stamina:
                 # print(f"⚠️ 提醒：你的體力剩餘 {player.stamina}，執行此行動可能會導致生病！")  # 因套用pygame而調整

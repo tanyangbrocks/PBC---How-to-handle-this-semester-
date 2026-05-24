@@ -303,9 +303,14 @@ def run_ui():
     lr = pygame.Rect(0, STATUS_H, WIN_W, LOG_H)
     ir = pygame.Rect(0, STATUS_H + LOG_H, WIN_W, INPUT_H)
 
+    # 道具店快捷按鈕固定在狀態欄右下角
+    shop_btn_rect = pygame.Rect(WIN_W - 120, STATUS_H - 46, 110, 36)
+
     running = True
     while running:
         mpos = pygame.mouse.get_pos()
+        # 道具店按鈕是否可點擊：只有在行動選單中且選項包含道具店時才亮起
+        shop_active = (_mode[0] == "choices" and "🏪 前往道具店" in _choices)
 
         # ── 消化遊戲執行緒的命令 ─────────────────────────────
         while not _cmd_q.empty():
@@ -335,6 +340,17 @@ def run_ui():
         _draw_log(screen, fs, _log, _scroll[0], lr)
         btn_rects = _draw_input(screen, fm, fs, _mode[0], _choices,
                                 _prompt, _tvalue, ir, mpos)
+
+        # 道具店快捷按鈕（亮色 = 可點，暗色 = 目前不在行動選單）
+        _shop_col = BTN_N if shop_active else DARK_GRAY
+        pygame.draw.rect(screen, _shop_col, shop_btn_rect, border_radius=5)
+        pygame.draw.rect(screen, GRAY, shop_btn_rect, 1, border_radius=5)
+        _shop_txt = fs.render("🏪 道具店", True, WHITE if shop_active else GRAY)
+        screen.blit(_shop_txt, (
+            shop_btn_rect.x + (shop_btn_rect.width  - _shop_txt.get_width())  // 2,
+            shop_btn_rect.y + (shop_btn_rect.height - _shop_txt.get_height()) // 2,
+        ))
+
         pygame.display.flip()
 
         # ── pygame 事件 ───────────────────────────────────────
@@ -349,6 +365,17 @@ def run_ui():
                 _scroll[0] = max(0, min(max_sc, _scroll[0] - ev.y))
 
             elif ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1:
+                # 道具店快捷按鈕
+                if shop_active and shop_btn_rect.collidepoint(ev.pos):
+                    shop_idx = next(
+                        (i + 1 for i, c in enumerate(_choices) if c == "🏪 前往道具店"),
+                        None,
+                    )
+                    if shop_idx is not None:
+                        _reply_val[0] = shop_idx
+                        _mode[0] = None
+                        _choices.clear()
+                        _reply_event.set()
                 for (br, val) in btn_rects:
                     if br.collidepoint(ev.pos):
                         if _mode[0] == "text" and val == "__ok__":
