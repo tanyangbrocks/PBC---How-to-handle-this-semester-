@@ -22,50 +22,61 @@ def game_main():
     遊戲邏輯主函式，在背景執行緒中執行。
     所有 ui.notify() / ui.ask_*() 呼叫都是執行緒安全的阻塞呼叫，
     邏輯順序與原版完全相同。
+    外層 while 迴圈支援「再來一次」重玩。
     """
-    # print("=" * 50)  # 因套用pygame而調整
-    ui.notify("=" * 50)
-    # print("  歡迎來到《如何渡過這學期？》")  # 因套用pygame而調整
-    ui.notify("  歡迎來到《如何渡過這學期？》")
-    # print("=" * 50)  # 因套用pygame而調整
-    ui.notify("=" * 50)
+    while True:
+        # ── 等待玩家點擊「開始遊戲」────────────────────────
+        ui.wait_start()
 
-    # ── 步驟 1：建立角色 ──────────────────────────────────
-    player = Character.create_new()
-    ui.set_player(player)
+        # print("=" * 50)  # 因套用pygame而調整
+        ui.notify("=" * 50)
+        # print("  歡迎來到《如何渡過這學期？》")  # 因套用pygame而調整
+        ui.notify("  歡迎來到《如何渡過這學期？》")
+        # print("=" * 50)  # 因套用pygame而調整
+        ui.notify("=" * 50)
 
-    # ── 步驟 2：建立各大子系統 ───────────────────────────
-    event_sys = EventSystem(player)
-    skill_sys = SkillSystem(player)
-    shop      = Shop(player)
-    engine    = TurnEngine(
-        player    = player,
-        event_sys = event_sys,
-        skill_sys = skill_sys,
-        shop      = shop,
-    )
-
-    # ── 步驟 3：主遊戲循環（共 16 回合 = 16 週）──────────
-    for week in range(1, 17):
-        # print(f"\n{'─'*50}")  # 因套用pygame而調整
-        ui.notify(f"\n{'─'*50}")
-        # print(f"  第 {week} 週")  # 因套用pygame而調整
-        ui.notify(f"  第 {week} 週")
-        # print(f"{'─'*50}")  # 因套用pygame而調整
-        ui.notify(f"{'─'*50}")
-
-        # display_status(player)  # 因套用pygame而調整（狀態欄由 pygame 持續顯示）
+        # ── 步驟 1：建立角色 ──────────────────────────────────
+        player = Character.create_new()
         ui.set_player(player)
 
-        game_over = engine.run_week(week)
+        # ── 步驟 2：建立各大子系統 ───────────────────────────
+        event_sys = EventSystem(player)
+        skill_sys = SkillSystem(player)
+        shop      = Shop(player)
+        engine    = TurnEngine(
+            player    = player,
+            event_sys = event_sys,
+            skill_sys = skill_sys,
+            shop      = shop,
+        )
 
-        if game_over:
-            # print("\n💀 遊戲結束：你沒能撐過這學期……")  # 因套用pygame而調整
-            ui.notify("\n💀 遊戲結束：你沒能撐過這學期……")
-            return
+        # ── 步驟 3：主遊戲循環（共 16 回合 = 16 週）──────────
+        for week in range(1, 17):
+            # print(f"\n{'─'*50}")  # 因套用pygame而調整
+            ui.notify(f"\n{'─'*50}")
+            # print(f"  第 {week} 週")  # 因套用pygame而調整
+            ui.notify(f"  第 {week} 週")
+            # print(f"{'─'*50}")  # 因套用pygame而調整
+            ui.notify(f"{'─'*50}")
 
-    # ── 步驟 4：期末結算 ──────────────────────────────────
-    engine.final_settlement()
+            # display_status(player)  # 因套用pygame而調整（狀態欄由 pygame 持續顯示）
+            ui.set_player(player)
+
+            game_over = engine.run_week(week)
+
+            if game_over:
+                # print("\n💀 遊戲結束：你沒能撐過這學期……")  # 因套用pygame而調整
+                ui.notify("\n💀 遊戲結束：你沒能撐過這學期……")
+                break   # 跳出 for，不執行 else（即不呼叫 final_settlement）
+
+        else:
+            # ── 步驟 4：期末結算（16 週正常完成）────────────
+            engine.final_settlement()
+
+        # ── 步驟 5：切換結束畫面，等待玩家決定────────────
+        ui.notify_end()
+        ui.wait_restart()
+        ui.reset_ui()   # 清除 log 與狀態，準備下一局
 
 
 if __name__ == "__main__":

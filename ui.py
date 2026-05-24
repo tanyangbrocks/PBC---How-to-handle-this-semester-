@@ -56,6 +56,11 @@ _tvalue  = [""]     # text 模式的目前輸入內容
 _scroll    = [0]      # 訊息區往上捲動的行數
 _composing = [""]   # IME 組字預覽（輸入法尚未確認的字）
 
+# 畫面階段：start → 開始畫面，game → 遊戲中，end → 結束畫面
+_phase         = ["start"]
+_start_event   = threading.Event()   # 玩家點擊「開始遊戲」後被 set
+_restart_event = threading.Event()   # 玩家點擊「再來一次」後被 set
+
 # ─────────────────────────────────────────
 #  供其他模組呼叫的 API
 # ─────────────────────────────────────────
@@ -93,6 +98,24 @@ def ask_yn(prompt: str) -> bool:
     _reply_event.clear()
     _reply_event.wait()
     return _reply_val[0]
+
+def wait_start():
+    """遊戲執行緒呼叫：阻塞直到玩家點擊「開始遊戲」。"""
+    _start_event.clear()
+    _start_event.wait()
+
+def notify_end():
+    """遊戲結束後呼叫：切換到結束畫面。"""
+    _cmd_q.put(("phase", "end"))
+
+def wait_restart():
+    """阻塞直到玩家點擊「再來一次」。"""
+    _restart_event.clear()
+    _restart_event.wait()
+
+def reset_ui():
+    """清除上一局的 log 與狀態，供下一局使用。"""
+    _cmd_q.put(("reset", None))
 
 # ─────────────────────────────────────────
 #  相容舊有介面（讓尚未修改的模組繼續可匯入）
@@ -284,6 +307,48 @@ def _draw_input(surf, fm, fs, mode, choices, prompt, tvalue, rect, mpos):
 
     return rects
 
+def _draw_start(surf, fm, fl, mpos):
+    """開始畫面：遊戲標題 + 開始遊戲按鈕，回傳按鈕 Rect。"""
+    surf.fill(BG)
+    # 標題
+    title = fl.render("如何渡過這學期？", True, CYAN)
+    surf.blit(title, ((WIN_W - title.get_width()) // 2, WIN_H // 3 - 20))
+    # 副標
+    sub = fm.render("一款大學生存模擬遊戲", True, GRAY)
+    surf.blit(sub, ((WIN_W - sub.get_width()) // 2, WIN_H // 3 + 55))
+    # 按鈕
+    btn = pygame.Rect((WIN_W - 220) // 2, WIN_H // 2 + 50, 220, 56)
+    hover = btn.collidepoint(mpos)
+    pygame.draw.rect(surf, BTN_H if hover else BTN_N, btn, border_radius=10)
+    pygame.draw.rect(surf, CYAN, btn, 2, border_radius=10)
+    t = fm.render("開始遊戲", True, WHITE)
+    surf.blit(t, (btn.x + (220 - t.get_width()) // 2,
+                  btn.y + (56  - t.get_height()) // 2))
+    return btn
+
+
+def _draw_end(surf, fm, fs, lr, mpos):
+    """結束畫面：保留 log（可看最終成績）+ 再來一次按鈕。"""
+    surf.fill(BG)
+    # 沿用 log 區，讓玩家還能看到最終成績
+    _draw_log(surf, fs, _log, _scroll[0], lr)
+    # 下方面板
+    ir = pygame.Rect(0, lr.y + lr.height, WIN_W, WIN_H - lr.y - lr.height)
+    pygame.draw.rect(surf, PANEL, ir)
+    pygame.draw.rect(surf, CYAN, ir, 2)
+    title = fm.render("🎓 學期結束！感謝遊玩《如何渡過這學期？》", True, YELLOW)
+    surf.blit(title, ((WIN_W - title.get_width()) // 2, ir.y + 14))
+    # 按鈕
+    btn = pygame.Rect((WIN_W - 220) // 2, ir.y + 60, 220, 50)
+    hover = btn.collidepoint(mpos)
+    pygame.draw.rect(surf, BTN_H if hover else BTN_N, btn, border_radius=10)
+    pygame.draw.rect(surf, CYAN, btn, 2, border_radius=10)
+    t = fm.render("再來一次", True, WHITE)
+    surf.blit(t, (btn.x + (220 - t.get_width()) // 2,
+                  btn.y + (50  - t.get_height()) // 2))
+    return btn
+
+
 # ─────────────────────────────────────────
 #  pygame 主迴圈（在主執行緒中呼叫）
 # ─────────────────────────────────────────
@@ -296,6 +361,7 @@ def run_ui():
     pygame.display.set_caption("如何渡過這學期？")
     clock  = pygame.time.Clock()
 
+    fl = _get_font(40)   # 開始 / 結束畫面標題大字
     fm = _get_font(22)
     fs = _get_font(17)
 
@@ -333,23 +399,43 @@ def run_ui():
                 _tvalue[0] = cmd[2] if len(cmd) > 2 else ""
                 _mode[0] = "text"
                 pygame.key.start_text_input()  # Windows IME 必須主動開啟
+            elif tag == "phase":
+                _phase[0] = cmd[1]
+            elif tag == "reset":
+                _log.clear()
+                _player[0] = None
+                _mode[0] = None
+                _choices.clear()
+                _prompt[0] = ""
+                _tvalue[0] = ""
+                _scroll[0] = 0
+                _composing[0] = ""
 
-        # ── 繪製 ─────────────────────────────────────────────
-        screen.fill(BG)
-        _draw_status(screen, fs, fm, _player[0], sr)
-        _draw_log(screen, fs, _log, _scroll[0], lr)
-        btn_rects = _draw_input(screen, fm, fs, _mode[0], _choices,
-                                _prompt, _tvalue, ir, mpos)
+        # ── 繪製（依畫面階段切換內容）────────────────────────
+        btn_rects = []
+        start_btn = None
+        end_btn   = None
 
-        # 道具店快捷按鈕（亮色 = 可點，暗色 = 目前不在行動選單）
-        _shop_col = BTN_N if shop_active else DARK_GRAY
-        pygame.draw.rect(screen, _shop_col, shop_btn_rect, border_radius=5)
-        pygame.draw.rect(screen, GRAY, shop_btn_rect, 1, border_radius=5)
-        _shop_txt = fs.render("🏪 道具店", True, WHITE if shop_active else GRAY)
-        screen.blit(_shop_txt, (
-            shop_btn_rect.x + (shop_btn_rect.width  - _shop_txt.get_width())  // 2,
-            shop_btn_rect.y + (shop_btn_rect.height - _shop_txt.get_height()) // 2,
-        ))
+        if _phase[0] == "start":
+            start_btn = _draw_start(screen, fm, fl, mpos)
+        elif _phase[0] == "end":
+            end_btn = _draw_end(screen, fm, fs, lr, mpos)
+        else:   # "game"
+            screen.fill(BG)
+            _draw_status(screen, fs, fm, _player[0], sr)
+            _draw_log(screen, fs, _log, _scroll[0], lr)
+            btn_rects = _draw_input(screen, fm, fs, _mode[0], _choices,
+                                    _prompt, _tvalue, ir, mpos)
+
+            # 道具店快捷按鈕（亮色 = 可點，暗色 = 目前不在行動選單）
+            _shop_col = BTN_N if shop_active else DARK_GRAY
+            pygame.draw.rect(screen, _shop_col, shop_btn_rect, border_radius=5)
+            pygame.draw.rect(screen, GRAY, shop_btn_rect, 1, border_radius=5)
+            _shop_txt = fs.render("🏪 道具店", True, WHITE if shop_active else GRAY)
+            screen.blit(_shop_txt, (
+                shop_btn_rect.x + (shop_btn_rect.width  - _shop_txt.get_width())  // 2,
+                shop_btn_rect.y + (shop_btn_rect.height - _shop_txt.get_height()) // 2,
+            ))
 
         pygame.display.flip()
 
@@ -365,30 +451,42 @@ def run_ui():
                 _scroll[0] = max(0, min(max_sc, _scroll[0] - ev.y))
 
             elif ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1:
-                # 道具店快捷按鈕
-                if shop_active and shop_btn_rect.collidepoint(ev.pos):
-                    shop_idx = next(
-                        (i + 1 for i, c in enumerate(_choices) if c == "🏪 前往道具店"),
-                        None,
-                    )
-                    if shop_idx is not None:
-                        _reply_val[0] = shop_idx
-                        _mode[0] = None
-                        _choices.clear()
-                        _reply_event.set()
-                for (br, val) in btn_rects:
-                    if br.collidepoint(ev.pos):
-                        if _mode[0] == "text" and val == "__ok__":
-                            _reply_val[0] = _tvalue[0]
-                            _mode[0] = None
-                            _composing[0] = ""
-                            pygame.key.stop_text_input()
-                            _reply_event.set()
-                        elif _mode[0] in ("choices", "yn"):
-                            _reply_val[0] = val
+                if _phase[0] == "start":
+                    # ── 開始畫面 ──────────────────────────────
+                    if start_btn and start_btn.collidepoint(ev.pos):
+                        _phase[0] = "game"
+                        _start_event.set()
+                elif _phase[0] == "end":
+                    # ── 結束畫面 ──────────────────────────────
+                    if end_btn and end_btn.collidepoint(ev.pos):
+                        _phase[0] = "start"
+                        _restart_event.set()
+                else:
+                    # ── 遊戲中 ────────────────────────────────
+                    # 道具店快捷按鈕
+                    if shop_active and shop_btn_rect.collidepoint(ev.pos):
+                        shop_idx = next(
+                            (i + 1 for i, c in enumerate(_choices) if c == "🏪 前往道具店"),
+                            None,
+                        )
+                        if shop_idx is not None:
+                            _reply_val[0] = shop_idx
                             _mode[0] = None
                             _choices.clear()
                             _reply_event.set()
+                    for (br, val) in btn_rects:
+                        if br.collidepoint(ev.pos):
+                            if _mode[0] == "text" and val == "__ok__":
+                                _reply_val[0] = _tvalue[0]
+                                _mode[0] = None
+                                _composing[0] = ""
+                                pygame.key.stop_text_input()
+                                _reply_event.set()
+                            elif _mode[0] in ("choices", "yn"):
+                                _reply_val[0] = val
+                                _mode[0] = None
+                                _choices.clear()
+                                _reply_event.set()
 
             elif ev.type == pygame.TEXTEDITING:
                 # 輸入法組字中（例如注音還沒按確認）：只更新預覽，不寫入正文
