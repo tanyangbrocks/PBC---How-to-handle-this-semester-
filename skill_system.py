@@ -6,6 +6,7 @@
 # ============================================================
 
 from character import Character
+from ui import notify
 
 # 熟練度等級門檻（累積 exp 達到多少進入該等級）
 LEVEL_THRESHOLDS = [0, 30, 60, 90]     # 等級 0、1、2、3
@@ -57,10 +58,11 @@ class SkillSystem:
 
         self.exp_pool[subject] = min(100, self.exp_pool[subject] + actual_gain)
         
-        print(f"📚 [{subject}] 熟練度 +{actual_gain} "
-            f"(熟練度等級：{LEVEL_NAMES[level]}，"
-            f"智力程度：{INTEL_NAMES[intel_level]}，"
-            f"目前：{self.exp_pool[subject]})")
+        # print(f"📚 [{subject}] 熟練度 +{actual_gain} "  # 因套用pygame而調整
+        #     f"(熟練度等級：{LEVEL_NAMES[level]}，"
+        #     f"智力程度：{INTEL_NAMES[intel_level]}，"
+        #     f"目前：{self.exp_pool[subject]})")
+        notify(f"📚 [{subject}] 熟練度 +{actual_gain} (熟練度等級：{LEVEL_NAMES[level]}，智力程度：{INTEL_NAMES[intel_level]}，目前：{self.exp_pool[subject]})")
 
         # 順便同步到 player.subject_exp（其實同一個字典，多此一舉但幫助理解）
         player.subject_exp[subject] = self.exp_pool[subject]

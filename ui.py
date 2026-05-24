@@ -1,55 +1,365 @@
 # ============================================================
-#  模組：ui.py — 介面與顯示工具
+#  模組：ui.py — pygame 圖形介面
 # ============================================================
-# 這個模組負責所有「與玩家互動」的視覺呈現。
-# 把 print 和 input 邏輯集中在這裡，可以讓其他系統（如戰鬥、商店）
-# 的程式碼保持乾淨，只專注於邏輯運算。
+# 架構：遊戲邏輯跑在背景執行緒，pygame 主迴圈跑在主執行緒。
+# 兩者透過 Queue 與 threading.Event 通訊：
+#   遊戲 → UI：把命令放入 _cmd_q（notify / ask_choice 等）
+#   UI → 遊戲：玩家點擊後設定 _reply_event，遊戲執行緒繼續
 # ============================================================
+
+import pygame
+import threading
+import queue
+import sys
+
+# ─────────────────────────────────────────
+#  顏色
+# ─────────────────────────────────────────
+WHITE     = (255, 255, 255)
+BLACK     = (  0,   0,   0)
+GRAY      = (160, 160, 160)
+DARK_GRAY = ( 50,  50,  60)
+BG        = ( 28,  28,  38)
+PANEL     = ( 42,  42,  58)
+BTN_N     = ( 60,  90, 140)
+BTN_H     = ( 80, 120, 180)
+GREEN     = ( 80, 200, 120)
+RED       = (210,  70,  70)
+YELLOW    = (220, 195,  80)
+CYAN      = ( 80, 200, 215)
+
+# ─────────────────────────────────────────
+#  版面尺寸
+# ─────────────────────────────────────────
+WIN_W    = 960
+WIN_H    = 720
+STATUS_H = 155
+INPUT_H  = 165
+LOG_H    = WIN_H - STATUS_H - INPUT_H
+
+# ─────────────────────────────────────────
+#  執行緒通訊
+# ─────────────────────────────────────────
+_cmd_q       = queue.Queue()    # 遊戲執行緒 → pygame 主執行緒
+_reply_event = threading.Event()
+_reply_val   = [None]           # 用 list 讓內層函式可修改
+
+# ─────────────────────────────────────────
+#  UI 狀態（僅主執行緒讀寫）
+# ─────────────────────────────────────────
+_log     = []       # 所有已換行的訊息字串
+_player  = [None]   # 角色物件參照
+_mode    = [None]   # "choices" | "yn" | "text" | None
+_choices = []       # 選項標籤列表
+_prompt  = [""]     # yn / text 提示文字
+_tvalue  = [""]     # text 模式的目前輸入內容
+_scroll  = [0]      # 訊息區往上捲動的行數
+
+# ─────────────────────────────────────────
+#  供其他模組呼叫的 API
+# ─────────────────────────────────────────
+
+def notify(msg: str):
+    """取代 print()：把訊息推入 UI 訊息區。"""
+    _cmd_q.put(("msg", str(msg)))
+
+def set_player(player):
+    """把角色物件傳給 UI，讓狀態欄即時更新。"""
+    _cmd_q.put(("player", player))
+
+def ask_choice(options) -> int:
+    """
+    取代 get_player_choice()。
+    options: 字串列表 或 帶 'name' key 的字典列表。
+    回傳：0 = 返回/結束，1..n = 玩家選擇的編號（1-based）。
+    """
+    labels = [opt["name"] if isinstance(opt, dict) else str(opt) for opt in options]
+    _cmd_q.put(("choices", labels))
+    _reply_event.clear()
+    _reply_event.wait()
+    return _reply_val[0]
+
+def ask_text(prompt: str, default: str = "") -> str:
+    """取代自由文字輸入的 input()：顯示輸入框，確認後回傳字串。"""
+    _cmd_q.put(("text", prompt, default))
+    _reply_event.clear()
+    _reply_event.wait()
+    return _reply_val[0]
+
+def ask_yn(prompt: str) -> bool:
+    """取代 y/N 型的 input()：顯示「是 / 否」按鈕，回傳 True / False。"""
+    _cmd_q.put(("yn", prompt))
+    _reply_event.clear()
+    _reply_event.wait()
+    return _reply_val[0]
+
+# ─────────────────────────────────────────
+#  相容舊有介面（讓尚未修改的模組繼續可匯入）
+# ─────────────────────────────────────────
 
 def display_status(player):
-    """
-    在螢幕上印出目前角色的所有數值狀態。
-    使用了格式化字串 (f-string) 來對齊文字，讓介面看起來更整齊。
-    """
-    print(f"\n{'#'*50}")
-    print(f"  角色：{player.name} ({player.department})")
-    print(f"  體力：{player.stamina} / {player.stamina_max}")
-    print(f"  智力：{player.intel}  |  運氣：{player.luck}  |  金錢：${player.money}")
-    print(f"  滿足感：{player.satisfaction}%")
-    
-    # 顯示目前擁有的狀態效果
-    if player.status_effects:
-        effects = ", ".join([f"{k}({v}週)" for k, v in player.status_effects.items()])
-        print(f"  當前狀態：[{effects}]")
-    else:
-        print(f"  當前狀態：[正常]")
-    print(f"{'#'*50}")
-
+    set_player(player)
 
 def display_menu(options, title="請選擇行動"):
-    """
-    印出一個選單供玩家選擇。
-    options: 一個清單，每個元素可以是字串，或是一個帶有 'name' 的字典。
-    """
-    print(f"\n--- {title} ---")
+    notify(f"--- {title} ---")
     for i, opt in enumerate(options, start=1):
-        # 判斷是單純的字串還是字典格式
         name = opt["name"] if isinstance(opt, dict) else opt
         desc = f" - {opt['desc']}" if isinstance(opt, dict) and "desc" in opt else ""
-        print(f"  {i}. {name}{desc}")
-    print("  0. 返回 / 結束")
+        notify(f"  {i}. {name}{desc}")
+    notify("  0. 返回 / 結束")
 
+def get_player_choice(options) -> int:
+    return ask_choice(options)
 
-def get_player_choice(options):
-    """
-    讀取玩家的輸入，並確保輸入在正確的編號範圍內。
-    """
-    while True:
+# ─────────────────────────────────────────
+#  pygame 繪製工具（私有）
+# ─────────────────────────────────────────
+
+def _get_font(size: int):
+    """找第一個能渲染中文的系統字型。"""
+    candidates = [
+        "microsoftyahei", "microsoft yahei",
+        "simsun", "nsimsun",
+        "arial unicode ms",
+        "noto sans cjk tc", "noto sans tc",
+    ]
+    for name in candidates:
         try:
-            choice = int(input("\n請輸入編號："))
-            if 0 <= choice <= len(options):
-                return choice
+            f = pygame.font.SysFont(name, size)
+            f.render("測", True, WHITE)
+            return f
+        except Exception:
+            pass
+    return pygame.font.SysFont(None, size)
+
+
+def _wrap(text: str, font, max_w: int) -> list:
+    """依寬度切行，支援 \\n 換段。"""
+    lines = []
+    for para in text.replace("\r", "").split("\n"):
+        if font.size(para)[0] <= max_w:
+            lines.append(para)
+            continue
+        buf = ""
+        for ch in para:
+            if font.size(buf + ch)[0] > max_w:
+                lines.append(buf)
+                buf = ch
             else:
-                print(f"❌ 請輸入 0 到 {len(options)} 之間的數字。")
-        except ValueError:
-            print("❌ 輸入錯誤！請輸入數字編號。")
+                buf += ch
+        if buf:
+            lines.append(buf)
+    return lines
+
+
+def _draw_status(surf, fs, fm, player, rect):
+    """上方狀態欄。"""
+    pygame.draw.rect(surf, PANEL, rect)
+    pygame.draw.rect(surf, CYAN, rect, 2)
+    x, y = rect.x + 12, rect.y + 8
+    gap = 5
+
+    if player is None:
+        surf.blit(fm.render("等待角色資料…", True, GRAY), (x, y))
+        return
+
+    surf.blit(fm.render(f"【{player.name}】 {player.department}", True, CYAN), (x, y))
+    y += fm.get_height() + gap
+
+    bw, bh = 220, 14
+
+    # 體力條
+    ratio = player.stamina / max(1, player.stamina_max)
+    pygame.draw.rect(surf, DARK_GRAY, (x, y, bw, bh))
+    pygame.draw.rect(surf, GREEN, (x, y, int(bw * ratio), bh))
+    surf.blit(fs.render(f"體力 {player.stamina}/{player.stamina_max}", True, WHITE),
+              (x + bw + 8, y))
+    y += bh + gap
+
+    surf.blit(fs.render(
+        f"智力: {player.intel}    運氣: {player.luck}    金錢: ${player.money}",
+        True, YELLOW), (x, y))
+    y += fs.get_height() + gap
+
+    # 滿足感條
+    sr = player.satisfaction / 100
+    sc = GREEN if sr > 0.6 else (YELLOW if sr > 0.3 else RED)
+    pygame.draw.rect(surf, DARK_GRAY, (x, y, bw, bh))
+    pygame.draw.rect(surf, sc, (x, y, int(bw * sr), bh))
+    surf.blit(fs.render(f"滿足感 {player.satisfaction}%", True, WHITE),
+              (x + bw + 8, y))
+    y += bh + gap
+
+    if player.status_effects:
+        eff = "  ".join([f"[{k} {v}週]" for k, v in player.status_effects.items()])
+        surf.blit(fs.render(eff, True, RED), (x, y))
+
+
+def _draw_log(surf, fs, log, scroll, rect):
+    """中間訊息紀錄區。"""
+    pygame.draw.rect(surf, BG, rect)
+    pygame.draw.rect(surf, GRAY, rect, 1)
+
+    lh  = fs.get_height() + 3
+    vis = rect.height // lh
+    end   = max(0, len(log) - scroll)
+    start = max(0, end - vis)
+
+    clip = surf.get_clip()
+    surf.set_clip(rect)
+    for i, line in enumerate(log[start:end]):
+        if line.startswith(("⚡", "💥", "📅", "📋", "🎓", "✍")):
+            color = YELLOW
+        elif line.startswith(("❌", "💀", "😞", "⚠", "💔", "📉")):
+            color = RED
+        elif line.startswith(("✅", "🌟", "🎉", "✨", "💰", "📚")):
+            color = GREEN
+        else:
+            color = WHITE
+        surf.blit(fs.render(line, True, color),
+                  (rect.x + 6, rect.y + i * lh + 4))
+    surf.set_clip(clip)
+
+
+def _draw_input(surf, fm, fs, mode, choices, prompt, tvalue, rect, mpos):
+    """下方輸入區：依 mode 顯示按鈕或文字輸入框。"""
+    pygame.draw.rect(surf, PANEL, rect)
+    pygame.draw.rect(surf, GRAY, rect, 1)
+    rects = []
+
+    if mode == "choices":
+        all_labels = ["0. 返回 / 結束"] + [f"{i+1}. {c}" for i, c in enumerate(choices)]
+        cols = 2
+        bw   = (rect.width - 20) // cols - 6
+        bh   = 36
+        px, py = rect.x + 10, rect.y + 10
+
+        for idx, label in enumerate(all_labels):
+            c  = idx % cols
+            r  = idx // cols
+            br = pygame.Rect(px + c * (bw + 6), py + r * (bh + 6), bw, bh)
+            rects.append((br, idx))   # 0 = 返回，1..n = 1-based 選擇
+            hover = br.collidepoint(mpos)
+            col   = BTN_H if hover else (DARK_GRAY if idx == 0 else BTN_N)
+            pygame.draw.rect(surf, col, br, border_radius=5)
+            pygame.draw.rect(surf, GRAY, br, 1, border_radius=5)
+            t = fs.render(label, True, WHITE)
+            surf.blit(t, (br.x + (bw - t.get_width()) // 2,
+                          br.y + (bh - t.get_height()) // 2))
+
+    elif mode == "yn":
+        surf.blit(fm.render(prompt[0], True, WHITE), (rect.x + 10, rect.y + 14))
+        for i, (label, val) in enumerate([("是", True), ("否", False)]):
+            br = pygame.Rect(rect.x + 10 + i * 130, rect.y + 62, 110, 44)
+            rects.append((br, val))
+            hover = br.collidepoint(mpos)
+            pygame.draw.rect(surf, BTN_H if hover else BTN_N, br, border_radius=5)
+            t = fm.render(label, True, WHITE)
+            surf.blit(t, (br.x + (110 - t.get_width()) // 2,
+                          br.y + (44 - t.get_height()) // 2))
+
+    elif mode == "text":
+        surf.blit(fs.render(prompt[0], True, WHITE), (rect.x + 10, rect.y + 12))
+        ir = pygame.Rect(rect.x + 10, rect.y + 44, rect.width - 20, 36)
+        pygame.draw.rect(surf, WHITE, ir, border_radius=4)
+        surf.blit(fm.render(tvalue[0] + "|", True, BLACK), (ir.x + 6, ir.y + 5))
+        ok = pygame.Rect(rect.x + 10, rect.y + 96, 100, 36)
+        hover = ok.collidepoint(mpos)
+        pygame.draw.rect(surf, BTN_H if hover else BTN_N, ok, border_radius=5)
+        t = fm.render("確認", True, WHITE)
+        surf.blit(t, (ok.x + (100 - t.get_width()) // 2,
+                      ok.y + (36 - t.get_height()) // 2))
+        rects.append((ok, "__ok__"))
+
+    return rects
+
+# ─────────────────────────────────────────
+#  pygame 主迴圈（在主執行緒中呼叫）
+# ─────────────────────────────────────────
+
+def run_ui():
+    """啟動 pygame 視窗並進入主迴圈，直到視窗關閉。"""
+    pygame.init()
+    screen = pygame.display.set_mode((WIN_W, WIN_H))
+    pygame.display.set_caption("如何渡過這學期？")
+    clock  = pygame.time.Clock()
+
+    fm = _get_font(22)
+    fs = _get_font(17)
+
+    sr = pygame.Rect(0, 0, WIN_W, STATUS_H)
+    lr = pygame.Rect(0, STATUS_H, WIN_W, LOG_H)
+    ir = pygame.Rect(0, STATUS_H + LOG_H, WIN_W, INPUT_H)
+
+    running = True
+    while running:
+        mpos = pygame.mouse.get_pos()
+
+        # ── 消化遊戲執行緒的命令 ─────────────────────────────
+        while not _cmd_q.empty():
+            cmd = _cmd_q.get_nowait()
+            tag = cmd[0]
+            if tag == "msg":
+                _log.extend(_wrap(cmd[1], fs, lr.width - 12))
+                _scroll[0] = 0          # 新訊息 → 自動滾到底
+            elif tag == "player":
+                _player[0] = cmd[1]
+            elif tag == "choices":
+                _choices.clear()
+                _choices.extend(cmd[1])
+                _mode[0] = "choices"
+            elif tag == "yn":
+                _prompt[0] = cmd[1]
+                _mode[0] = "yn"
+            elif tag == "text":
+                _prompt[0] = cmd[1]
+                _tvalue[0] = cmd[2] if len(cmd) > 2 else ""
+                _mode[0] = "text"
+
+        # ── 繪製 ─────────────────────────────────────────────
+        screen.fill(BG)
+        _draw_status(screen, fs, fm, _player[0], sr)
+        _draw_log(screen, fs, _log, _scroll[0], lr)
+        btn_rects = _draw_input(screen, fm, fs, _mode[0], _choices,
+                                _prompt, _tvalue, ir, mpos)
+        pygame.display.flip()
+
+        # ── pygame 事件 ───────────────────────────────────────
+        for ev in pygame.event.get():
+            if ev.type == pygame.QUIT:
+                running = False
+
+            elif ev.type == pygame.MOUSEWHEEL:
+                lh     = fs.get_height() + 3
+                vis    = lr.height // lh
+                max_sc = max(0, len(_log) - vis)
+                _scroll[0] = max(0, min(max_sc, _scroll[0] - ev.y))
+
+            elif ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1:
+                for (br, val) in btn_rects:
+                    if br.collidepoint(ev.pos):
+                        if _mode[0] == "text" and val == "__ok__":
+                            _reply_val[0] = _tvalue[0]
+                            _mode[0] = None
+                            _reply_event.set()
+                        elif _mode[0] in ("choices", "yn"):
+                            _reply_val[0] = val
+                            _mode[0] = None
+                            _choices.clear()
+                            _reply_event.set()
+
+            elif ev.type == pygame.KEYDOWN:
+                if _mode[0] == "text":
+                    if ev.key == pygame.K_RETURN:
+                        _reply_val[0] = _tvalue[0]
+                        _mode[0] = None
+                        _reply_event.set()
+                    elif ev.key == pygame.K_BACKSPACE:
+                        _tvalue[0] = _tvalue[0][:-1]
+                    elif ev.unicode and ev.unicode.isprintable():
+                        _tvalue[0] += ev.unicode
+
+        clock.tick(30)
+
+    pygame.quit()
+    sys.exit()
