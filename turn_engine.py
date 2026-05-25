@@ -424,7 +424,7 @@ class TurnEngine:
         notify(f"  ✔ 執行【{action['name']}】完成。")
 
         # ── 觸發彈出結果視窗 ──────────────────────────────────
-        show_action_result(results)
+        show_action_result(results, title=action["name"])
 
     # ============================================================
     # 期中 / 期末考

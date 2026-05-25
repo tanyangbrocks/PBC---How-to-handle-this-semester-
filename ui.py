@@ -100,6 +100,7 @@ _shop_exit_event = threading.Event()
 
 # ── 行動結果彈出視窗 ─────────────────────────────────────────
 _popup_lines   = []    # 結果文字行列表
+_popup_title   = ["行動結果"]  # 彈出視窗標題（行動名稱）
 _popup_t0      = [0]   # 觸發時間戳（ms，0 = 未啟用）
 POPUP_DURATION = 3400  # 整體顯示時長（ms）
 POPUP_IN_MS    = 320   # 滑入動畫時長（ms）
@@ -244,13 +245,15 @@ def open_shop_ui(items: list) -> None:
     _cmd_q.put(("phase", "game"))
 
 
-def show_action_result(lines: list) -> None:
+def show_action_result(lines: list, title: str = "行動結果") -> None:
     """
     由遊戲執行緒呼叫，觸發畫面右側由右而左滑入的行動結果視窗。
     lines: 要顯示的結果文字列表（如「體力 -4」、「金錢 +150」）。
+    title: 彈出視窗的標題，通常傳入行動名稱（如「認真讀書」）。
     """
     _popup_lines.clear()
     _popup_lines.extend(str(l) for l in lines)
+    _popup_title[0] = title
     _popup_t0[0] = pygame.time.get_ticks()
 
 # ─────────────────────────────────────────
@@ -1178,7 +1181,7 @@ def _draw_action_popup(surf, fs):
 
     # 標題列
     ty = pop_r.y + 8
-    title_t = fs.render("行動結果", True, CYAN)
+    title_t = fs.render(_popup_title[0], True, CYAN)
     surf.blit(title_t, (pop_r.x + (POPUP_W - title_t.get_width()) // 2, ty))
     ty += title_t.get_height() + 4
     pygame.draw.line(surf, DARK_GRAY,
