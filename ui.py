@@ -2468,6 +2468,7 @@ def run_ui():
                     _shop_slide_t0[0]  = pygame.time.get_ticks()
             elif tag == "ripple":
                 _ripple_t0[0] = pygame.time.get_ticks()
+                _play_sfx("cc_click")
             elif tag == "reset":
                 _log.clear()
                 _player[0] = None
