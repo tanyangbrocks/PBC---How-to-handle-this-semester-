@@ -128,10 +128,11 @@ RIPPLE_DURATION  = 900       # 總時長（ms）
 _ripple_np_cache : dict = {} # numpy 座標格快取（同解析度只建一次）
 
 # ── 角色創建背景影片（WEBM 循環播放） ────────────────────────
-_cc_video_cap  = [None]  # cv2.VideoCapture 物件（None 表示未載入）
-_cc_video_fps  = [30.0]  # 影片 FPS
-_cc_video_surf = [None]  # 當前幀的 pygame.Surface
-_cc_video_last = [0]     # 上次更新幀的時間戳（ms）
+_cc_video_cap    = [None]  # cv2.VideoCapture 物件（None 表示未載入）
+_cc_video_fps    = [30.0]  # 影片 FPS
+_cc_video_surf   = [None]  # 當前幀的 pygame.Surface
+_cc_video_last   = [0]     # 上次更新幀的時間戳（ms）
+_cc_overlay_surf = [None]  # 奶茶↔奶白漸層遮罩（75% 透明，懶初始化）
 
 # ── 道具店滑動轉場 ────────────────────────────────────────────
 _shop_slide_dir = ["none"]   # "in" | "out" | "out_done" | "none"
@@ -1137,23 +1138,24 @@ def _draw_panel(surf, rect, border=CYAN):
 
 def _draw_cc_bg(surf: pygame.Surface) -> None:
     """
-    在 surf 上繪製角色創建畫面的背景。
-    若 WEBM 影片已載入則播放當前幀（按影片 FPS 推進，到結尾自動回繞）；
-    否則退回靜態漸層背景。
+    在 surf 上繪製角色創建畫面的背景：
+      1. 底層：WEBM 影片當前幀（按 FPS 推進，到尾自動回繞）；
+         若影片未載入則退回靜態漸層。
+      2. 上層：75% 不透明奶茶色→奶白色縱向漸層遮罩，
+         讓 UI 卡片在影片上仍保有良好對比。
     """
+    # ── 底層：影片 or 靜態漸層 ───────────────────────────────
     cap = _cc_video_cap[0]
     if cap is not None:
-        import cv2, numpy as np
+        import cv2
         now = pygame.time.get_ticks()
         ms_per_frame = 1000.0 / max(_cc_video_fps[0], 1.0)
         if _cc_video_surf[0] is None or now - _cc_video_last[0] >= ms_per_frame:
             ret, frame = cap.read()
             if not ret:
-                # 到結尾 → 回繞
                 cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                 ret, frame = cap.read()
             if ret:
-                # BGR → RGB，轉 pygame Surface
                 frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 fh, fw = frame_rgb.shape[:2]
                 vsf = pygame.surfarray.make_surface(
@@ -1162,14 +1164,28 @@ def _draw_cc_bg(surf: pygame.Surface) -> None:
                     vsf = pygame.transform.scale(vsf, (WIN_W, WIN_H))
                 _cc_video_surf[0] = vsf
                 _cc_video_last[0] = now
-        if _cc_video_surf[0] is not None:
-            surf.blit(_cc_video_surf[0], (0, 0))
-            return
-    # 靜態漸層退場
-    if "start" in _grads:
+    if _cc_video_surf[0] is not None:
+        surf.blit(_cc_video_surf[0], (0, 0))
+    elif "start" in _grads:
         surf.blit(_grads["start"], (0, 0))
     else:
         surf.fill(BG)
+
+    # ── 上層：奶茶↔奶白漸層遮罩（75% 不透明，懶初始化快取）──
+    if _cc_overlay_surf[0] is None:
+        # 奶茶色 (210,170,128) → 奶白色 (255,250,238)，alpha=191（75%）
+        ov = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
+        top_c  = (210, 170, 128, 191)
+        bot_c  = (255, 250, 238, 191)
+        for _i in range(WIN_H):
+            _t = _i / max(WIN_H - 1, 1)
+            _r = int(top_c[0] + (bot_c[0] - top_c[0]) * _t)
+            _g = int(top_c[1] + (bot_c[1] - top_c[1]) * _t)
+            _b = int(top_c[2] + (bot_c[2] - top_c[2]) * _t)
+            _a = int(top_c[3] + (bot_c[3] - top_c[3]) * _t)
+            pygame.draw.line(ov, (_r, _g, _b, _a), (0, _i), (WIN_W - 1, _i))
+        _cc_overlay_surf[0] = ov
+    surf.blit(_cc_overlay_surf[0], (0, 0))
 
 
 def _draw_cc_name(surf, fm, fs, mpos):
