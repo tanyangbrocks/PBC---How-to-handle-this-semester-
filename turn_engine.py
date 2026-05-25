@@ -400,8 +400,17 @@ class TurnEngine:
         # ── 課業熟練度 ────────────────────────────────────────
         exp = action.get("exp_gain", 0)
         if exp > 0:
-            self.skill_sys.gain_exp("綜合", exp)
-            results.append(f"課業熟練度 +{exp}")
+            # 讓玩家選擇本次要加強哪一科
+            _subj_opts = [s for s in player.subject_exp.keys() if s != "綜合"]
+            if _subj_opts:
+                notify("📖 這次要集中精力在哪一科？")
+                _idx = ask_choice(_subj_opts)
+                # _idx == 0 表示玩家按返回（體力已扣），預設第一科
+                _chosen = _subj_opts[(_idx - 1) if _idx > 0 else 0]
+            else:
+                _chosen = "綜合"
+            self.skill_sys.gain_exp(_chosen, exp)
+            results.append(f"【{_chosen}】熟練度 +{exp}")
 
         # ── 自我滿足度 ────────────────────────────────────────
         sat = action.get("satisfaction", 0)
@@ -581,10 +590,12 @@ class TurnEngine:
     def _calculate_exam_score(self, exam_type: str) -> float:
         player = self.player
 
-        if not player.subject_exp:
+        # 只計算五個正式科目（排除 "綜合" 等歷史殘留 key）
+        _valid = {k: v for k, v in player.subject_exp.items() if k != "綜合"}
+        if not _valid:
             avg_exp = 0
         else:
-            avg_exp = sum(player.subject_exp.values()) / len(player.subject_exp)
+            avg_exp = sum(_valid.values()) / len(_valid)
 
         intel_bonus      = 1.0 + min(player.intel / 200, 0.5)
         luck_roll        = random.uniform(-0.1, 0.1) + (player.luck - 50) / 500
