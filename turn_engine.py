@@ -465,34 +465,37 @@ class TurnEngine:
         return modifier
 
     def _run_exam_mini_game(self, exam_type: str) -> float:
-        # print(f"\n✍ ═══ {exam_type}考：知識問答挑戰 ═══")  # 因套用pygame而調整
-        notify(f"\n✍ ═══ {exam_type}考：知識問答挑戰 ═══")
-        # print("請根據題目輸入正確的數字編號。")  # 因套用pygame而調整
-        notify("請根據題目輸入正確的數字編號。")
+        notify(f"\n{exam_type}考：知識問答挑戰開始！")
 
         questions = [
             {
-                "q": "台大三大夜沒有哪個之夜？\n  (1) 會計之夜  (2) 電機之夜  (3) 南友之夜  (4) 國企之夜",
+                "q": "台大三大夜沒有哪個之夜？",
+                "options": ["會計之夜", "電機之夜", "南友之夜", "國企之夜"],
                 "a": 1,
             },
             {
-                "q": "下列何者不屬於三校聯盟？\n  (1) NTUST  (2) NTNU  (3) NTUE",
+                "q": "下列何者不屬於三校聯盟？",
+                "options": ["NTUST", "NTNU", "NTUE"],
                 "a": 3,
             },
             {
-                "q": "行政大樓前的傅鐘每次只敲幾下？\n  (1) 20  (2) 21  (3) 22",
+                "q": "行政大樓前的傅鐘每次只敲幾下？",
+                "options": ["20 下", "21 下", "22 下"],
                 "a": 2,
             },
             {
-                "q": "台大附近的餐廳何者不位於118？\n  (1) 三米三  (2) 笑嘻嘻  (3) IMPASTA  (4) 李記水餃",
+                "q": "台大附近的餐廳何者不位於 118？",
+                "options": ["三米三", "笑嘻嘻", "IMPASTA", "李記水餃"],
                 "a": 1,
             },
             {
-                "q": "台大附近的餐廳何者不位於水源商圈？\n  (1) 塊雞師食物所  (2) 大埔鐵板燒  (3) 小高拉麵  (4) 瑪莉珍披薩",
+                "q": "台大附近的餐廳何者不位於水源商圈？",
+                "options": ["塊雞師食物所", "大埔鐵板燒", "小高拉麵", "瑪莉珍披薩"],
                 "a": 4,
             },
             {
-                "q": "商管程式設計這門課是由哪個系的教授開設的？\n  (1) 資工系  (2) 資管系  (3) 統計系",
+                "q": "商管程式設計這門課是由哪個系的教授開設的？",
+                "options": ["資工系", "資管系", "統計系"],
                 "a": 1,
             },
         ]
@@ -501,28 +504,13 @@ class TurnEngine:
         correct_count = 0
 
         for i, q in enumerate(selected_qs, start=1):
-            # print(f"\n📌 題目 {i}: {q['q']}")  # 因套用pygame而調整
-            notify(f"\n📌 題目 {i}：{q['q']}")
-
-            # try:  # 因套用pygame而調整
-            #     ans = int(input("  👉 你的答案是："))
-            #     if ans == q["a"]:
-            #         print("  ✨ 答對了！")
-            #         correct_count += 1
-            #     else:
-            #         print("  ❌ 選錯了……")
-            # except ValueError:
-            #     print("  ❌ 輸入錯誤，這題不計分。")
-            raw = ask_text(f"題目 {i} 的答案（輸入數字）：")
-            try:
-                ans = int(raw)
-                if ans == q["a"]:
-                    notify("  ✨ 答對了！")
-                    correct_count += 1
-                else:
-                    notify("  ❌ 選錯了……")
-            except ValueError:
-                notify("  ❌ 輸入錯誤，這題不計分。")
+            notify(f"題目 {i}：{q['q']}")
+            ans = ask_choice(q["options"])
+            if ans == q["a"]:
+                notify("  答對了！")
+                correct_count += 1
+            else:
+                notify("  選錯了……")
 
         return correct_count / len(selected_qs)
 

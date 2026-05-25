@@ -1340,9 +1340,19 @@ def _draw_action_panel(surf, fm, fs, mode, choices, log, prompt, tvalue, rect, t
             content_rects.append((brect, orig_idx))
 
     elif mode == "choices" and not is_std_action:
-        # ── 非標準選項：小圓角矩形（2 欄）────────────────────
-        bw, bh = (rect.width - 36) // 2 - 6, 40
-        px, py = rect.x + 12, content_top + 10
+        # ── 非標準選項：上方顯示最新 log（題目文字），下方按鈕作答 ──
+        LOG_LINES = 3
+        lh_log    = fs.get_height() + 4
+        log_h     = LOG_LINES * lh_log + 6
+        log_area  = pygame.Rect(content_rect.x, content_rect.y,
+                                content_rect.width, log_h)
+        _draw_panel_log(surf, fs, log, log_area, lines=LOG_LINES)
+
+        # 按鈕區從 log 下方開始
+        bw   = (rect.width - 36) // 2 - 6
+        bh   = 40
+        px   = rect.x + 12
+        py   = content_top + log_h + 6
         for i, label in enumerate(choices):
             col = i % 2
             row = i // 2
