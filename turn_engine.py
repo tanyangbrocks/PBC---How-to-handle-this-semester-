@@ -409,8 +409,9 @@ class TurnEngine:
                 _chosen = _subj_opts[(_idx - 1) if _idx > 0 else 0]
             else:
                 _chosen = "綜合"
-            _actual = self.skill_sys.gain_exp(_chosen, exp)
+            _actual, _annot_str, _annot_col = self.skill_sys.gain_exp(_chosen, exp)
             results.append(f"【{_chosen}】熟練度 +{_actual}")
+            results.append((_annot_str, _annot_col))   # 2-tuple → popup 彩色標注行
 
         # ── 自我滿足度 ────────────────────────────────────────
         sat = action.get("satisfaction", 0)

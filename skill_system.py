@@ -22,6 +22,15 @@ INTEL_NAMES = ["障礙", "困擾", "平均", "優秀", "聰明"]
 # 各程度的效益乘數
 INTEL_MULTIPLIERS = [0.6, 0.8, 1.0, 1.3, 1.6]
 
+# 智力等級對應的 popup 標注顏色（RGB）
+INTEL_ANNOT_COLORS = [
+    (160,  40,  40),   # 障礙 — 暗紅
+    ( 72,  38,  18),   # 困擾 — 深棕黑（主文字色）
+    ( 60, 120, 200),   # 平均 — 藍色
+    ( 60, 160,  75),   # 優秀 — 綠色
+    (190, 140,   0),   # 聰明 — 金色
+]
+
 
 class SkillSystem:
     """
@@ -34,11 +43,14 @@ class SkillSystem:
         # 這裡直接引用同一個字典物件（改這裡等於改 player 裡的）
         self.exp_pool = player.subject_exp
 
-    def gain_exp(self, subject: str, base_amount: int) -> int:
+    def gain_exp(self, subject: str, base_amount: int) -> tuple:
         """
         增加某科目的熟練度經驗值。
         實際獲得的量 = base_amount × 當前等級乘數 × 智力乘數。
-        回傳：實際增加量（已套用乘數後的整數）。
+        回傳 (actual_gain, annot_str, annot_color)：
+          actual_gain  — 實際入帳整數
+          annot_str    — 標注文字，例如「（障礙，×0.6）」
+          annot_color  — 對應 RGB tuple
         """
         player = self.player
 
@@ -66,7 +78,12 @@ class SkillSystem:
 
         # 順便同步到 player.subject_exp（其實同一個字典，多此一舉但幫助理解）
         player.subject_exp[subject] = self.exp_pool[subject]
-        return actual_gain
+
+        # 組合標注字串與顏色（供 popup 顯示用）
+        mult_display = f"{INTEL_MULTIPLIERS[intel_level]:g}"   # 去除多餘小數點
+        annot_str    = f"（{INTEL_NAMES[intel_level]}，×{mult_display}）"
+        annot_color  = INTEL_ANNOT_COLORS[intel_level]
+        return actual_gain, annot_str, annot_color
 
     def _get_level(self, subject: str) -> int:
         """

@@ -1718,7 +1718,11 @@ def _draw_action_popup(surf, fs):
     title_h = fs.get_height() + 10
     rows    = []   # list of ("text", color) | ("sep",) | ("warn_sep",)
     for raw in _popup_lines:
-        if raw == "---":
+        if isinstance(raw, tuple):
+            # 2-tuple (text, color_rgb)：直接以指定顏色渲染，略作縮排
+            _annot_text, _annot_col = raw
+            rows.append((f"  {_annot_text}", _annot_col))
+        elif raw == "---":
             rows.append(("sep",))
         elif raw.startswith("! "):
             display = raw[2:]
