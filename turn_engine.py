@@ -16,7 +16,8 @@ from event_system import EventSystem
 from skill_system import SkillSystem
 from shop_V03 import Shop
 from ui import notify, ask_yn, ask_choice, ask_text, set_player, \
-               notify_timetable, notify_grade_report, set_time, show_action_result
+               notify_timetable, notify_grade_report, set_time, show_action_result, \
+               ask_subject_popup, trigger_time_overflow_warning
 
 
 # ── 每週可選擇的行動清單 ──────────────────────────────────
@@ -137,7 +138,7 @@ class TurnEngine:
         remaining_time = time_units
         set_time(remaining_time)   # 初始化底部標籤列
 
-        while remaining_time > 0:
+        while remaining_time >= 0:
             set_player(player)     # 刷新狀態欄
             set_time(remaining_time)
 
@@ -153,6 +154,28 @@ class TurnEngine:
             if action["id"] == "shop":
                 self.shop.open_shop()
                 continue
+
+            # 時間即將耗盡（本行動會使時間變成負數）→ 警告確認
+            if remaining_time - 1 < 0:
+                trigger_time_overflow_warning()   # 震動 + damage6
+                confirm = ask_yn(
+                    "本週時間已耗盡！強行行動會透支精力，確定繼續？",
+                    yes_label="強行繼續",
+                    no_label="結束本週",
+                )
+                if not confirm:
+                    break
+                # 玩家確認強行繼續：執行動作後立刻結束本週（時間不顯示負數）
+                if action["stamina_cost"] > player.stamina:
+                    confirm2 = ask_yn(
+                        f"體力剩餘 {player.stamina} 點，執行此行動可能會導致生病！",
+                        yes_label="仍要執行",
+                        no_label="還是算了",
+                    )
+                    if not confirm2:
+                        continue
+                self._execute_action(action)
+                break
 
             if action["stamina_cost"] > player.stamina:
                 confirm = ask_yn(
@@ -403,9 +426,8 @@ class TurnEngine:
             # 讓玩家選擇本次要加強哪一科
             _subj_opts = [s for s in player.subject_exp.keys() if s != "綜合"]
             if _subj_opts:
-                notify("📖 這次要集中精力在哪一科？")
-                _idx = ask_choice(_subj_opts)
-                # _idx == 0 表示玩家按返回（體力已扣），預設第一科
+                _idx = ask_subject_popup("這次要集中精力在哪一科？", _subj_opts)
+                # _idx == 0 表示異常情況，預設第一科
                 _chosen = _subj_opts[(_idx - 1) if _idx > 0 else 0]
             else:
                 _chosen = "綜合"

@@ -12,6 +12,8 @@ import threading
 import queue
 import sys
 import os
+import math
+import random
 
 # ─────────────────────────────────────────
 #  顏色（陽光少女色系）
@@ -28,9 +30,20 @@ BTN_H     = (255, 195, 145)   # 淡珊瑚 — hover 按鈕
 GREEN     = ( 78, 172,  90)   # 嫩草綠
 RED       = (215,  68,  62)   # 草莓紅
 YELLOW    = (190, 128,  12)   # 琥珀金（深色，在淺底可見）
-CYAN      = ( 78, 165, 210)   # 晴天藍 — 強調邊框（僅用於框線）
+CYAN      = ( 93,  64,  55)   # #5D4037 深咖啡棕 — 強調邊框（取代舊藍色）
 MILK      = (255, 253, 248)   # 純奶白 — 文字輸入框背景
 TITLE     = ( 93,  64,  55)   # #5D4037 深棕 — 標題文字（取代各處藍色 CYAN 字）
+
+# ── 智力等階常數（供狀態欄顯示，避免循環匯入 skill_system）────
+_INTEL_THRESHOLDS_UI = [0, 20, 40, 60, 80]
+_INTEL_NAMES_UI      = ["障礙", "困擾", "平均", "優秀", "聰明"]
+_INTEL_ANNOT_COLS_UI = [
+    (160,  40,  40),   # 障礙 — 暗紅
+    ( 72,  38,  18),   # 困擾 — 深棕黑
+    ( 60, 120, 200),   # 平均 — 藍色
+    ( 60, 160,  75),   # 優秀 — 綠色
+    (190, 140,   0),   # 聰明 — 金色
+]
 
 # ─────────────────────────────────────────
 #  版面尺寸
@@ -65,6 +78,17 @@ _time_units    = [0]      # 本週剩餘時間點（底部標籤列顯示用）
 _is_fullscreen = [False]  # 目前是否全螢幕
 _week          = [0]      # 當前週次（1–16，0 表示尚未開始）
 _font_micro    = [None]   # 極小字型（週次輪盤數字用）
+_font_bold     = [None]   # 粗體字型 size-17（行動按鈕標籤用）
+_font_bold_lg  = [None]   # 粗體字型 size-22（標題 / 上方視窗用）
+_font_bold_xl  = [None]   # 粗體字型 size-26（日曆週次大字用）
+
+# ── 剩餘時間點震動特效 ──────────────────────────────────────────
+_time_shake_t0 = [0]      # 震動觸發時間戳（ms，0 = 未啟用）
+_TIME_SHAKE_MS = 520      # 整段動畫時長（ms）
+
+# ── 行動成功白光閃爍 ────────────────────────────────────────────
+_action_flash_t0 = [0]    # 閃爍觸發時間戳（ms，0 = 未啟用）
+_ACTION_FLASH_MS = 300    # 整段閃爍時長（ms）
 
 # ── 音效 ────────────────────────────────────────────────────
 _sfx: dict = {}   # name -> pygame.mixer.Sound（run_ui 啟動後載入）
@@ -135,6 +159,15 @@ _shop_hover_idx  = [-1]   # 目前被 hover 的商品索引（-1 = 無）
 _shop_msg        = [""]   # 購買結果訊息
 _shop_msg_time   = [0]    # 訊息顯示的時間戳（ms）
 _shop_exit_event = threading.Event()
+
+# ── 科目選擇彈出視窗狀態 ─────────────────────────────────────────
+_subj_popup_active = [False]
+_subj_popup_title:  list = [""]
+_subj_popup_opts:   list = []    # 選項字串列表
+_subj_popup_rects:  list = []    # [(rect, idx), ...] 每幀更新
+
+# ── 通用選項彈出視窗（非標準 choices + yn）─────────────────────
+_choice_popup_rects: list = []   # [(rect, val), ...] 每幀更新
 
 # ── 行動結果彈出視窗 ─────────────────────────────────────────
 _popup_lines   = []    # 結果文字行列表
@@ -215,6 +248,519 @@ _shop_slide_dir = ["none"]   # "in" | "out" | "out_done" | "none"
 _shop_slide_t0  = [0]        # 動畫開始時間（ms）
 SHOP_SLIDE_MS   = 370        # 單向滑動時長（ms）
 
+# ============================================================
+#  動態天氣特效系統
+# ============================================================
+# 支援五種天氣，每週隨機切換：
+#   "sun"           陽光灑落（光柱 + 漂浮光塵）
+#   "leaves_green"  綠葉飄蕩
+#   "leaves_orange" 橙色楓葉飄蕩
+#   "sakura"        粉色櫻花飄落
+#   "rain"          陰雨綿綿（深灰遮罩 + 雨滴）
+# ============================================================
+
+_WEATHER_TYPES = ["sun", "leaves_green", "leaves_orange", "sakura", "rain", "fog"]
+_weather_type  = [None]   # 目前天氣類型字串
+_weather_pts   = []       # 粒子池（葉子 / 花瓣 / 雨滴 / 光塵 / 霧團）
+
+# 葉子 / 花瓣顏色組
+_WX_LEAF_COLS = {
+    "leaves_green":  [
+        (52, 160, 54), (72, 180, 60), (40, 140, 45),
+        (68, 170, 72), (55, 155, 58), (80, 190, 65),
+    ],
+    "leaves_orange": [
+        (210, 75, 20), (225, 100, 30), (190, 60, 15),
+        (215, 130, 35), (200, 88, 22), (230, 110, 40),
+    ],
+    "sakura": [
+        (255, 180, 200), (255, 200, 215), (255, 210, 222),
+        (250, 170, 192), (255, 185, 205), (255, 220, 230),
+    ],
+}
+
+
+# ── 粒子工廠 ─────────────────────────────────────────────────
+
+def _wx_leaf_new(wt: str, full_screen: bool = False) -> dict:
+    """生成一片葉子 / 花瓣粒子。full_screen=True 時 y 散布全螢幕（初始化用）。"""
+    is_sak = (wt == "sakura")
+    cols   = _WX_LEAF_COLS.get(wt, [(200, 200, 200)])
+    y0     = (random.uniform(-WIN_H, WIN_H) if full_screen
+              else random.uniform(-80, -10))
+    return {
+        "wt":         wt,
+        "x":          random.uniform(-40, WIN_W + 40),
+        "y":          y0,
+        "vx":         random.uniform(-0.55, 0.55),
+        "vy":         random.uniform(0.45, 1.3) if is_sak else random.uniform(0.85, 2.3),
+        "angle":      random.uniform(0.0, 360.0),
+        "angle_v":    random.uniform(-2.0, 2.0),
+        "wb_ph":      random.uniform(0.0, math.tau),
+        "wb_sp":      random.uniform(0.016, 0.038),
+        "wb_amp":     random.uniform(0.30, 1.05),
+        "size":       random.uniform(4.0, 8.0) if is_sak else random.uniform(7.0, 14.0),
+        "alpha":      random.randint(148, 228),
+        "color":      random.choice(cols),
+    }
+
+
+def _wx_dust_new(full_screen: bool = False) -> dict:
+    """生成一顆陽光光塵粒子。"""
+    src_x = int(WIN_W * 0.42)
+    y0    = (random.uniform(0, WIN_H) if full_screen
+             else random.uniform(WIN_H * 0.6, WIN_H))
+    return {
+        "wt":       "dust",
+        "x":        random.uniform(src_x - 280, src_x + 280),
+        "y":        y0,
+        "vx":       random.uniform(-0.12, 0.12),
+        "vy":       random.uniform(-0.22, -0.55),
+        "size":     random.uniform(2.0, 4.5),
+        "alpha":    random.randint(22, 65),
+        "pb_ph":    random.uniform(0.0, math.tau),
+        "pb_sp":    random.uniform(0.02, 0.05),
+    }
+
+
+def _wx_rain_new(full_screen: bool = False) -> dict:
+    """生成一滴雨粒子。"""
+    y0 = (random.uniform(-WIN_H, WIN_H) if full_screen
+          else random.uniform(-60, -10))
+    return {
+        "wt":     "rain",
+        "x":      random.uniform(-20, WIN_W + 80),
+        "y":      y0,
+        "speed":  random.uniform(13.0, 22.0),
+        "length": random.randint(10, 20),
+        "alpha":  random.randint(100, 190),
+    }
+
+
+# 霧團顏色組（冷灰白系）
+_WX_FOG_PALETTE = [
+    (218, 224, 232),
+    (228, 232, 238),
+    (212, 220, 230),
+    (225, 228, 235),
+    (220, 226, 234),
+]
+
+
+def _wx_fog_new(full_screen: bool = False) -> dict:
+    """生成一團霧粒子（大型半透明橢圓，緩慢飄移）。"""
+    w = random.randint(180, 500)
+    h = random.randint(55, 175)
+    if full_screen:
+        x0 = random.uniform(-w, WIN_W + w)
+        y0 = random.uniform(-h * 0.5, WIN_H + h * 0.3)
+    else:
+        # 從左側螢幕外緣進入
+        x0 = random.uniform(-w - 20, -w + 5)
+        y0 = random.uniform(-h * 0.3, WIN_H + h * 0.2)
+    return {
+        "wt":       "fog",
+        "x":        x0,
+        "y":        y0,
+        "vx":       random.uniform(0.10, 0.38),    # 緩慢向右飄
+        "vy":       random.uniform(-0.06, 0.06),   # 微幅上下漂動
+        "w":        w,
+        "h":        h,
+        "alpha":    random.randint(16, 44),         # 極淡
+        "pulse_ph": random.uniform(0.0, math.tau),
+        "pulse_sp": random.uniform(0.004, 0.012),
+        "col":      random.choice(_WX_FOG_PALETTE),
+    }
+
+
+# ── 初始化 / 重置 ─────────────────────────────────────────────
+
+def _weather_reset() -> None:
+    """隨機挑選天氣並初始化粒子池（每週呼叫一次）。"""
+    _weather_type[0] = random.choice(_WEATHER_TYPES)
+    _weather_pts.clear()
+    wt = _weather_type[0]
+
+    if wt in ("leaves_green", "leaves_orange", "sakura"):
+        cnt = 72 if wt == "sakura" else 52
+        for _ in range(cnt):
+            _weather_pts.append(_wx_leaf_new(wt, full_screen=True))
+
+    elif wt == "sun":
+        for _ in range(32):
+            _weather_pts.append(_wx_dust_new(full_screen=True))
+
+    elif wt == "rain":
+        for _ in range(240):
+            _weather_pts.append(_wx_rain_new(full_screen=True))
+
+    elif wt == "fog":
+        for _ in range(26):
+            _weather_pts.append(_wx_fog_new(full_screen=True))
+
+
+# ── 多邊形旋轉輔助 ───────────────────────────────────────────
+
+def _wx_rotate(pts, angle_rad: float, cx: float, cy: float):
+    """將點列表繞 (cx, cy) 旋轉 angle_rad，回傳新列表（避免 Surface 旋轉開銷）。"""
+    cos_a = math.cos(angle_rad)
+    sin_a = math.sin(angle_rad)
+    result = []
+    for x, y in pts:
+        dx, dy = x - cx, y - cy
+        result.append((cx + dx * cos_a - dy * sin_a,
+                       cy + dx * sin_a + dy * cos_a))
+    return result
+
+
+# ── 每幀繪製入口 ─────────────────────────────────────────────
+
+def _draw_weather(surf: pygame.Surface, ms: int) -> None:
+    """
+    繪製目前天氣特效並更新粒子位置。
+    應在 _draw_game_bg() 之後、所有 UI 元件之前呼叫。
+    """
+    wt = _weather_type[0]
+    if wt is None:
+        return
+    if wt == "sun":
+        _wx_draw_sun(surf, ms)
+    elif wt == "rain":
+        _wx_draw_rain(surf)
+    elif wt == "fog":
+        _wx_draw_fog(surf)
+    else:
+        _wx_draw_leaves(surf)
+
+
+# ── 陽光灑落 ─────────────────────────────────────────────────
+
+def _wx_draw_sun(surf: pygame.Surface, ms: int) -> None:
+    """陽光灑落：半透明光柱 + 漂浮光塵。"""
+    t    = ms * 0.001
+    sx   = int(WIN_W * 0.42)
+    sy   = -55
+    dist = WIN_W + WIN_H
+
+    # ── 光柱（用單張 SRCALPHA 面，只建一次可接受）────────────
+    ray_surf = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
+    # (中心角度, 半角寬, 基礎透明度)
+    RAY_DEFS = [
+        (52,   7,  38),
+        (68,  13,  50),
+        (84,   8,  35),
+        (100, 15,  52),
+        (117,  9,  40),
+        (134, 11,  44),
+    ]
+    for ang, hw, base_a in RAY_DEFS:
+        pulse = 0.5 + 0.5 * math.sin(t * 0.55 + ang * 0.038)
+        a     = int(base_a * (0.72 + 0.28 * pulse))
+        a1    = math.radians(ang - hw)
+        a2    = math.radians(ang + hw)
+        p1    = (sx + math.cos(a1) * dist, sy + math.sin(a1) * dist)
+        p2    = (sx + math.cos(a2) * dist, sy + math.sin(a2) * dist)
+        pygame.draw.polygon(ray_surf, (255, 218, 100, a), [(sx, sy), p1, p2])
+    surf.blit(ray_surf, (0, 0))
+
+    # ── 光源暈圈 ─────────────────────────────────────────────
+    halo = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
+    halo_cy = sy + 65
+    for r in range(180, 0, -18):
+        ha = int(18 * (1.0 - r / 180.0) * (0.85 + 0.15 * math.sin(t * 1.1)))
+        if ha > 0:
+            pygame.draw.circle(halo, (255, 240, 160, ha), (sx, halo_cy), r)
+    surf.blit(halo, (0, 0))
+
+    # ── 光塵粒子 ─────────────────────────────────────────────
+    dust_surf = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
+    for p in _weather_pts:
+        p["x"]    += p["vx"]
+        p["y"]    += p["vy"]
+        p["pb_ph"] += p["pb_sp"]
+        if p["y"] < -10:
+            p.update(_wx_dust_new())
+        pulse_a = 0.6 + 0.4 * math.sin(p["pb_ph"])
+        a       = int(p["alpha"] * pulse_a)
+        r       = max(1, int(p["size"]))
+        pygame.draw.circle(dust_surf, (255, 245, 200, a),
+                           (int(p["x"]), int(p["y"])), r)
+    surf.blit(dust_surf, (0, 0))
+
+
+# ── 葉子 / 花瓣飄落 ──────────────────────────────────────────
+
+def _wx_draw_leaves(surf: pygame.Surface) -> None:
+    """葉子 / 花瓣飄落：純多邊形旋轉，不建立額外 Surface。"""
+    # 用一張共用 SRCALPHA Surface 支援透明度
+    leaf_surf = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
+
+    for p in _weather_pts:
+        # ── 更新位置 ─────────────────────────────────────────
+        p["wb_ph"]  += p["wb_sp"]
+        p["x"]      += p["vx"] + math.sin(p["wb_ph"]) * p["wb_amp"]
+        p["y"]      += p["vy"]
+        p["angle"]   = (p["angle"] + p["angle_v"]) % 360.0
+
+        if p["y"] > WIN_H + 40:
+            p.update(_wx_leaf_new(p["wt"]))
+            continue
+
+        # ── 繪製葉形多邊形 ───────────────────────────────────
+        cx, cy = p["x"], p["y"]
+        sz     = p["size"]
+        col    = (*p["color"], p["alpha"])
+        ar     = math.radians(p["angle"])
+        wt     = p["wt"]
+
+        if wt == "sakura":
+            # 橢圓花瓣：四點鑽石形
+            r1, r2 = sz, sz * 0.52
+            base = [(cx, cy - r1), (cx + r2, cy), (cx, cy + r1), (cx - r2, cy)]
+        else:
+            # 葉形：頂端尖、底部稍圓的菱形
+            base = [
+                (cx,           cy - sz),
+                (cx + sz*0.46, cy - sz*0.05),
+                (cx + sz*0.30, cy + sz*0.65),
+                (cx,           cy + sz*0.80),
+                (cx - sz*0.30, cy + sz*0.65),
+                (cx - sz*0.46, cy - sz*0.05),
+            ]
+
+        pts = _wx_rotate(base, ar, cx, cy)
+        try:
+            pygame.draw.polygon(leaf_surf, col, pts)
+            # 葉脈（僅非花瓣）
+            if wt != "sakura" and sz > 9:
+                tip = _wx_rotate([(cx, cy - sz)], ar, cx, cy)[0]
+                bot = _wx_rotate([(cx, cy + sz*0.80)], ar, cx, cy)[0]
+                pygame.draw.line(leaf_surf,
+                                 (min(255, p["color"][0]+25),
+                                  min(255, p["color"][1]+25),
+                                  min(255, p["color"][2]+25), p["alpha"]),
+                                 (int(tip[0]), int(tip[1])),
+                                 (int(bot[0]), int(bot[1])), 1)
+        except Exception:
+            pass
+
+    surf.blit(leaf_surf, (0, 0))
+
+
+# ── 濃霧繚繞 ─────────────────────────────────────────────────
+
+def _wx_draw_fog(surf: pygame.Surface) -> None:
+    """濃霧繚繞：大型半透明橢圓霧團緩慢漂移，疊加淡灰色氛圍遮罩。"""
+    # 整體氛圍遮罩（輕描淡寫的冷灰調）
+    atm = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
+    atm.fill((210, 215, 225, 30))
+    surf.blit(atm, (0, 0))
+
+    fog_surf = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
+    for p in _weather_pts:
+        p["x"]        += p["vx"]
+        p["y"]        += p["vy"]
+        p["pulse_ph"] += p["pulse_sp"]
+
+        # 離開右邊界後從左側重入
+        if p["x"] - p["w"] // 2 > WIN_W + 60:
+            p.update(_wx_fog_new())
+            continue
+
+        # 脈動透明度（霧氣若隱若現）
+        a = int(p["alpha"] * (0.70 + 0.30 * math.sin(p["pulse_ph"])))
+        if a <= 0:
+            continue
+
+        rect = pygame.Rect(
+            int(p["x"] - p["w"] // 2),
+            int(p["y"] - p["h"] // 2),
+            p["w"], p["h"],
+        )
+        # 主霧體
+        pygame.draw.ellipse(fog_surf, (*p["col"], a), rect)
+        # 霧心稍亮（增加立體感）
+        inner = pygame.Rect(
+            rect.x + rect.w // 4, rect.y + rect.h // 4,
+            rect.w // 2, rect.h // 2,
+        )
+        pygame.draw.ellipse(fog_surf, (*p["col"], min(255, a + 12)), inner)
+
+    surf.blit(fog_surf, (0, 0))
+
+    # 底部地面霧（靜態漸層帶，增強霧氣厚重感）
+    ground_fog = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
+    for row in range(60):
+        layer_a = int(22 * (1.0 - row / 60.0) ** 1.6)
+        y_row   = WIN_H - row * 3
+        pygame.draw.line(ground_fog, (220, 225, 232, layer_a),
+                         (0, y_row), (WIN_W, y_row))
+    surf.blit(ground_fog, (0, 0))
+
+
+# ── 陰雨綿綿 ─────────────────────────────────────────────────
+
+def _wx_draw_rain(surf: pygame.Surface) -> None:
+    """陰雨綿綿：深灰半透明遮罩 + 斜向雨滴線條。"""
+    # 陰暗遮罩
+    ov = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
+    ov.fill((45, 50, 65, 95))
+    surf.blit(ov, (0, 0))
+
+    # 雨滴
+    rain_surf = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
+    slant     = -0.32   # 斜度（偏左）
+    for p in _weather_pts:
+        p["y"] += p["speed"]
+        p["x"] += p["speed"] * slant
+        if p["y"] > WIN_H + 10 or p["x"] < -30:
+            p.update(_wx_rain_new())
+            continue
+        le = p["length"]
+        x0, y0 = int(p["x"]), int(p["y"])
+        x1 = int(x0 + le * slant)
+        y1 = int(y0 + le)
+        pygame.draw.line(rain_surf,
+                         (175, 195, 220, p["alpha"]),
+                         (x0, y0), (x1, y1), 1)
+    surf.blit(rain_surf, (0, 0))
+
+
+# ============================================================
+#  點擊波紋特效系統
+# ============================================================
+# 每次 MOUSEBUTTONDOWN 觸發：三層擴散光環 + 中心爆閃 + 十字光芒 +
+# 8 顆外射星形光點，全程 650 ms，最多同時 6 個疊加。
+# ============================================================
+
+_click_effects: list = []    # 進行中的特效清單
+_CLICK_MS       = 650        # 每個特效存活時間（ms）
+_CLICK_MAX      = 6          # 最多同時存在幾個
+
+_CLICK_SPARK_COLS = [
+    (255, 240, 140),   # 暖金
+    (255, 220,  90),   # 琥珀金
+    (255, 255, 210),   # 淡黃白
+    (255, 200, 120),   # 橙金
+    (255, 250, 180),   # 奶黃
+    (255, 235, 160),   # 柔金
+]
+
+
+def _click_spawn(x: int, y: int, ms: int) -> None:
+    """在螢幕座標 (x, y) 處生成一個點擊特效。"""
+    n      = 8
+    sparks = []
+    for i in range(n):
+        angle = math.tau * i / n + random.uniform(-0.20, 0.20)
+        sparks.append({
+            "angle": angle,
+            "dist":  random.uniform(48, 92),
+            "sz":    random.uniform(2.5, 4.8),
+            "col":   random.choice(_CLICK_SPARK_COLS),
+        })
+    _click_effects.append({"x": x, "y": y, "t0": ms, "sparks": sparks})
+    # 超過上限時移除最舊的
+    while len(_click_effects) > _CLICK_MAX:
+        _click_effects.pop(0)
+
+
+def _draw_click_effects(surf: pygame.Surface, ms: int) -> None:
+    """
+    繪製所有進行中的點擊波紋特效。
+    應在 pygame.display.flip() 之前、所有其他繪製之後呼叫，
+    確保特效顯示在最頂層。
+    """
+    if not _click_effects:
+        return
+
+    fx = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
+    dead: list = []
+
+    for ef in _click_effects:
+        elapsed = ms - ef["t0"]
+        if elapsed >= _CLICK_MS:
+            dead.append(ef)
+            continue
+
+        t  = elapsed / _CLICK_MS          # 0.0 → 1.0，進度比例
+        cx = ef["x"]
+        cy = ef["y"]
+
+        # ── 中心爆閃（前 28% 時段）──────────────────────────
+        if t < 0.28:
+            bt = t / 0.28                               # 0→1 in first 28%
+            br = int(15 * (1.0 - bt))
+            ba = int(255 * (1.0 - bt) ** 1.3)
+            if br > 0 and ba > 0:
+                pygame.draw.circle(fx, (255, 255, 255, ba), (cx, cy), br)
+                pygame.draw.circle(fx, (255, 240, 160, ba // 3), (cx, cy), br + 7)
+
+        # ── 十字光芒（前 38% 時段，類鏡頭光暈）──────────────
+        if t < 0.38:
+            ct    = t / 0.38
+            clen  = int(26 * (1.0 - ct ** 0.75))
+            ca    = int(190 * (1.0 - ct) ** 1.5)
+            if ca > 0 and clen > 0:
+                w2 = 2
+                for ddx, ddy in ((clen,0),(-clen,0),(0,clen),(0,-clen)):
+                    pygame.draw.line(fx, (255, 255, 200, ca),
+                                     (cx, cy), (cx + ddx, cy + ddy), w2)
+
+        # ── Ring A：快速內環（ease-out-cubic）────────────────
+        ease_a = 1.0 - (1.0 - t) ** 3
+        r1     = int(ease_a * 88)
+        a1     = int(220 * max(0.0, 1.0 - t * 2.3) ** 1.7)
+        if r1 > 0 and a1 > 0:
+            pygame.draw.circle(fx, (255, 248, 175, a1), (cx, cy), r1, 2)
+
+        # ── Ring B：中速中環 ──────────────────────────────────
+        ease_b = 1.0 - (1.0 - t) ** 2.4
+        r2     = int(ease_b * 145)
+        a2     = int(175 * max(0.0, 1.0 - t * 1.65) ** 1.9)
+        if r2 > 0 and a2 > 0:
+            pygame.draw.circle(fx, (255, 215, 105, a2), (cx, cy), r2, 2)
+            # 內側加一圈更淡的輝光，讓環更有厚度感
+            if r2 > 3:
+                pygame.draw.circle(fx, (255, 230, 140, a2 // 3), (cx, cy), r2 - 3, 1)
+
+        # ── Ring C：慢速外環（最薄，最遠）───────────────────
+        ease_c = t ** 0.65
+        r3     = int(ease_c * 210)
+        a3     = int(135 * max(0.0, 1.0 - t * 1.25) ** 2.3)
+        if r3 > 0 and a3 > 0:
+            pygame.draw.circle(fx, (255, 240, 170, a3), (cx, cy), r3, 1)
+
+        # ── 外射星形光點 ─────────────────────────────────────
+        for spark in ef["sparks"]:
+            sp_t   = min(t * 1.45, 1.0)
+            ease_s = 1.0 - (1.0 - sp_t) ** 2.8   # ease-out
+            dist   = spark["dist"] * ease_s
+            sa     = int(245 * max(0.0, 1.0 - t * 1.55) ** 1.6)
+            if sa <= 0:
+                continue
+            sx  = cx + math.cos(spark["angle"]) * dist
+            sy  = cy + math.sin(spark["angle"]) * dist
+            sz  = max(1, int(spark["sz"] * (1.0 - t * 0.68)))
+            col = (*spark["col"], sa)
+            pygame.draw.circle(fx, col, (int(sx), int(sy)), sz)
+            # 每顆光點加小十字，做出星芒感
+            if sz >= 2 and sa > 55:
+                slen = sz + 2
+                sa2  = sa // 3
+                pygame.draw.line(fx, (255, 255, 255, sa2),
+                                 (int(sx) - slen, int(sy)),
+                                 (int(sx) + slen, int(sy)), 1)
+                pygame.draw.line(fx, (255, 255, 255, sa2),
+                                 (int(sx), int(sy) - slen),
+                                 (int(sx), int(sy) + slen), 1)
+
+    for ef in dead:
+        _click_effects.remove(ef)
+
+    surf.blit(fx, (0, 0))
+
+
 # ─────────────────────────────────────────
 #  供其他模組呼叫的 API
 # ─────────────────────────────────────────
@@ -235,6 +781,18 @@ def ask_choice(options) -> int:
     """
     labels = [opt["name"] if isinstance(opt, dict) else str(opt) for opt in options]
     _cmd_q.put(("choices", labels))
+    _reply_event.clear()
+    _reply_event.wait()
+    return _reply_val[0]
+
+def ask_subject_popup(title: str, options: list) -> int:
+    """
+    在畫面中央顯示科目選擇彈出視窗。
+    options: 字串列表（或帶 'name' key 的 dict 列表）。
+    回傳：1-based 選擇索引（不提供「返回」選項，玩家必須選一科）。
+    """
+    labels = [opt["name"] if isinstance(opt, dict) else str(opt) for opt in options]
+    _cmd_q.put(("subj_popup", title, labels))
     _reply_event.clear()
     _reply_event.wait()
     return _reply_val[0]
@@ -276,6 +834,14 @@ def reset_ui():
 def set_time(n: int):
     """更新底部標籤列的剩餘時間點數字。"""
     _cmd_q.put(("set_time", n))
+
+def trigger_time_overflow_warning():
+    """
+    觸發「時間不足」警告特效：
+    剩餘時間點文字紅色閃動 + 左右震動，同時播放 damage6 音效。
+    由 turn_engine 在玩家即將將時間扣成負數時呼叫。
+    """
+    _cmd_q.put(("time_overflow_warn", None))
 
 def set_week(w: int):
     """由遊戲執行緒呼叫，更新週次輪盤顯示並觸發對應 BGM。"""
@@ -373,9 +939,11 @@ def show_action_result(lines: list, title: str = "行動結果") -> None:
     title: 彈出視窗的標題，通常傳入行動名稱（如「認真讀書」）。
     """
     _popup_lines.clear()
-    _popup_lines.extend(str(l) for l in lines)
+    _popup_lines.extend(lines)   # 保留 tuple 型別（"multi" 多色行、(text,col) 標注行）
     _popup_title[0] = title
-    _popup_t0[0] = pygame.time.get_ticks()
+    _now = pygame.time.get_ticks()
+    _popup_t0[0]        = _now
+    _action_flash_t0[0] = _now   # 觸發全螢幕白光閃爍
 
 # ─────────────────────────────────────────
 #  相容舊有介面（讓尚未修改的模組繼續可匯入）
@@ -400,9 +968,10 @@ def get_player_choice(options) -> int:
 # ─────────────────────────────────────────
 
 def _get_font(size: int):
-    """找第一個能渲染中文的系統字型。"""
+    """優先微軟正黑體，再依序嘗試其他能渲染中文的系統字型。"""
     candidates = [
-        "microsoftyahei", "microsoft yahei",
+        "microsoft jhenghei", "microsoftjhenghei",   # 微軟正黑體（繁體）
+        "microsoftyahei", "microsoft yahei",           # 微軟雅黑（簡體）
         "simsun", "nsimsun",
         "arial unicode ms",
         "noto sans cjk tc", "noto sans tc",
@@ -415,6 +984,25 @@ def _get_font(size: int):
         except Exception:
             pass
     return pygame.font.SysFont(None, size)
+
+
+def _get_font_bold(size: int):
+    """粗體版字型，優先微軟正黑體 Bold。"""
+    candidates = [
+        "microsoft jhenghei", "microsoftjhenghei",
+        "microsoftyahei", "microsoft yahei",
+        "simsun", "nsimsun",
+        "arial unicode ms",
+        "noto sans cjk tc", "noto sans tc",
+    ]
+    for name in candidates:
+        try:
+            f = pygame.font.SysFont(name, size, bold=True)
+            f.render("測", True, WHITE)
+            return f
+        except Exception:
+            pass
+    return pygame.font.SysFont(None, size, bold=True)
 
 
 def _clean(text: str) -> str:
@@ -958,7 +1546,7 @@ def _draw_status(surf, fs, fm, player, rect):
 
     # 滿足感條
     sr = player.satisfaction / 100
-    sc = GREEN if sr > 0.6 else (YELLOW if sr > 0.3 else RED)
+    sc = YELLOW
     pygame.draw.rect(surf, DARK_GRAY, (x, y, bw, bh))
     pygame.draw.rect(surf, sc, (x, y, int(bw * sr), bh))
     surf.blit(fs.render(f"自我滿足度 {player.satisfaction}%", True, WHITE),
@@ -970,208 +1558,456 @@ def _draw_status(surf, fs, fm, player, rect):
         surf.blit(fs.render(eff, True, RED), (x, y))
 
 
-def _draw_week_ticker(surf: pygame.Surface,
-                      fm,
-                      cx: int, cy: int, week: int) -> None:
+def _draw_icon_cart(surf: pygame.Surface, cx: int, cy: int, r: int) -> None:
+    """購物車小圖示（純 pygame.draw，不使用外部資源）。"""
+    # r 為半高基準；整體大小約 r*2.2 × r*1.8
+    body_w = max(6, int(r * 1.8))
+    body_h = max(4, int(r * 1.1))
+    bx     = cx - body_w // 2
+    by     = cy - body_h // 2 + max(1, r // 5)   # 略下移讓圖示視覺居中
+
+    # 車身（圓角矩形）
+    pygame.draw.rect(surf, (93, 64, 55), pygame.Rect(bx, by, body_w, body_h), border_radius=2)
+    pygame.draw.rect(surf, (140, 100, 65), pygame.Rect(bx, by, body_w, body_h), 1, border_radius=2)
+
+    # 車架柄（左斜線 → 上延伸）
+    handle_rx = bx - max(2, r // 3)
+    handle_ty = by - max(3, int(r * 0.8))
+    pygame.draw.line(surf, (93, 64, 55), (bx, by), (handle_rx, handle_ty), max(1, r // 5))
+
+    # 車輪（兩個小圓）
+    whl_r = max(2, r // 3)
+    whl_y = by + body_h + whl_r
+    pygame.draw.circle(surf, (93, 64, 55),  (bx + body_w // 4,         whl_y), whl_r)
+    pygame.draw.circle(surf, (93, 64, 55),  (bx + body_w * 3 // 4,     whl_y), whl_r)
+    pygame.draw.circle(surf, (200, 170, 130),(bx + body_w // 4,         whl_y), max(1, whl_r - 1))
+    pygame.draw.circle(surf, (200, 170, 130),(bx + body_w * 3 // 4,     whl_y), max(1, whl_r - 1))
+
+
+def _draw_week_calendar(surf: pygame.Surface,
+                        fm, cx: int, cy: int, week: int) -> None:
     """
-    橫長條滾輪式週次計數器（取代圓形指針輪盤）。
-    三格：左（上週，暗）｜中（本週，高亮）｜右（下週，暗）。
-    使用 BLEND_RGB_MULT 做圓柱曲面漸層，不影響透明角落像素。
+    日曆式週次顯示器：以翻頁日曆造型大字呈現當前週次。
+    頂部深紅標題列 + 裝訂環 + 主體白底大字。
     """
-    fmic = _font_micro[0]
-    if fmic is None:
-        return
+    fb_xl = _font_bold_xl[0] or fm
+    fmic  = _font_micro[0]
 
-    # ── 版面常數 ──────────────────────────────────────────────
-    SIDE_W  = 46    # 左右欄寬（px）
-    CTR_W   = 82    # 中央欄寬
-    DIV_W   = 2     # 分隔線寬
-    H       = 58    # 總高
-    TOTAL_W = SIDE_W * 2 + CTR_W + DIV_W * 2   # = 178
-    RADIUS  = 10
+    CAL_W  = 108   # 日曆卡片寬度
+    CAL_H  = 112   # 日曆卡片高度
+    HDR_H  = 28    # 頂部紅色標題列高度
+    RADIUS = 8
+    RING_R = 5     # 裝訂環半徑
 
-    sx = cx - TOTAL_W // 2
-    sy = cy - H // 2
-    outer = pygame.Rect(sx, sy, TOTAL_W, H)
+    sx = cx - CAL_W // 2
+    sy = cy - CAL_H // 2
+    outer = pygame.Rect(sx, sy, CAL_W, CAL_H)
 
-    # ── 在 SRCALPHA Surface 上合成（圓角乾淨，透明角落不受影響）
-    ticker = pygame.Surface((TOTAL_W, H), pygame.SRCALPHA)
+    cal = pygame.Surface((CAL_W, CAL_H), pygame.SRCALPHA)
 
-    # 深色底板（滾輪鼓面）
-    pygame.draw.rect(ticker, (35, 20, 8, 252),
-                     pygame.Rect(0, 0, TOTAL_W, H), border_radius=RADIUS)
+    # ── 主體（米白）────────────────────────────────────────────
+    pygame.draw.rect(cal, (255, 249, 237, 255),
+                     pygame.Rect(0, 0, CAL_W, CAL_H), border_radius=RADIUS)
 
-    # 欄位 x 座標
-    div1_x = SIDE_W           # 左分隔線起點
-    ctr_x  = div1_x + DIV_W  # 中央欄起點
-    div2_x = ctr_x  + CTR_W  # 右分隔線起點
+    # ── 頂部標題列（深紅，僅上方圓角）─────────────────────────
+    pygame.draw.rect(cal, (188, 50, 40, 255),
+                     pygame.Rect(0, 0, CAL_W, HDR_H), border_radius=RADIUS)
+    # 蓋掉標題列下方多餘的圓角（讓下邊緣平整）
+    pygame.draw.rect(cal, (188, 50, 40, 255),
+                     pygame.Rect(0, RADIUS, CAL_W, HDR_H - RADIUS))
 
-    # 中央 aperture 高亮（金黃暈光）
-    pygame.draw.rect(ticker, (255, 195, 90, 30),
-                     pygame.Rect(ctr_x, 4, CTR_W, H - 8), border_radius=6)
+    # 標題文字「本週」
+    if fmic is not None:
+        hdr_t = fmic.render("本  週", True, (255, 215, 195))
+        cal.blit(hdr_t, ((CAL_W - hdr_t.get_width()) // 2,
+                         (HDR_H - hdr_t.get_height()) // 2))
 
-    # ── 三格文字 ──────────────────────────────────────────────
-    prev_w = week - 1 if week > 1  else None
-    next_w = week + 1 if week < 16 else None
+    # ── 裝訂環（位於頂邊，橫跨標題列上緣）─────────────────────
+    for ring_cx in [CAL_W // 3, CAL_W * 2 // 3]:
+        ring_cy = RING_R + 1
+        # 環柱（深棕色小矩形）
+        pygame.draw.rect(cal, (70, 46, 25),
+                         pygame.Rect(ring_cx - 3, 0, 6, ring_cy + RING_R))
+        # 外環
+        pygame.draw.circle(cal, (110, 78, 44), (ring_cx, ring_cy), RING_R)
+        # 孔洞
+        pygame.draw.circle(cal, (35, 20, 10), (ring_cx, ring_cy), max(2, RING_R - 2))
 
-    # 左：上週（fmic 小字，暗棕）
-    if prev_w is not None:
-        pt = fmic.render(str(prev_w), True, (148, 105, 68))
-        ticker.blit(pt, ((SIDE_W - pt.get_width()) // 2,
-                          (H      - pt.get_height()) // 2))
+    # ── 週次大字（置中於主體區域）──────────────────────────────
+    body_y = HDR_H
+    body_h = CAL_H - HDR_H
+    week_t = fb_xl.render(f"第{week}週", True, (72, 38, 18))
+    # 若文字超寬則改用 fb_lg
+    if week_t.get_width() > CAL_W - 8:
+        _fb_lg = _font_bold_lg[0] or fm
+        week_t = _fb_lg.render(f"第{week}週", True, (72, 38, 18))
+    cal.blit(week_t, ((CAL_W - week_t.get_width()) // 2,
+                      body_y + (body_h - week_t.get_height()) // 2 - 2))
 
-    # 中：本週（fm 大字，琥珀金 YELLOW）
-    ct = fm.render(f"第{week}週", True, YELLOW)
-    ticker.blit(ct, (ctr_x + (CTR_W - ct.get_width()) // 2,
-                     (H     - ct.get_height()) // 2))
+    # ── 底部細線裝飾（模擬日曆頁格線）─────────────────────────
+    deco_y = CAL_H - 9
+    pygame.draw.line(cal, (210, 195, 175),
+                     (12, deco_y), (CAL_W - 12, deco_y))
 
-    # 右：下週（fmic 小字，暗棕）
-    if next_w is not None:
-        nt = fmic.render(str(next_w), True, (148, 105, 68))
-        ticker.blit(nt, (div2_x + DIV_W + (SIDE_W - nt.get_width()) // 2,
-                          (H               - nt.get_height()) // 2))
+    # ── 卡片邊框 ────────────────────────────────────────────────
+    pygame.draw.rect(cal, (148, 108, 70, 255),
+                     pygame.Rect(0, 0, CAL_W, CAL_H), 1, border_radius=RADIUS)
 
-    # 分隔線（文字之後繪製確保清晰）
-    pygame.draw.rect(ticker, (90, 60, 34, 255),
-                     pygame.Rect(div1_x, 8, DIV_W, H - 16))
-    pygame.draw.rect(ticker, (90, 60, 34, 255),
-                     pygame.Rect(div2_x, 8, DIV_W, H - 16))
-
-    # ── 圓柱曲面漸層（BLEND_RGB_MULT：暗化上下邊緣，透明角落 RGB=0 不受影響）
-    _curve = pygame.Surface((TOTAL_W, H))   # RGB only，無 SRCALPHA
-    _curve.fill((255, 255, 255))
-    _band = H // 3
-    for _i in range(_band):
-        _t    = (1.0 - _i / _band) ** 2.3
-        _gray = int(255 - 92 * _t)
-        pygame.draw.line(_curve, (_gray, _gray, _gray),
-                         (0, _i),         (TOTAL_W - 1, _i))
-        pygame.draw.line(_curve, (_gray, _gray, _gray),
-                         (0, H - 1 - _i), (TOTAL_W - 1, H - 1 - _i))
-    ticker.blit(_curve, (0, 0), special_flags=pygame.BLEND_RGB_MULT)
-
-    # ── 頂部光澤（起點避開圓角透明區）────────────────────────
-    _gh = max(3, int(H * 0.28))
-    for _i in range(_gh):
-        _a = int(62 * (1 - _i / _gh) ** 1.9)
-        pygame.draw.line(ticker, (255, 255, 255, _a),
-                         (RADIUS, _i), (TOTAL_W - 1 - RADIUS, _i))
-
-    # ── 邊框 ─────────────────────────────────────────────────
-    pygame.draw.rect(ticker, (92, 64, 38, 255),
-                     pygame.Rect(0, 0, TOTAL_W, H), 2, border_radius=RADIUS)
-
-    # ── 陰影 → 貼圖 ──────────────────────────────────────────
+    # ── 投影 + 貼圖 ─────────────────────────────────────────────
     _soft_shadow(surf, outer, radius=RADIUS, alpha=52, offset=(0, 5))
-    surf.blit(ticker, (sx, sy))
+    surf.blit(cal, (sx, sy))
+
+
+def _get_intel_level_ui(intel: int) -> int:
+    """根據智力數值回傳等階索引（0–4），供狀態欄顯示用。"""
+    for lvl in range(len(_INTEL_THRESHOLDS_UI) - 1, -1, -1):
+        if intel >= _INTEL_THRESHOLDS_UI[lvl]:
+            return lvl
+    return 0
+
+
+def _draw_action_flash(surf: pygame.Surface, ms: int) -> None:
+    """
+    行動成功後的全螢幕白光閃爍。
+    alpha 快速衰退，模擬瞬間強光感。
+    """
+    if _action_flash_t0[0] == 0:
+        return
+    elapsed = ms - _action_flash_t0[0]
+    if elapsed >= _ACTION_FLASH_MS:
+        _action_flash_t0[0] = 0
+        return
+    t     = elapsed / _ACTION_FLASH_MS          # 0 → 1
+    alpha = int(210 * (1.0 - t) ** 1.6)         # 快速指數衰退
+    flash = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
+    flash.fill((255, 255, 255, alpha))
+    surf.blit(flash, (0, 0))
+
+
+# ============================================================
+#  小圖示繪製函式（純 pygame.draw，無需外部素材）
+# ============================================================
+
+def _draw_icon_coin(surf: pygame.Surface, cx: int, cy: int, r: int) -> None:
+    """金幣圖示：立體金圓＋高光。r 為外圓半徑。"""
+    # 陰影（右下偏移 1px）
+    pygame.draw.circle(surf, (140, 100, 10), (cx + 1, cy + 1), r)
+    # 主體（深金）
+    pygame.draw.circle(surf, (210, 158, 24), (cx, cy), r)
+    # 亮面（較淺金，去掉外緣 2px）
+    if r > 3:
+        pygame.draw.circle(surf, (248, 210, 60), (cx, cy), r - 2)
+    # 高光點（左上）
+    if r >= 6:
+        pygame.draw.circle(surf, (255, 245, 160),
+                           (cx - max(1, r // 3), cy - max(1, r // 3)),
+                           max(1, r // 4))
+    # 邊框（深金色）
+    pygame.draw.circle(surf, (160, 115, 15), (cx, cy), r, 1)
+    # 內環裝飾線
+    if r >= 5:
+        pygame.draw.circle(surf, (185, 140, 22), (cx, cy), max(1, r - 3), 1)
+
+
+def _draw_icon_clock(surf: pygame.Surface, cx: int, cy: int, r: int,
+                     col: tuple = (93, 64, 55)) -> None:
+    """時鐘圖示：錶盤＋時針＋分針。col 控制邊框與指針顏色（支援動畫色）。"""
+    face = (255, 250, 236)
+    # 錶盤
+    pygame.draw.circle(surf, face, (cx, cy), r)
+    pygame.draw.circle(surf, col,  (cx, cy), r, 1)
+    # 時針（短，指向 10 點方向）
+    ha  = math.radians(-60)   # 10 點 = -60° from 12
+    hx  = cx + int(math.sin(ha) * r * 0.50)
+    hy  = cy - int(math.cos(ha) * r * 0.50)
+    pygame.draw.line(surf, col, (cx, cy), (hx, hy), max(1, r // 5))
+    # 分針（長，指向 12 點方向）
+    mx2 = cx
+    my2 = cy - int(r * 0.78)
+    pygame.draw.line(surf, col, (cx, cy), (mx2, my2), max(1, r // 6))
+    # 中心點
+    pygame.draw.circle(surf, col, (cx, cy), max(1, r // 5))
+
+
+def _draw_icon_brain(surf: pygame.Surface, cx: int, cy: int, r: int) -> None:
+    """大腦圖示：兩半球 + 中央縱溝 + 腦回折痕弧線 + 高光。"""
+    pink  = (232, 148, 148)   # 腦組織粉紅
+    dark  = (175,  78,  78)   # 深玫瑰（輪廓 / 折痕）
+    light = (252, 208, 208)   # 高光粉
+
+    _pad = 2
+    sz   = (r + _pad) * 2
+    bs   = pygame.Surface((sz, sz), pygame.SRCALPHA)
+    bx = by = sz // 2
+
+    hl  = max(3, int(r * 0.60))            # 半球半徑
+    sep = max(1, int(r * 0.26))            # 半球圓心離中軸距離
+    hcy = by - max(1, int(r * 0.12))       # 半球圓心略偏上
+    lhx = bx - sep                         # 左半球圓心 x
+    rhx = bx + sep                         # 右半球圓心 x
+
+    # ── 填充：左右半球 + 底部連接（小腦區）──────────────────
+    pygame.draw.circle(bs, pink, (lhx, hcy), hl)
+    pygame.draw.circle(bs, pink, (rhx, hcy), hl)
+    bot_rect = pygame.Rect(bx - int(r * 0.55), by - int(r * 0.05),
+                           int(r * 1.1), int(r * 0.75))
+    pygame.draw.ellipse(bs, pink, bot_rect)
+
+    # ── 輪廓 ─────────────────────────────────────────────────
+    pygame.draw.circle(bs, dark, (lhx, hcy), hl, 1)
+    pygame.draw.circle(bs, dark, (rhx, hcy), hl, 1)
+    pygame.draw.ellipse(bs, dark, bot_rect, 1)
+
+    # ── 中央縱溝 ─────────────────────────────────────────────
+    pygame.draw.line(bs, dark,
+                     (bx, hcy - hl + max(1, int(r * 0.15))),
+                     (bx, by  + int(r * 0.55)), 1)
+
+    # ── 腦回折痕（向下開口弧線＝溝回）──────────────────────
+    fw = max(4, int(r * 0.55))
+    fh = max(3, int(r * 0.38))
+    fy = hcy - int(r * 0.05)
+    pygame.draw.arc(bs, dark,
+                    pygame.Rect(lhx - fw // 2, fy, fw, fh),
+                    math.pi, math.tau, 1)   # 左半球折痕
+    pygame.draw.arc(bs, dark,
+                    pygame.Rect(rhx - fw // 2, fy, fw, fh),
+                    math.pi, math.tau, 1)   # 右半球折痕
+
+    # ── 高光 ─────────────────────────────────────────────────
+    if r >= 6:
+        pygame.draw.circle(bs, light,
+                           (lhx - max(1, int(r * 0.18)),
+                            hcy - max(1, int(r * 0.22))),
+                           max(1, int(r * 0.18)))
+
+    surf.blit(bs, (cx - bx, cy - by))
+
+
+def _draw_icon_clover(surf: pygame.Surface, cx: int, cy: int, r: int) -> None:
+    """四葉幸運草圖示。r 為整體半徑。"""
+    leaf_r  = max(2, int(r * 0.48))
+    offset  = max(2, int(r * 0.44))
+    green   = (68, 178, 82)
+    dark_g  = (38, 125, 52)
+    shadow  = (30, 100, 42)
+    # 四葉（上下左右），先畫陰影再畫本色
+    for dx, dy in [(0, -offset), (0, offset), (-offset, 0), (offset, 0)]:
+        pygame.draw.circle(surf, shadow, (cx + dx + 1, cy + dy + 1), leaf_r)
+        pygame.draw.circle(surf, green,  (cx + dx,     cy + dy),     leaf_r)
+    # 葉脈（細線，各葉從中心往葉頂）
+    for dx, dy in [(0, -offset), (0, offset), (-offset, 0), (offset, 0)]:
+        pygame.draw.line(surf, dark_g, (cx, cy),
+                         (cx + dx, cy + dy), 1)
+    # 莖（往下延伸）
+    pygame.draw.line(surf, dark_g, (cx, cy + leaf_r),
+                     (cx, cy + r + 3), max(1, r // 5))
+    # 中心蓋住葉脈交叉點
+    pygame.draw.circle(surf, dark_g, (cx, cy), max(1, leaf_r // 2))
 
 
 def _draw_status_v2(surf, fm, fs, player, rect, mpos):
     """
-    新版狀態欄：
+    新版狀態欄（浮動卡片）：
       左側：圓形頭像 → 名字/系級/體力條/滿足感條 → 智力/運氣小標籤
-      右側：金錢顯示 + 道具店按鈕
+      右側：道具店按鈕 + 金錢（靠右對齊道具店右緣）
     回傳道具店按鈕 Rect。
     """
-    # 漸層背景
-    if "status" in _grads:
-        surf.blit(_grads["status"], rect.topleft)
-    else:
-        pygame.draw.rect(surf, PANEL, rect)
-    pygame.draw.rect(surf, CYAN, rect, 2, border_radius=0)
+    fb    = _font_bold[0]    or fs   # 粗體 size-17
+    fb_lg = _font_bold_lg[0] or fm  # 粗體 size-22
+
+    M  = 8
+    pr = pygame.Rect(rect.x + M, rect.y + M,
+                     rect.width - M * 2, rect.height - M * 2)
+
+    # ── 投影 ──────────────────────────────────────────────────
+    sh = pygame.Surface((pr.width, pr.height), pygame.SRCALPHA)
+    pygame.draw.rect(sh, (0, 0, 0, 52),
+                     pygame.Rect(0, 0, pr.width, pr.height), border_radius=14)
+    surf.blit(sh, (pr.x + 4, pr.y + 4))
+
+    # ── 卡片底色 ──────────────────────────────────────────────
+    card = pygame.Surface((pr.width, pr.height), pygame.SRCALPHA)
+    pygame.draw.rect(card, (255, 244, 228, 238),
+                     pygame.Rect(0, 0, pr.width, pr.height), border_radius=14)
+    surf.blit(card, pr.topleft)
+    pygame.draw.rect(surf, CYAN, pr, 2, border_radius=14)
 
     if player is None:
         t = fm.render("等待角色資料…", True, GRAY)
-        surf.blit(t, (rect.x + 20, rect.y + rect.height // 2 - t.get_height() // 2))
-        # 空的道具店按鈕占位
-        shop_r = pygame.Rect(rect.right - 130, rect.y + 12, 118, 38)
+        surf.blit(t, (pr.x + 20, pr.y + pr.height // 2 - t.get_height() // 2))
+        shop_r = pygame.Rect(pr.right - 122, pr.y + (pr.height - 40) // 2, 118, 40)
         pygame.draw.rect(surf, DARK_GRAY, shop_r, border_radius=14)
         return shop_r
 
     # ── 圓形頭像 ──────────────────────────────────────────────
-    av_cx = rect.x + 52
-    av_cy = rect.y + 58
+    av_cx = pr.x + 52
+    av_cy = pr.y + 58
     av_r  = 42
     pygame.draw.circle(surf, PANEL, (av_cx, av_cy), av_r)
     pygame.draw.circle(surf, CYAN,  (av_cx, av_cy), av_r, 3)
     init_ch = player.name[0] if player.name else "？"
-    init_t  = fm.render(init_ch, True, TITLE)
+    init_t  = fb_lg.render(init_ch, True, TITLE)
     surf.blit(init_t, (av_cx - init_t.get_width() // 2,
                        av_cy - init_t.get_height() // 2))
 
-    # ── 名字 + 系級（帶懸浮半透明名字卡）────────────────────
-    info_x = rect.x + 106
-    info_y = rect.y + 14
-    name_t = fm.render(f"【{player.name}】 {player.department}", True, WHITE)
-    _fy_nc = _float_offset(amp=3, speed=0.00195, phase=0.8)
-    nc_px, nc_py = 10, 5
-    nc_r = pygame.Rect(info_x - nc_px,
-                       info_y + _fy_nc - nc_py,
-                       name_t.get_width() + nc_px * 2,
-                       name_t.get_height() + nc_py * 2)
-    nc_s = pygame.Surface((nc_r.width, nc_r.height), pygame.SRCALPHA)
-    nc_s.fill((255, 255, 255, 68))
-    surf.blit(nc_s, nc_r.topleft)
-    pygame.draw.rect(surf, CYAN, nc_r, 1, border_radius=8)
-    surf.blit(name_t, (info_x, info_y + _fy_nc))
+    # ── 名字 + 系級（純文字，無外框）────────────────────────
+    info_x = pr.x + 106
+    info_y = pr.y + 14
+    name_t = fb_lg.render(f"{player.name}  {player.department}", True, WHITE)
+    surf.blit(name_t, (info_x, info_y))
+    # 名字下細線
+    line_y = info_y + name_t.get_height() + 2
+    pygame.draw.line(surf, (210, 190, 165),
+                     (info_x, line_y), (info_x + name_t.get_width(), line_y), 1)
 
-    # ── 體力條 ────────────────────────────────────────────────
-    bar_y  = info_y + fm.get_height() + 6
-    bar_w  = 300
-    bar_h  = 14
+    # ── 體力條 / 滿足感條 ────────────────────────────────────
+    # 標籤在左側，數值置中顯示於條內；兩列標籤對齊同一 x
+    bar_h  = 22                          # 加粗（原 14）
+    bar_w  = 280                         # 略縮，讓左側標籤有空間
+    bar_gap = 8                          # 標籤與條之間的間距
+
+    # 預算標籤寬度（取最寬者做對齊基準）
+    _lbl_stam = fb.render("體力", True, WHITE)
+    _lbl_sat  = fb.render("自我滿足度", True, WHITE)
+    lbl_col_w = max(_lbl_stam.get_width(), _lbl_sat.get_width())
+    bar_x     = info_x + lbl_col_w + bar_gap   # 兩條共同左起點
+
+    bar_y  = line_y + 7
     ratio  = player.stamina / max(player.stamina_max, 1)
-    pygame.draw.rect(surf, DARK_GRAY, (info_x, bar_y, bar_w, bar_h), border_radius=7)
-    pygame.draw.rect(surf, GREEN,     (info_x, bar_y, int(bar_w * ratio), bar_h), border_radius=7)
-    pygame.draw.rect(surf, GRAY,      (info_x, bar_y, bar_w, bar_h), 1, border_radius=7)
-    stam_t = fs.render(f"體力  {player.stamina}/{player.stamina_max}", True, WHITE)
-    surf.blit(stam_t, (info_x + bar_w + 10, bar_y))
 
-    # ── 滿足感條 ──────────────────────────────────────────────
+    # 標籤（右對齊於標籤欄）
+    surf.blit(_lbl_stam,
+              (info_x + lbl_col_w - _lbl_stam.get_width(),
+               bar_y + (bar_h - _lbl_stam.get_height()) // 2))
+    # 進度條底 + 填充 + 邊框
+    pygame.draw.rect(surf, DARK_GRAY, (bar_x, bar_y, bar_w, bar_h), border_radius=9)
+    _fill_w = max(0, int(bar_w * ratio))
+    if _fill_w > 0:
+        pygame.draw.rect(surf, GREEN, (bar_x, bar_y, _fill_w, bar_h), border_radius=9)
+    pygame.draw.rect(surf, GRAY, (bar_x, bar_y, bar_w, bar_h), 1, border_radius=9)
+    # 數值置中於整條
+    _sv = fb.render(f"{player.stamina}/{player.stamina_max}", True, PANEL)
+    surf.blit(_sv, (bar_x + (bar_w - _sv.get_width()) // 2,
+                    bar_y + (bar_h - _sv.get_height()) // 2))
+
     sat_y  = bar_y + bar_h + 7
     sr_val = player.satisfaction / 100
-    sat_c  = GREEN if sr_val > 0.6 else (YELLOW if sr_val > 0.3 else RED)
-    pygame.draw.rect(surf, DARK_GRAY, (info_x, sat_y, bar_w, bar_h), border_radius=7)
-    pygame.draw.rect(surf, sat_c,     (info_x, sat_y, int(bar_w * sr_val), bar_h), border_radius=7)
-    pygame.draw.rect(surf, GRAY,      (info_x, sat_y, bar_w, bar_h), 1, border_radius=7)
-    sat_t = fs.render(f"自我滿足度  {player.satisfaction}%", True, WHITE)
-    surf.blit(sat_t, (info_x + bar_w + 10, sat_y))
+    sat_c  = YELLOW
+
+    # 滿足感條
+    surf.blit(_lbl_sat,
+              (info_x + lbl_col_w - _lbl_sat.get_width(),
+               sat_y + (bar_h - _lbl_sat.get_height()) // 2))
+    pygame.draw.rect(surf, DARK_GRAY, (bar_x, sat_y, bar_w, bar_h), border_radius=9)
+    _fill_sw = max(0, int(bar_w * sr_val))
+    if _fill_sw > 0:
+        pygame.draw.rect(surf, sat_c, (bar_x, sat_y, _fill_sw, bar_h), border_radius=9)
+    pygame.draw.rect(surf, GRAY, (bar_x, sat_y, bar_w, bar_h), 1, border_radius=9)
+    _satv = fb.render(f"{player.satisfaction}%", True, PANEL)
+    surf.blit(_satv, (bar_x + (bar_w - _satv.get_width()) // 2,
+                      sat_y + (bar_h - _satv.get_height()) // 2))
+    sat_t = _lbl_sat   # 供下方 sat_right 計算使用（取標籤寬度作基準）
 
     # ── 狀態效果（若有）───────────────────────────────────────
     eff_y = sat_y + bar_h + 7
     if player.status_effects:
         eff_str = "  ".join(f"[{k} {v}週]" for k, v in player.status_effects.items())
-        surf.blit(fs.render(eff_str, True, RED), (info_x, eff_y))
+        surf.blit(fb.render(eff_str, True, RED), (info_x, eff_y))
 
     # ── 智力 / 運氣 小標籤（頭像正下方）─────────────────────
-    chip_y = rect.y + 118
-    for i, (label, val) in enumerate([("智力", player.intel), ("運氣", player.luck)]):
-        chip_x = rect.x + 10 + i * 100
-        chip_r = pygame.Rect(chip_x, chip_y, 88, 30)
-        pygame.draw.rect(surf, PANEL, chip_r, border_radius=10)
-        pygame.draw.rect(surf, CYAN,  chip_r, 1,  border_radius=10)
-        ct = fs.render(f"{label}: {val}", True, WHITE)
-        surf.blit(ct, (chip_r.x + (chip_r.width  - ct.get_width())  // 2,
-                       chip_r.y + (chip_r.height - ct.get_height()) // 2))
+    chip_y = pr.bottom - 42
 
-    # ── 金錢 + 道具店按鈕（右側）─────────────────────────────
-    money_t = fm.render(f"$ {player.money}", True, YELLOW)
-    surf.blit(money_t, (rect.right - 140 - money_t.get_width(), rect.y + 18))
+    # 智力 chip（含彩色等階名稱，寬度較大）
+    intel_lvl  = _get_intel_level_ui(player.intel)
+    lvl_name   = _INTEL_NAMES_UI[intel_lvl]
+    lvl_col    = _INTEL_ANNOT_COLS_UI[intel_lvl]
+    base_s     = fb.render(f"智力: {player.intel}", True, WHITE)
+    lvl_s      = fb.render(f"（{lvl_name}）", True, lvl_col)
+    _CR = 8                                              # chip 圖示半徑
+    _ISPACE = _CR * 2 + 5                               # 圖示佔寬（直徑 + 右間距）
+    intel_chip_w = _ISPACE + base_s.get_width() + lvl_s.get_width() + 18
+    intel_chip_r = pygame.Rect(pr.x + 10, chip_y, intel_chip_w, 30)
+    # 大腦圖示（智力）
+    _draw_icon_brain(surf,
+                     intel_chip_r.x + 9 + _CR,
+                     intel_chip_r.centery, _CR)
+    bx = intel_chip_r.x + 9 + _ISPACE
+    by = intel_chip_r.y + (intel_chip_r.height - base_s.get_height()) // 2
+    surf.blit(base_s, (bx, by))
+    surf.blit(lvl_s,  (bx + base_s.get_width(), by))
 
-    # ── 週次計數器（自我滿足度文字右側 ↔ 金錢左側的空白區域）─
-    sat_right   = info_x + bar_w + 10 + sat_t.get_width() + 12
-    money_left  = rect.right - 140 - money_t.get_width() - 12
-    TICKER_W    = 178          # 與 _draw_week_ticker 中 TOTAL_W 一致
-    ticker_cx   = (sat_right + money_left) // 2
-    ticker_cy   = rect.y + STATUS_H // 2
-    if money_left - sat_right >= TICKER_W + 8:   # 空間夠才畫
-        _draw_week_ticker(surf, fm, ticker_cx, ticker_cy, _week[0])
+    # 運氣（緊接在智力右側，間距 8px）
+    luck_chip_x = intel_chip_r.right + 8
+    lt = fb.render(f"運氣: {player.luck}", True, WHITE)
+    luck_chip_w = _ISPACE + lt.get_width() + 18
+    luck_chip_r = pygame.Rect(luck_chip_x, chip_y, luck_chip_w, 30)
+    # 幸運草圖示（運氣）
+    _draw_icon_clover(surf,
+                      luck_chip_r.x + 9 + _CR,
+                      luck_chip_r.centery, _CR)
+    lbx = luck_chip_r.x + 9 + _ISPACE
+    lby = luck_chip_r.y + (luck_chip_r.height - lt.get_height()) // 2
+    surf.blit(lt, (lbx, lby))
 
-    shop_r = pygame.Rect(rect.right - 130, rect.y + 58, 118, 40)
+    # ── 道具店按鈕（先計算，供金錢靠右對齊使用）─────────────
+    shop_r = pygame.Rect(pr.right - 150, pr.y + (pr.height - 40) // 2, 118, 40)
     hover  = shop_r.collidepoint(mpos)
     dr     = _premium_btn(surf, shop_r, BTN_N, hover, radius=14)
-    st     = fm.render("道具店", True, PANEL)
-    surf.blit(st, (dr.x + (dr.width  - st.get_width())  // 2,
-                   dr.y + (dr.height - st.get_height()) // 2))
+    st     = fb_lg.render("道具店", True, PANEL)
+    _CART_R  = 7                                          # 購物車圖示半高
+    _CART_SP = 6                                          # 圖示與文字間距
+    _total_w = _CART_R * 2 + _CART_SP + st.get_width()   # 圖示 + 間距 + 文字
+    _btn_cx  = dr.x + dr.width  // 2
+    _btn_cy  = dr.y + dr.height // 2
+    _cart_cx = _btn_cx - _total_w // 2 + _CART_R
+    _text_x  = _btn_cx - _total_w // 2 + _CART_R * 2 + _CART_SP
+    _draw_icon_cart(surf, _cart_cx, _btn_cy, _CART_R)
+    surf.blit(st, (_text_x, _btn_cy - st.get_height() // 2))
+
+    # ── 金錢（金幣圖示 + 數字，靠右對齊道具店按鈕右邊緣）────
+    _COIN_R   = 11                          # 金幣圖示半徑
+    money_t   = fb_lg.render(f"{player.money}", True, YELLOW)
+    _mtotal_w = _COIN_R * 2 + 5 + money_t.get_width()
+    _mx0      = shop_r.right - _mtotal_w   # 整組左起點
+    _mcy      = pr.y + 14 + money_t.get_height() // 2
+    _draw_icon_coin(surf, _mx0 + _COIN_R, _mcy, _COIN_R)
+    surf.blit(money_t, (_mx0 + _COIN_R * 2 + 5, pr.y + 14))
+
+    # ── 考試倒數提示（道具店按鈕正下方，靠右對齊）──────────────
+    _fmic = _font_micro[0]
+    _w    = _week[0]
+    if _fmic and _w > 0:
+        if _w < 8:
+            _cdwn_txt      = f"距離期中考還有{8 - _w}週"
+            _cdwn_base_col = WHITE
+        elif _w == 8:
+            _cdwn_txt      = "期中考週！"
+            _cdwn_base_col = RED
+        elif _w < 16:
+            _cdwn_txt      = f"距離期末考還有{16 - _w}週"
+            _cdwn_base_col = WHITE
+        else:                                            # _w == 16
+            _cdwn_txt      = "期末考週！"
+            _cdwn_base_col = RED
+        # 第 7、15 週：每秒 4 次閃爍（250ms 週期，前 125ms 紅，後 125ms 正常）
+        if _w in (7, 15):
+            _cdwn_col = RED if (pygame.time.get_ticks() % 250) < 125 else WHITE
+        else:
+            _cdwn_col = _cdwn_base_col
+        _cdwn_s = _fmic.render(_cdwn_txt, True, _cdwn_col)
+        surf.blit(_cdwn_s, (shop_r.right - _cdwn_s.get_width(),
+                            shop_r.bottom + 5))
+
+    # ── 週次日曆（條右邊緣 ↔ 道具店左 中間空白）──────────────
+    sat_right  = bar_x + bar_w + 12   # 條右邊緣 + 間距
+    money_left = shop_r.x - 12
+    CAL_W      = 108
+    ticker_cx  = (sat_right + money_left) // 2
+    ticker_cy  = pr.y + pr.height // 2
+    if money_left - sat_right >= CAL_W + 8:
+        _draw_week_calendar(surf, fm, ticker_cx, ticker_cy, _week[0])
+
     return shop_r
 
 
@@ -1330,6 +2166,7 @@ def _draw_cc_bg(surf: pygame.Surface) -> None:
 
 def _draw_cc_name(surf, fm, fs, mpos):
     """姓名輸入 modal 卡片，回傳「確認」按鈕 Rect。"""
+    fb_lg = _font_bold_lg[0] or fm
     _draw_cc_bg(surf)
     # modal card（整張卡緩慢懸浮）
     _fy = _float_offset(amp=7, speed=0.00170, phase=0.3)
@@ -1341,7 +2178,7 @@ def _draw_cc_name(surf, fm, fs, mpos):
     pygame.draw.rect(surf, PANEL, card, border_radius=20)
     pygame.draw.rect(surf, CYAN, card, 2, border_radius=20)
     # 標題
-    title = fm.render("請輸入角色名字", True, TITLE)
+    title = fb_lg.render("請輸入角色名字", True, TITLE)
     surf.blit(title, (cx + (cw - title.get_width()) // 2, cy + 24))
     # 輸入框
     ir = pygame.Rect(cx + 30, cy + 80, cw - 60, 42)
@@ -1361,7 +2198,7 @@ def _draw_cc_name(surf, fm, fs, mpos):
     ok    = pygame.Rect(cx + (cw - 140) // 2, cy + 180, 140, 46)
     hover = ok.collidepoint(mpos)
     dr    = _premium_btn(surf, ok, BTN_N, hover, radius=14)
-    t     = fm.render("確認", True, WHITE)
+    t     = fb_lg.render("確認", True, WHITE)
     surf.blit(t, (dr.x + (dr.width  - t.get_width())  // 2,
                   dr.y + (dr.height - t.get_height()) // 2))
     return ok
@@ -1369,6 +2206,7 @@ def _draw_cc_name(surf, fm, fs, mpos):
 
 def _draw_cc_dept(surf, fm, fs, options, mpos):
     """系級橫向卡片，回傳各卡 (Rect, 1-based idx) 列表。"""
+    fb_lg = _font_bold_lg[0] or fm
     _draw_cc_bg(surf)
     # ── 垂直置中計算 ──────────────────────────────────────────
     cw, ch = 180, 120
@@ -1387,7 +2225,7 @@ def _draw_cc_dept(surf, fm, fs, options, mpos):
         r     = pygame.Rect(sx + i * (cw + gap), sy, cw, ch)
         hover = r.collidepoint(mpos)
         dr    = _premium_btn(surf, r, BTN_N, hover, radius=16)
-        t     = fm.render(opt, True, WHITE)
+        t     = fb_lg.render(opt, True, WHITE)
         surf.blit(t, (dr.x + (dr.width  - t.get_width())  // 2,
                       dr.y + (dr.height - t.get_height()) // 2))
         rects.append((r, i + 1))
@@ -1396,6 +2234,7 @@ def _draw_cc_dept(surf, fm, fs, options, mpos):
 
 def _draw_cc_drawbacks(surf, fm, fs, drawbacks, sel_indices, max_sel, mpos):
     """負面特質切換卡片，回傳 (card_rects, confirm_btn_rect)。"""
+    fb_lg = _font_bold_lg[0] or fm
     _draw_cc_bg(surf)
     # ── 垂直置中計算 ──────────────────────────────────────────
     cw, ch = 250, 190
@@ -1431,7 +2270,7 @@ def _draw_cc_drawbacks(surf, fm, fs, drawbacks, sel_indices, max_sel, mpos):
         if selected:
             pygame.draw.rect(surf, YELLOW, dr, 2, border_radius=16)
         # name
-        nt = fm.render(d["name"], True, YELLOW if selected else WHITE)
+        nt = fb_lg.render(d["name"], True, YELLOW if selected else WHITE)
         surf.blit(nt, (dr.x + (dr.width - nt.get_width()) // 2, dr.y + 14))
         # desc (wrap)
         desc_lines = _wrap(d["desc"], fs, cw - 20)
@@ -1446,7 +2285,7 @@ def _draw_cc_drawbacks(surf, fm, fs, drawbacks, sel_indices, max_sel, mpos):
     ok    = pygame.Rect((WIN_W - 160) // 2, sy + ch + CARD_BTN_GAP, 160, btn_h)
     hover = ok.collidepoint(mpos)
     dr    = _premium_btn(surf, ok, BTN_N, hover, radius=14)
-    t     = fm.render("確認選擇", True, WHITE)
+    t     = fb_lg.render("確認選擇", True, WHITE)
     surf.blit(t, (dr.x + (dr.width  - t.get_width())  // 2,
                   dr.y + (dr.height - t.get_height()) // 2))
     return card_rects, ok
@@ -1454,6 +2293,7 @@ def _draw_cc_drawbacks(surf, fm, fs, drawbacks, sel_indices, max_sel, mpos):
 
 def _draw_cc_stats(surf, fm, fs, total, vals, raw, active, mpos):
     """能力點分配畫面，回傳 (minus_rects, plus_rects, confirm_rect)。"""
+    fb_lg = _font_bold_lg[0] or fm
     _draw_cc_bg(surf)
     # ── 垂直置中計算 ──────────────────────────────────────────
     btn_sz       = 38
@@ -1493,13 +2333,13 @@ def _draw_cc_stats(surf, fm, fs, total, vals, raw, active, mpos):
 
     for i, (label, ry) in enumerate(zip(labels, row_y)):
         # label
-        lt = fm.render(label, True, WHITE)
+        lt = fb_lg.render(label, True, WHITE)
         surf.blit(lt, (cx - 230, ry + (box_h - lt.get_height()) // 2))
         # [-]
         mr    = pygame.Rect(cx - 130, ry, btn_sz, btn_sz)
         hover = mr.collidepoint(mpos)
         mr_dr = _premium_btn(surf, mr, BTN_N, hover, radius=10)
-        mt    = fm.render("－", True, WHITE)
+        mt    = fb_lg.render("－", True, WHITE)
         surf.blit(mt, (mr_dr.x + (mr_dr.width  - mt.get_width())  // 2,
                        mr_dr.y + (mr_dr.height - mt.get_height()) // 2))
         minus_rects.append(mr)
@@ -1517,7 +2357,7 @@ def _draw_cc_stats(surf, fm, fs, total, vals, raw, active, mpos):
         pr    = pygame.Rect(cx + 20, ry, btn_sz, btn_sz)
         hover = pr.collidepoint(mpos)
         pr_dr = _premium_btn(surf, pr, BTN_N, hover, radius=10)
-        pt    = fm.render("＋", True, WHITE)
+        pt    = fb_lg.render("＋", True, WHITE)
         surf.blit(pt, (pr_dr.x + (pr_dr.width  - pt.get_width())  // 2,
                        pr_dr.y + (pr_dr.height - pt.get_height()) // 2))
         plus_rects.append(pr)
@@ -1528,7 +2368,7 @@ def _draw_cc_stats(surf, fm, fs, total, vals, raw, active, mpos):
     can_confirm = rem >= 0
     ok_col      = BTN_N if can_confirm else DARK_GRAY
     ok_dr       = _premium_btn(surf, ok, ok_col, hover and can_confirm, radius=14)
-    t           = fm.render("確認分配", True, WHITE)
+    t           = fb_lg.render("確認分配", True, WHITE)
     surf.blit(t, (ok_dr.x + (ok_dr.width  - t.get_width())  // 2,
                   ok_dr.y + (ok_dr.height - t.get_height()) // 2))
     return minus_rects, plus_rects, ok
@@ -1536,6 +2376,7 @@ def _draw_cc_stats(surf, fm, fs, total, vals, raw, active, mpos):
 
 def _draw_cc_talent(surf, fm, fs, candidates, sel_idx, mpos):
     """天賦卡片（單選），回傳 (card_rects, confirm_rect)。"""
+    fb_lg = _font_bold_lg[0] or fm
     _draw_cc_bg(surf)
     # ── 垂直置中計算 ──────────────────────────────────────────
     cw, ch = 250, 200
@@ -1562,7 +2403,7 @@ def _draw_cc_talent(surf, fm, fs, candidates, sel_idx, mpos):
         dr       = _premium_btn(surf, r, bg_col, hover, radius=16)
         if selected:
             pygame.draw.rect(surf, YELLOW, dr, 2, border_radius=16)
-        nt = fm.render(t_data["name"], True, YELLOW if selected else WHITE)
+        nt = fb_lg.render(t_data["name"], True, YELLOW if selected else WHITE)
         surf.blit(nt, (dr.x + (dr.width - nt.get_width()) // 2, dr.y + 18))
         desc_lines = _wrap(t_data["desc"], fs, cw - 20)
         for li, dl in enumerate(desc_lines):
@@ -1575,7 +2416,7 @@ def _draw_cc_talent(surf, fm, fs, candidates, sel_idx, mpos):
     can_confirm = sel_idx is not None
     ok_col      = BTN_N if can_confirm else DARK_GRAY
     ok_dr       = _premium_btn(surf, ok, ok_col, hover and can_confirm, radius=14)
-    t           = fm.render("確認選擇", True, WHITE)
+    t           = fb_lg.render("確認選擇", True, WHITE)
     surf.blit(t, (ok_dr.x + (ok_dr.width  - t.get_width())  // 2,
                   ok_dr.y + (ok_dr.height - t.get_height()) // 2))
     return card_rects, ok
@@ -1685,6 +2526,206 @@ _ACTION_INFO = {
     "好好休息": ("恢復體力 6", "自我滿足度 +8"),
     "幫助朋友": ("消耗體力 2", "自我滿足度 +12"),
 }
+
+
+def _draw_choice_popup(surf, fm, fs, mode, choices, log, prompt_text,
+                       yn_labels, mpos):
+    """
+    畫面中央通用選項彈出視窗。
+      mode == "choices"（非標準）→ 顯示題目（log 末尾）+ 選項按鈕（縱排）
+      mode == "yn"               → 顯示 prompt + 是/否按鈕（橫排）
+    回傳 [(rect, val), ...] 可點擊按鈕清單。
+    """
+    fb    = _font_bold[0]    or fs   # 粗體 size-17（題目 / 按鈕文字）
+    fb_lg = _font_bold_lg[0] or fm  # 粗體 size-22（yn 按鈕）
+    # ── 全螢幕遮罩 ────────────────────────────────────────────
+    ov = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
+    ov.fill((0, 0, 0, 155))
+    surf.blit(ov, (0, 0))
+
+    PAD_X   = 32   # 視窗左右內距
+    PAD_TOP = 22
+    PAD_BOT = 24
+    BTN_PX  = 16   # 按鈕水平內距
+    BTN_PY  = 10   # 按鈕垂直內距
+    BTN_GAP = 8    # 按鈕間距
+    SEP_H   = 14   # 題目與按鈕之間間距
+
+    popup_w    = min(WIN_W - 40, 900)
+    text_w     = popup_w - PAD_X * 2
+    btn_text_w = text_w - BTN_PX * 2
+
+    # ── 題目文字準備 ─────────────────────────────────────────
+    _yn_ctx_count = 0   # yn 模式：紀錄「文案背景行數」，用於分色渲染
+    if mode == "yn":
+        raw = prompt_text or ""
+        # 取最近幾條 log 純字串作為文案背景（最多 3 條）
+        ctx_entries = [l for l in log if isinstance(l, str)][-3:]
+        ctx_lines   = []
+        for entry in ctx_entries:
+            ctx_lines.extend(_wrap(entry, fb, text_w))
+        _yn_ctx_count = len(ctx_lines)
+        # 問題本身接在文案後面
+        q_lines = ctx_lines + (_wrap(raw, fb, text_w) if raw else [])
+    else:
+        q_lines = list(log[-6:]) if log else []
+
+    q_lh = fb.get_height() + 4
+    q_h  = len(q_lines) * q_lh
+
+    # ── 按鈕佈局計算 ─────────────────────────────────────────
+    btn_layout = []   # [(wrapped_lines, btn_h, val), ...]
+    if mode == "yn":
+        yn_half_w = (text_w - BTN_GAP) // 2 - BTN_PX * 2
+        for label, val in [(yn_labels[0], True), (yn_labels[1], False)]:
+            lines = _wrap(label, fb_lg, yn_half_w)
+            bh    = max(46, len(lines) * (fb_lg.get_height() + 3) + BTN_PY * 2)
+            btn_layout.append((lines, bh, val))
+        btns_h = max(bh for _, bh, _ in btn_layout)
+    else:
+        for i, label in enumerate(choices):
+            lines = _wrap(_clean(label), fb, btn_text_w)
+            bh    = max(46, len(lines) * (fb.get_height() + 3) + BTN_PY * 2)
+            btn_layout.append((lines, bh, i + 1))
+        btns_h = (sum(bh + BTN_GAP for _, bh, _ in btn_layout) - BTN_GAP
+                  if btn_layout else 0)
+
+    sep_actual = SEP_H if q_lines else 0
+    total_h    = min(PAD_TOP + q_h + sep_actual + btns_h + PAD_BOT,
+                     WIN_H - 60)
+    px = (WIN_W - popup_w) // 2
+    py = max(30, (WIN_H - total_h) // 2)
+
+    # ── 投影 + 卡片 ──────────────────────────────────────────
+    sh = pygame.Surface((popup_w, total_h), pygame.SRCALPHA)
+    pygame.draw.rect(sh, (0, 0, 0, 55),
+                     pygame.Rect(0, 0, popup_w, total_h), border_radius=18)
+    surf.blit(sh, (px + 4, py + 4))
+    card = pygame.Surface((popup_w, total_h), pygame.SRCALPHA)
+    pygame.draw.rect(card, (255, 248, 238, 248),
+                     pygame.Rect(0, 0, popup_w, total_h), border_radius=18)
+    surf.blit(card, (px, py))
+    pygame.draw.rect(surf, CYAN,
+                     pygame.Rect(px, py, popup_w, total_h), 2, border_radius=18)
+
+    # ── 設定 clip 防溢出 ──────────────────────────────────────
+    old_clip = surf.get_clip()
+    inner    = pygame.Rect(px + 2, py + 2, popup_w - 4, total_h - 4)
+    surf.set_clip(inner)
+
+    # ── 題目文字 ─────────────────────────────────────────────
+    # yn 模式：文案背景行（前 _yn_ctx_count 行）用暖棕灰色，
+    # 問題本身（後段）用正常深棕色，形成視覺層次。
+    cur_y = py + PAD_TOP
+    for i, line in enumerate(q_lines):
+        line_col = GRAY if (mode == "yn" and i < _yn_ctx_count) else WHITE
+        lt = fb.render(line, True, line_col)
+        surf.blit(lt, (px + PAD_X, cur_y))
+        cur_y += q_lh
+
+    if q_lines and sep_actual:
+        mid_sep = cur_y + sep_actual // 2
+        pygame.draw.line(surf, (210, 190, 165),
+                         (px + PAD_X, mid_sep), (px + popup_w - PAD_X, mid_sep), 1)
+        cur_y += sep_actual
+
+    # ── 按鈕 ─────────────────────────────────────────────────
+    btn_rects = []
+    bx = px + PAD_X
+    bw = text_w
+
+    if mode == "yn":
+        yw    = (bw - BTN_GAP) // 2
+        yn_bh = max(bh for _, bh, _ in btn_layout)
+        for j, (lines, _, val) in enumerate(btn_layout):
+            br    = pygame.Rect(bx + j * (yw + BTN_GAP), cur_y, yw, yn_bh)
+            col_b = BTN_N if val else DARK_GRAY
+            hover = br.collidepoint(mpos)
+            dr    = _premium_btn(surf, br, col_b, hover, radius=12)
+            th    = len(lines) * (fb_lg.get_height() + 3)
+            ty    = dr.y + (dr.height - th) // 2
+            for line in lines:
+                lt = fb_lg.render(line, True, PANEL)
+                surf.blit(lt, (dr.x + (dr.width - lt.get_width()) // 2, ty))
+                ty += fb_lg.get_height() + 3
+            btn_rects.append((br, val))
+    else:
+        for lines, bh, val in btn_layout:
+            br    = pygame.Rect(bx, cur_y, bw, bh)
+            hover = br.collidepoint(mpos)
+            dr    = _premium_btn(surf, br, BTN_N, hover, radius=12)
+            th    = len(lines) * (fb.get_height() + 3)
+            ty    = dr.y + (dr.height - th) // 2
+            for line in lines:
+                lt = fb.render(line, True, PANEL)
+                surf.blit(lt, (dr.x + (dr.width - lt.get_width()) // 2, ty))
+                ty += fb.get_height() + 3
+            btn_rects.append((br, val))
+            cur_y += bh + BTN_GAP
+
+    surf.set_clip(old_clip)
+    return btn_rects
+
+
+def _draw_subj_popup(surf, fm, fs, mpos):
+    """
+    在畫面中央繪製「選擇科目」彈出視窗，並回傳按鈕清單 [(rect, idx), ...]。
+    idx 為 1-based；玩家點擊後由事件迴圈負責解除 popup 並回傳結果。
+    """
+    fb    = _font_bold[0]    or fs   # 粗體 size-17（按鈕文字）
+    fb_lg = _font_bold_lg[0] or fm  # 粗體 size-22（標題）
+    # ── 半透明暗色遮罩 ────────────────────────────────────────
+    ov = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
+    ov.fill((0, 0, 0, 160))
+    surf.blit(ov, (0, 0))
+
+    n       = len(_subj_popup_opts)
+    bw      = 300          # 按鈕寬度
+    bh      = 46           # 按鈕高度
+    gap     = 10           # 按鈕間距
+    pad_x   = 40           # 左右內距
+    pad_top = 20           # 頂部內距（標題上方）
+    pad_mid = 14           # 標題與按鈕之間
+    pad_bot = 24           # 最後按鈕到底部
+    sep_h   = 1            # 標題下方分隔線高度
+
+    total_w = bw + pad_x * 2
+    title_h = fm.get_height()
+    total_h = (pad_top + title_h + 6 + sep_h + pad_mid
+               + n * bh + max(n - 1, 0) * gap
+               + pad_bot)
+
+    px = (WIN_W - total_w) // 2
+    py = (WIN_H - total_h) // 2
+
+    # ── 視窗背景 ──────────────────────────────────────────────
+    box = pygame.Rect(px, py, total_w, total_h)
+    pygame.draw.rect(surf, (38, 24, 14), box, border_radius=18)
+    pygame.draw.rect(surf, CYAN,         box, 2, border_radius=18)
+
+    # ── 標題 ──────────────────────────────────────────────────
+    ttx = fb_lg.render(_subj_popup_title[0], True, PANEL)
+    surf.blit(ttx, (px + (total_w - ttx.get_width()) // 2, py + pad_top))
+
+    # 標題下分隔線
+    line_y = py + pad_top + title_h + 6
+    pygame.draw.line(surf, (CYAN[0], CYAN[1], CYAN[2]),
+                     (px + 18, line_y), (px + total_w - 18, line_y), 1)
+
+    # ── 選項按鈕 ──────────────────────────────────────────────
+    bx  = px + pad_x
+    by0 = line_y + sep_h + pad_mid
+    btn_list = []
+    for i, label in enumerate(_subj_popup_opts):
+        br    = pygame.Rect(bx, by0 + i * (bh + gap), bw, bh)
+        hover = br.collidepoint(mpos)
+        dr    = _premium_btn(surf, br, BTN_N, hover, radius=12)
+        lt    = fb.render(label, True, PANEL)
+        surf.blit(lt, (dr.x + (dr.width  - lt.get_width())  // 2,
+                       dr.y + (dr.height - lt.get_height()) // 2))
+        btn_list.append((br, i + 1))
+
+    return btn_list
 
 
 def _draw_action_popup(surf, fs):
@@ -1805,20 +2846,32 @@ def _draw_action_popup(surf, fs):
 
 def _draw_action_panel(surf, fm, fs, mode, choices, log, prompt, tvalue, rect, time_left, mpos):
     """
-    新版底部面板。
+    新版底部面板（浮動卡片）。
     rect: 整個底部區域（含 TAB_H 標籤列）
     回傳 (content_rects, end_week_btn)
     """
-    # ── 面板背景 ─────────────────────────────────────────────
-    if "input" in _grads:
-        surf.blit(_grads["input"], rect.topleft)
-    else:
-        pygame.draw.rect(surf, PANEL, rect)
-    pygame.draw.rect(surf, CYAN, rect, 2, border_radius=0)
+    fb    = _font_bold[0]    or fs   # 粗體 size-17
+    fb_lg = _font_bold_lg[0] or fm  # 粗體 size-22
+    M  = 8
+    pr = pygame.Rect(rect.x + M, rect.y + M,
+                     rect.width - M * 2, rect.height - M * 2)
+
+    # ── 投影 ──────────────────────────────────────────────────
+    sh = pygame.Surface((pr.width, pr.height), pygame.SRCALPHA)
+    pygame.draw.rect(sh, (0, 0, 0, 52),
+                     pygame.Rect(0, 0, pr.width, pr.height), border_radius=14)
+    surf.blit(sh, (pr.x + 4, pr.y + 4))
+
+    # ── 卡片底色 ──────────────────────────────────────────────
+    card = pygame.Surface((pr.width, pr.height), pygame.SRCALPHA)
+    pygame.draw.rect(card, (255, 244, 228, 238),
+                     pygame.Rect(0, 0, pr.width, pr.height), border_radius=14)
+    surf.blit(card, pr.topleft)
+    pygame.draw.rect(surf, CYAN, pr, 2, border_radius=14)
 
     # ── 標籤列 ───────────────────────────────────────────────
-    tab_rect    = pygame.Rect(rect.x, rect.y, rect.width, TAB_H)
-    content_top = rect.y + TAB_H
+    tab_rect    = pygame.Rect(pr.x, pr.y, pr.width, TAB_H)
+    content_top = pr.y + TAB_H
 
     # ── 預先計算 hover 狀態（供標籤列 tooltip 使用）─────────
     is_std_action = (mode == "choices" and
@@ -1828,9 +2881,9 @@ def _draw_action_panel(surf, fm, fs, mode, choices, log, prompt, tvalue, rect, t
         action_choices_pre = [c for c in choices if c != "🏪 前往道具店"]
         n_pre    = len(action_choices_pre)
         r_pre    = 36
-        sp_pre   = min(140, (rect.width - 40) // max(n_pre, 1))
-        sx_pre   = rect.x + (rect.width - n_pre * sp_pre) // 2 + sp_pre // 2
-        cy_pre   = content_top + r_pre + ((rect.height - TAB_H - r_pre * 2 - fs.get_height() - 8) // 2)
+        sp_pre   = min(140, (pr.width - 40) // max(n_pre, 1))
+        sx_pre   = pr.x + (pr.width - n_pre * sp_pre) // 2 + sp_pre // 2
+        cy_pre   = content_top + r_pre + ((pr.height - TAB_H - r_pre * 2 - fs.get_height() - 8) // 2)
         for i, lbl in enumerate(action_choices_pre):
             cx_i = sx_pre + i * sp_pre
             if pygame.Rect(cx_i - r_pre - 8, cy_pre - r_pre - 8,
@@ -1838,37 +2891,63 @@ def _draw_action_panel(surf, fm, fs, mode, choices, log, prompt, tvalue, rect, t
                 hovered_action = lbl
                 break
 
-    # 左側：剩餘時間點
-    time_txt = fs.render(f"剩餘時間點：{time_left}", True, WHITE)
-    surf.blit(time_txt, (tab_rect.x + 14, tab_rect.y + (TAB_H - time_txt.get_height()) // 2))
+    # 左側：剩餘時間點（含震動 / 紅色閃動特效）
+    _now_ms      = pygame.time.get_ticks()
+    _shake_elapsed = _now_ms - _time_shake_t0[0] if _time_shake_t0[0] > 0 else _TIME_SHAKE_MS
+    if _time_shake_t0[0] > 0 and _shake_elapsed < _TIME_SHAKE_MS:
+        _t     = _shake_elapsed / _TIME_SHAKE_MS          # 0→1
+        _decay = (1.0 - _t) ** 1.5
+        _offset_x = int(math.sin(_t * math.pi * 5) * 10 * _decay)
+        _mix   = _decay                                   # 1→0，紅色→正常色
+        _time_col = (
+            int(RED[0] * _mix + WHITE[0] * (1.0 - _mix)),
+            int(RED[1] * _mix + WHITE[1] * (1.0 - _mix)),
+            int(RED[2] * _mix + WHITE[2] * (1.0 - _mix)),
+        )
+    else:
+        _offset_x = 0
+        _time_col = WHITE
+        if _time_shake_t0[0] > 0 and _shake_elapsed >= _TIME_SHAKE_MS:
+            _time_shake_t0[0] = 0   # 動畫結束後重置
+    # 時鐘圖示 + 時間文字（整組跟著震動偏移）
+    _CLK_R   = 9                          # 時鐘圖示半徑
+    _clk_x0  = tab_rect.x + 14 + _offset_x   # 整組左起點
+    _clk_cy  = tab_rect.y + TAB_H // 2       # 垂直中心
+    _draw_icon_clock(surf,
+                     _clk_x0 + _CLK_R,        # 圖示圓心 x
+                     _clk_cy, _CLK_R,
+                     col=_time_col)            # 指針顏色跟著閃動色
+    time_txt = fb.render(f"剩餘時間點：{time_left}", True, _time_col)
+    surf.blit(time_txt, (_clk_x0 + _CLK_R * 2 + 5,
+                         tab_rect.y + (TAB_H - time_txt.get_height()) // 2))
 
     # 中間：行動 hover 提示（體力消耗 + 預期效果）
     if hovered_action and hovered_action in _ACTION_INFO:
         cost_str, eff_str = _ACTION_INFO[hovered_action]
         is_restore = cost_str.startswith("恢復")
         cost_col   = GREEN if is_restore else RED
-        tip_x = tab_rect.x + 14 + time_txt.get_width() + 24
-        tip_y = tab_rect.y + (TAB_H - fs.get_height()) // 2
-        cost_t = fs.render(cost_str, True, cost_col)
+        tip_x = _clk_x0 + _CLK_R * 2 + 5 + time_txt.get_width() + 24
+        tip_y = tab_rect.y + (TAB_H - fb.get_height()) // 2
+        cost_t = fb.render(cost_str, True, cost_col)
         surf.blit(cost_t, (tip_x, tip_y))
         sep_x  = tip_x + cost_t.get_width() + 10
         sep_t  = fs.render("|", True, GRAY)
         surf.blit(sep_t, (sep_x, tip_y))
-        eff_t  = fs.render(eff_str, True, YELLOW)
+        eff_t  = fb.render(eff_str, True, YELLOW)
         surf.blit(eff_t, (sep_x + sep_t.get_width() + 10, tip_y))
 
-    # 右側：結束本週按鈕
-    ew_btn   = pygame.Rect(rect.right - 110, tab_rect.y + 4, 100, TAB_H - 8)
+    # 右側：結束本週按鈕（紅色，類似離開道具店）
+    ew_btn   = pygame.Rect(pr.right - 110, tab_rect.y + 4, 100, TAB_H - 8)
     ew_hover = ew_btn.collidepoint(mpos)
-    ew_dr    = _premium_btn(surf, ew_btn, DARK_GRAY, ew_hover, radius=10)
-    ew_t     = fs.render("結束本週", True, WHITE)
+    ew_dr    = _premium_btn(surf, ew_btn, (200, 78, 58), ew_hover, radius=10)
+    ew_t     = fb.render("結束本週", True, PANEL)
     surf.blit(ew_t, (ew_dr.x + (ew_dr.width  - ew_t.get_width())  // 2,
                      ew_dr.y + (ew_dr.height - ew_t.get_height()) // 2))
 
     # 分隔線
-    pygame.draw.line(surf, GRAY, (rect.x, content_top), (rect.right, content_top), 1)
+    pygame.draw.line(surf, GRAY, (pr.x, content_top), (pr.right, content_top), 1)
 
-    content_rect = pygame.Rect(rect.x, content_top, rect.width, rect.height - TAB_H)
+    content_rect = pygame.Rect(pr.x, content_top, pr.width, pr.height - TAB_H)
     content_rects = []
 
     # ── 內容區：依模式切換 ────────────────────────────────────
@@ -1878,25 +2957,67 @@ def _draw_action_panel(surf, fm, fs, mode, choices, log, prompt, tvalue, rect, t
         action_choices = [c for c in choices if c != "🏪 前往道具店"]
         n       = len(action_choices)
         r       = 36
-        spacing = min(140, (rect.width - 40) // max(n, 1))
+        spacing = min(140, (pr.width - 40) // max(n, 1))
         total_w = n * spacing
-        sx      = rect.x + (rect.width - total_w) // 2 + spacing // 2
+        sx      = pr.x + (pr.width - total_w) // 2 + spacing // 2
         # 垂直：圓心上移，留空間給下方標籤
-        lh      = fs.get_height()
+        fb      = _font_bold[0] or fs      # 粗體字型（行動標籤）
+        lh      = fb.get_height()
         cy_btn  = content_top + r + ((content_rect.height - r * 2 - lh - 8) // 2)
+
+        ms_now  = pygame.time.get_ticks()
 
         for i, label in enumerate(action_choices):
             cx_btn   = sx + i * spacing
             orig_idx = choices.index(label) + 1
             hover    = pygame.Rect(cx_btn - r - 8, cy_btn - r - 8,
                                    (r + 8) * 2, (r + 8) * 2).collidepoint(mpos)
-            ar       = _premium_circle(surf, cx_btn, cy_btn, r,
-                                       BTN_N, hover, key=(cx_btn, cy_btn))
-            brect    = pygame.Rect(cx_btn - ar, cy_btn - ar, ar * 2, ar * 2)
-            # 標籤顯示在按鈕正下方（文字移出按鈕外）
-            clean_label = label.replace("🏪 ", "")
-            lt = fs.render(clean_label, True, WHITE)
-            surf.blit(lt, (cx_btn - lt.get_width() // 2, cy_btn + r + 6))
+
+            # ── 按鈕脈動：1 Hz，動畫段速度與原 2Hz 相同 ───────────
+            # 每 1000ms 週期：前 500ms 播完一個完整 sin 週期（與原同速），
+            # 後 500ms 靜止在自然大小；sin(0)=sin(τ)=0 確保首尾無跳變。
+            _PULSE_CYCLE = 1000
+            _PULSE_SPAN  = 500
+            _t_p         = ms_now % _PULSE_CYCLE
+            if _t_p < _PULSE_SPAN:
+                _pulse_phase = (_t_p / _PULSE_SPAN) * math.tau
+                r_pulse = r + int(math.sin(_pulse_phase) * 3.0)
+            else:
+                r_pulse = r   # 靜止
+
+            ar    = _premium_circle(surf, cx_btn, cy_btn, r_pulse,
+                                    BTN_N, hover, key=(cx_btn, cy_btn))
+            brect = pygame.Rect(cx_btn - r - 8, cy_btn - r - 8,
+                                (r + 8) * 2, (r + 8) * 2)   # 點擊判定用原始 r
+
+            # ── 波浪標籤：每 2 秒 1 次，動畫段速度與原 1Hz 相同 ──────
+            # 每 2000ms 週期：前 1000ms 播波浪（同速），後 1000ms 靜止；
+            # 以 Hann 包絡 sin(π·t) 讓振幅平滑淡入淡出，避免首尾跳變。
+            clean_label  = label.replace("🏪 ", "")
+            _WAVE_CYCLE  = 2000
+            _WAVE_SPAN   = 1000
+            _t_w         = ms_now % _WAVE_CYCLE
+            wave_amp     = 3.5    # 峰值振幅（像素）
+            wave_step    = 0.9    # 相鄰字元相位差（弧度）
+
+            ch_surfs  = [fb.render(ch, True, WHITE) for ch in clean_label]
+            txt_total = sum(s.get_width() for s in ch_surfs)
+            x_cur     = cx_btn - txt_total // 2
+            label_y   = cy_btn + r + 12
+
+            if _t_w < _WAVE_SPAN:
+                _t_norm    = _t_w / _WAVE_SPAN          # 0.0 → 1.0
+                _wave_base = _t_norm * math.tau          # 與原 1Hz 相同速度
+                _env       = math.sin(_t_norm * math.pi) # Hann 包絡，首尾振幅→0
+                for j, ch_s in enumerate(ch_surfs):
+                    y_off = int(wave_amp * _env * math.sin(_wave_base - j * wave_step))
+                    surf.blit(ch_s, (x_cur, label_y + y_off))
+                    x_cur += ch_s.get_width()
+            else:
+                for ch_s in ch_surfs:                   # 靜止，全部 y_off=0
+                    surf.blit(ch_s, (x_cur, label_y))
+                    x_cur += ch_s.get_width()
+
             content_rects.append((brect, orig_idx))
 
     elif mode == "choices" and not is_std_action:
@@ -1909,9 +3030,9 @@ def _draw_action_panel(surf, fm, fs, mode, choices, log, prompt, tvalue, rect, t
         _draw_panel_log(surf, fs, log, log_area, lines=LOG_LINES)
 
         # 按鈕區從 log 下方開始
-        bw   = (rect.width - 36) // 2 - 6
+        bw   = (pr.width - 36) // 2 - 6
         bh   = 40
-        px   = rect.x + 12
+        px   = pr.x + 12
         py   = content_top + log_h + 6
         for i, label in enumerate(choices):
             col = i % 2
@@ -1919,7 +3040,7 @@ def _draw_action_panel(surf, fm, fs, mode, choices, log, prompt, tvalue, rect, t
             br    = pygame.Rect(px + col * (bw + 12), py + row * (bh + 8), bw, bh)
             hover = br.collidepoint(mpos)
             dr    = _premium_btn(surf, br, BTN_N, hover, radius=12)
-            lt    = fs.render(label, True, PANEL)
+            lt    = fb.render(label, True, PANEL)
             surf.blit(lt, (dr.x + (dr.width  - lt.get_width())  // 2,
                            dr.y + (dr.height - lt.get_height()) // 2))
             content_rects.append((br, i + 1))
@@ -1934,15 +3055,15 @@ def _draw_action_panel(surf, fm, fs, mode, choices, log, prompt, tvalue, rect, t
         if prompt[0]:
             for j, pln in enumerate(_wrap(prompt[0], fs, content_rect.width - 28)):
                 pt = fs.render(pln, True, RED)
-                surf.blit(pt, (rect.x + 14,
+                surf.blit(pt, (pr.x + 14,
                                prompt_y - (len(_wrap(prompt[0], fs, content_rect.width - 28)) - 1 - j)
                                * (fs.get_height() + 3)))
         for i, (label, val) in enumerate([(_yn_labels[1], False), (_yn_labels[0], True)]):
-            br    = pygame.Rect(rect.x + 14 + i * (BTN_W2 + BTN_SP), btn_y, BTN_W2, BTN_H2)
+            br    = pygame.Rect(pr.x + 14 + i * (BTN_W2 + BTN_SP), btn_y, BTN_W2, BTN_H2)
             hover = br.collidepoint(mpos)
             col_b = BTN_N if val else DARK_GRAY
             dr    = _premium_btn(surf, br, col_b, hover, radius=12)
-            lt    = fm.render(label, True, PANEL)
+            lt    = fb_lg.render(label, True, PANEL)
             surf.blit(lt, (dr.x + (dr.width  - lt.get_width())  // 2,
                            dr.y + (dr.height - lt.get_height()) // 2))
             content_rects.append((br, val))
@@ -1951,8 +3072,8 @@ def _draw_action_panel(surf, fm, fs, mode, choices, log, prompt, tvalue, rect, t
         # ── 文字輸入框 ────────────────────────────────────────
         _draw_panel_log(surf, fs, log, content_rect, lines=2)
         surf.blit(fs.render(prompt[0], True, GRAY),
-                  (rect.x + 14, content_top + content_rect.height - 88))
-        ir2 = pygame.Rect(rect.x + 14, content_top + content_rect.height - 64, rect.width - 140, 36)
+                  (pr.x + 14, content_top + content_rect.height - 88))
+        ir2 = pygame.Rect(pr.x + 14, content_top + content_rect.height - 64, pr.width - 140, 36)
         pygame.draw.rect(surf, MILK, ir2, border_radius=10)
         t_done = fm.render(tvalue[0], True, BLACK)
         t_comp = fm.render(_composing[0], True, (150, 90, 180)) if _composing[0] else None
@@ -1962,9 +3083,9 @@ def _draw_action_panel(surf, fm, fs, mode, choices, log, prompt, tvalue, rect, t
         if t_comp:
             surf.blit(t_comp, (xo, ir2.y + 5)); xo += t_comp.get_width()
         surf.blit(t_cur, (xo, ir2.y + 5))
-        ok    = pygame.Rect(rect.right - 118, ir2.y, 104, 36)
+        ok    = pygame.Rect(pr.right - 118, ir2.y, 104, 36)
         ok_dr = _premium_btn(surf, ok, BTN_N, ok.collidepoint(mpos), radius=12)
-        ot    = fm.render("確認", True, PANEL)
+        ot    = fb_lg.render("確認", True, PANEL)
         surf.blit(ot, (ok_dr.x + (ok_dr.width  - ot.get_width())  // 2,
                        ok_dr.y + (ok_dr.height - ot.get_height()) // 2))
         content_rects.append((ok, "__ok__"))
@@ -2020,29 +3141,37 @@ _EXP_LVL_THR    = [0, 30, 60, 90]
 
 
 def _side_panel_bg(surf: pygame.Surface, x: int, y: int, w: int, h: int) -> None:
-    """繪製半透明深棕圓角面板底色。"""
+    """繪製白色筆記本卡片底色（陰影 + 奶白底 + 暖棕邊框）。"""
+    # 投影
+    sh = pygame.Surface((w, h), pygame.SRCALPHA)
+    pygame.draw.rect(sh, (0, 0, 0, 48), pygame.Rect(0, 0, w, h), border_radius=13)
+    surf.blit(sh, (x + 3, y + 4))
+    # 卡片底色
     bg = pygame.Surface((w, h), pygame.SRCALPHA)
-    pygame.draw.rect(bg, (32, 18, 6, 190),  pygame.Rect(0, 0, w, h), border_radius=12)
-    pygame.draw.rect(bg, (105, 68, 35, 210), pygame.Rect(0, 0, w, h), 1, border_radius=12)
+    pygame.draw.rect(bg, (251, 248, 243, 242), pygame.Rect(0, 0, w, h), border_radius=13)
     surf.blit(bg, (x, y))
+    # 邊框
+    pygame.draw.rect(surf, (185, 163, 138), pygame.Rect(x, y, w, h), 1, border_radius=13)
 
 
 def _draw_exp_panel(surf: pygame.Surface, fm, fmic, player) -> None:
     """左側：各科課業熟練度面板（進度條 + 等級）。"""
     if player is None:
         return
+    fb    = _font_bold[0]    or fmic  # 粗體 size-17（等級徽章）
+    fb_lg = _font_bold_lg[0] or fm   # 粗體 size-22（標題 / 科目名）
     PW  = _SIDE_PANEL_W
     PAD = 9
-    sx, sy = 6, STATUS_H + 6
-    sh  = CHAR_H - 12
+    sx, sy = 8, STATUS_H + 8
+    sh  = CHAR_H - 16
 
     _side_panel_bg(surf, sx, sy, PW, sh)
 
     # 標題
-    title = fm.render("課業熟練度", True, YELLOW)
+    title = fb_lg.render("課業熟練度", True, YELLOW)
     surf.blit(title, (sx + (PW - title.get_width()) // 2, sy + 7))
     div_y = sy + 7 + title.get_height() + 5
-    pygame.draw.line(surf, (105, 68, 35),
+    pygame.draw.line(surf, (205, 188, 168),
                      (sx + PAD, div_y), (sx + PW - PAD, div_y))
 
     # 每科行高（平分剩餘高度）
@@ -2062,25 +3191,27 @@ def _draw_exp_panel(surf: pygame.Surface, fm, fmic, player) -> None:
         lvl_name = _EXP_LVL_NAMES[lvl]
 
         # 科目短名（左）+ 等級名（右）
-        lbl  = fm.render(short, True, PANEL)
-        badge = fmic.render(lvl_name, True, col)
+        lbl  = fb_lg.render(short, True, WHITE)      # 粗體科目名
+        badge = fb.render(lvl_name, True, col)       # 粗體等級徽章
         surf.blit(lbl,   (sx + PAD, row_y))
         surf.blit(badge, (sx + PW - PAD - badge.get_width(),
-                          row_y + (fm.get_height() - badge.get_height()) // 2))
+                          row_y + (fb_lg.get_height() - badge.get_height()) // 2))
 
-        # 進度條底色
-        by = row_y + fm.get_height() + 3
-        pygame.draw.rect(surf, (65, 42, 22),
-                         pygame.Rect(sx + PAD, by, bar_w, 7), border_radius=3)
+        # 進度條底色（改為淺灰）
+        bar_h = 18                                              # 加粗
+        by = row_y + fb_lg.get_height() + 3
+        pygame.draw.rect(surf, (215, 204, 192),
+                         pygame.Rect(sx + PAD, by, bar_w, bar_h), border_radius=4)
         # 進度條填色
         fw = int(bar_w * exp / 100)
         if fw > 0:
             pygame.draw.rect(surf, col,
-                             pygame.Rect(sx + PAD, by, fw, 7), border_radius=3)
+                             pygame.Rect(sx + PAD, by, fw, bar_h), border_radius=4)
 
-        # exp 數字
-        val_lbl = fmic.render(f"{exp} / 100", True, (148, 105, 68))
-        surf.blit(val_lbl, (sx + PAD, by + 10))
+        # exp 數字（置中於條內）
+        val_lbl = fmic.render(f"{exp} / 100", True, PANEL)
+        surf.blit(val_lbl, (sx + PAD + (bar_w - val_lbl.get_width()) // 2,
+                            by + (bar_h - val_lbl.get_height()) // 2))
 
         row_y += row_h
 
@@ -2089,19 +3220,20 @@ def _draw_grade_panel(surf: pygame.Surface, fm, fmic, player) -> None:
     """右側：已發生成績記錄面板（未公布項目顯示 ──）。"""
     if player is None:
         return
+    fb_lg = _font_bold_lg[0] or fm   # 粗體 size-22（標題 / 科目名 / 分數）
     PW  = _SIDE_PANEL_W
     PAD = 9
-    sx  = WIN_W - 6 - PW
-    sy  = STATUS_H + 6
-    sh  = CHAR_H - 12
+    sx  = WIN_W - 8 - PW
+    sy  = STATUS_H + 8
+    sh  = CHAR_H - 16
 
     _side_panel_bg(surf, sx, sy, PW, sh)
 
     # 標題
-    title = fm.render("成績記錄", True, YELLOW)
+    title = fb_lg.render("成績記錄", True, YELLOW)
     surf.blit(title, (sx + (PW - title.get_width()) // 2, sy + 7))
     div_y = sy + 7 + title.get_height() + 5
-    pygame.draw.line(surf, (105, 68, 35),
+    pygame.draw.line(surf, (205, 188, 168),
                      (sx + PAD, div_y), (sx + PW - PAD, div_y))
 
     # 只顯示已有分數的欄位
@@ -2122,19 +3254,19 @@ def _draw_grade_panel(surf: pygame.Surface, fm, fmic, player) -> None:
         val = player.grades.get(key, 0.0)
 
         # 科目名（左）+ 佔比（右）
-        lbl_s = fm.render(label, True, PANEL)
+        lbl_s = fb_lg.render(label, True, WHITE)        # 粗體科目名
         wt_s  = fmic.render(weight, True, (130, 90, 55))
         surf.blit(lbl_s, (sx + PAD, row_y))
         surf.blit(wt_s,  (sx + PW - PAD - wt_s.get_width(),
-                           row_y + (fm.get_height() - wt_s.get_height()) // 2))
+                           row_y + (fb_lg.get_height() - wt_s.get_height()) // 2))
 
         # 分數
         col       = GREEN if val >= 80 else (YELLOW if val >= 60 else RED)
         score_str = f"{val:.1f}"
-        score_s   = fm.render(score_str, True, col)
+        score_s   = fb_lg.render(score_str, True, col)
         surf.blit(score_s,
                   (sx + (PW - score_s.get_width()) // 2,
-                   row_y + fm.get_height() + 3))
+                   row_y + fb_lg.get_height() + 3))
 
         row_y += row_h
 
@@ -2161,7 +3293,7 @@ def _draw_character_art(surf, rect):
         (cx - skirt_b_w // 2, body_bot_y),
     ]
     pygame.draw.polygon(surf, BTN_H, skirt_pts)
-    pygame.draw.polygon(surf, CYAN,  skirt_pts, 2)
+    pygame.draw.polygon(surf, (78, 165, 210),  skirt_pts, 2)
 
     # 裙子腰帶
     waist_r = pygame.Rect(cx - 30, body_top_y - 6, 60, 14)
@@ -2170,7 +3302,7 @@ def _draw_character_art(surf, rect):
     # 上衣（圓角矩形）
     top_r = pygame.Rect(cx - 28, rect.y + 100, 56, 52)
     pygame.draw.rect(surf, MILK, top_r, border_radius=8)
-    pygame.draw.rect(surf, CYAN, top_r, 2, border_radius=8)
+    pygame.draw.rect(surf, (78, 165, 210), top_r, 2, border_radius=8)
 
     # 衣領小V
     collar_pts = [(cx, rect.y + 108), (cx - 10, rect.y + 100), (cx + 10, rect.y + 100)]
@@ -2180,7 +3312,7 @@ def _draw_character_art(surf, rect):
     for side in (-1, 1):
         arm_r = pygame.Rect(cx + side * 32 - 10, rect.y + 105, 18, 44)
         pygame.draw.rect(surf, MILK, arm_r, border_radius=9)
-        pygame.draw.rect(surf, CYAN, arm_r, 1, border_radius=9)
+        pygame.draw.rect(surf, (78, 165, 210), arm_r, 1, border_radius=9)
 
     # ── 頸部 ─────────────────────────────────────────────────
     pygame.draw.rect(surf, MILK, (cx - 9, rect.y + 74, 18, 28), border_radius=5)
@@ -2188,7 +3320,7 @@ def _draw_character_art(surf, rect):
     # ── 頭部（圓形）─────────────────────────────────────────
     head_cx, head_cy, head_r = cx, rect.y + 62, 42
     pygame.draw.circle(surf, MILK, (head_cx, head_cy), head_r)
-    pygame.draw.circle(surf, CYAN, (head_cx, head_cy), head_r, 2)
+    pygame.draw.circle(surf, (78, 165, 210), (head_cx, head_cy), head_r, 2)
 
     # ── 頭髮（深棕弧形蓋在頭上）─────────────────────────────
     hair_col = (140, 88, 40)
@@ -2472,6 +3604,8 @@ def _draw_shop(surf: pygame.Surface,
     右側：效果說明面板 + 剩餘金錢 + 離開按鈕
     回傳 (buy_rects[(Rect, idx)...], exit_btn_rect)
     """
+    fb    = _font_bold[0]    or fs   # 粗體 size-17
+    fb_lg = _font_bold_lg[0] or fm  # 粗體 size-22
     # 背景
     surf.blit(_grads.get("bg", pygame.Surface((WIN_W, WIN_H))), (0, 0))
     ov = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
@@ -2560,7 +3694,7 @@ def _draw_shop(surf: pygame.Surface,
         info_w = dr.right - info_x - int(8 * scale)
 
         # 道具名稱
-        nt = fm.render(item["name"], True, WHITE)
+        nt = fb_lg.render(item["name"], True, WHITE)
         surf.blit(nt, (info_x, dr.y + int(10 * scale)))
 
         # 效果簡述（1 行截斷）
@@ -2581,10 +3715,19 @@ def _draw_shop(surf: pygame.Surface,
         b_col  = BTN_N if afford else DARK_GRAY
         bdr_r  = _premium_btn(surf, buy_r, b_col,
                                bhov and afford, radius=int(9 * scale))
-        pt_t   = fs.render(f"購買  $ {item['price']}", True,
-                            PANEL if afford else GRAY)
-        surf.blit(pt_t, (bdr_r.x + (bdr_r.width  - pt_t.get_width())  // 2,
-                          bdr_r.y + (bdr_r.height - pt_t.get_height()) // 2))
+        # 購買按鈕：「購買 」+ 金幣圖示 + 「{price}」，整體置中
+        _bc_r   = max(5, int(fb.get_height() * 0.38))   # 金幣半徑隨字型縮放
+        _bc_col = PANEL if afford else GRAY
+        pt_t    = fb.render(f"購買  ", True, _bc_col)
+        pc_t    = fb.render(f" {item['price']}", True, _bc_col)
+        _brow_w = pt_t.get_width() + _bc_r * 2 + pc_t.get_width()
+        _brow_x = bdr_r.x + (bdr_r.width - _brow_w) // 2
+        _brow_y = bdr_r.y + (bdr_r.height - pt_t.get_height()) // 2
+        surf.blit(pt_t, (_brow_x, _brow_y))
+        _draw_icon_coin(surf,
+                        _brow_x + pt_t.get_width() + _bc_r,
+                        bdr_r.centery, _bc_r)
+        surf.blit(pc_t, (_brow_x + pt_t.get_width() + _bc_r * 2, _brow_y))
 
         buy_rects.append((buy_r, i))
 
@@ -2598,7 +3741,7 @@ def _draw_shop(surf: pygame.Surface,
     pygame.draw.rect(surf, CYAN, rp, 2, border_radius=16)
 
     # 標題
-    tt = fm.render("效果說明", True, TITLE)
+    tt = fb_lg.render("效果說明", True, TITLE)
     surf.blit(tt, (rp.x + (rp.width - tt.get_width()) // 2, rp.y + 16))
     pygame.draw.line(surf, GRAY,
                      (rp.x + 14, rp.y + 50), (rp.right - 14, rp.y + 50), 1)
@@ -2615,10 +3758,17 @@ def _draw_shop(surf: pygame.Surface,
             surf.blit(mt, (rp.x + 14, desc_y + j * (fs.get_height() + 4)))
     elif hover_this >= 0 and hover_this < len(items):
         hi = items[hover_this]
-        hn = fm.render(hi["name"], True, WHITE)
+        hn = fb_lg.render(hi["name"], True, WHITE)
         surf.blit(hn, (rp.x + 14, desc_y))
-        hp = fs.render(f"售價：${hi['price']} 元", True, YELLOW)
-        surf.blit(hp, (rp.x + 14, desc_y + fm.get_height() + 6))
+        # 售價：「售價：」+ 金幣 + 「{price} 元」
+        _hr    = 9
+        _hl_t  = fb.render("售價：", True, YELLOW)
+        _hn2_t = fb.render(f" {hi['price']} 元", True, YELLOW)
+        _hy    = desc_y + fm.get_height() + 6
+        _hcy   = _hy + _hl_t.get_height() // 2
+        surf.blit(_hl_t, (rp.x + 14, _hy))
+        _draw_icon_coin(surf, rp.x + 14 + _hl_t.get_width() + _hr, _hcy, _hr)
+        surf.blit(_hn2_t, (rp.x + 14 + _hl_t.get_width() + _hr * 2, _hy))
         dy2 = desc_y + fm.get_height() + fs.get_height() + 18
         for j, ln in enumerate(_wrap(hi.get("desc", ""), fs, rp.width - 28)):
             surf.blit(fs.render(ln, True, GRAY),
@@ -2633,15 +3783,24 @@ def _draw_shop(surf: pygame.Surface,
     pygame.draw.line(surf, GRAY,
                      (rp.x + 14, rp.bottom - 108),
                      (rp.right - 14, rp.bottom - 108), 1)
-    mval = player.money if player else 0
-    mt   = fm.render(f"剩餘金錢：${mval}", True, YELLOW)
-    surf.blit(mt, (rp.x + (rp.width - mt.get_width()) // 2, rp.bottom - 94))
+    # 剩餘金錢：「剩餘金錢：」+ 金幣圖示 + 數字，水平置中
+    mval   = player.money if player else 0
+    _mr    = 11                                         # 金幣圖示半徑
+    _ml_t  = fb_lg.render("剩餘金錢：", True, YELLOW)
+    _mn_t  = fb_lg.render(f"{mval}", True, YELLOW)
+    _mrow_w = _ml_t.get_width() + _mr * 2 + 4 + _mn_t.get_width()
+    _mrow_x = rp.x + (rp.width - _mrow_w) // 2
+    _mrow_y = rp.bottom - 94
+    _mcy    = _mrow_y + _ml_t.get_height() // 2
+    surf.blit(_ml_t, (_mrow_x, _mrow_y))
+    _draw_icon_coin(surf, _mrow_x + _ml_t.get_width() + _mr, _mcy, _mr)
+    surf.blit(_mn_t, (_mrow_x + _ml_t.get_width() + _mr * 2 + 4, _mrow_y))
 
     # 離開道具店按鈕
     eb   = pygame.Rect(rp.x + 14, WIN_H - 60, rp.width - 28, 44)
     ehov = eb.collidepoint(mpos)
     edr  = _premium_btn(surf, eb, (200, 78, 58), ehov, radius=14)
-    et   = fm.render("離開道具店", True, PANEL)
+    et   = fb_lg.render("離開道具店", True, PANEL)
     surf.blit(et, (edr.x + (edr.width  - et.get_width())  // 2,
                    edr.y + (edr.height - et.get_height()) // 2))
 
@@ -2672,6 +3831,7 @@ def run_ui():
         _sfx["action"]      = _ld("attack1.mp3")
         _sfx["ui_click"]    = _ld("poka.mp3")
         _sfx["back"]        = _ld("universfield-interface-03-277552.mp3")
+        _sfx["damage6"]     = _ld("damage6.wav")
     except Exception:
         pass
 
@@ -2682,7 +3842,10 @@ def run_ui():
     fl = _get_font(40)   # 開始 / 結束畫面標題大字
     fm = _get_font(22)
     fs = _get_font(17)
-    _font_micro[0] = _get_font(11)   # 週次輪盤小字
+    _font_micro[0]   = _get_font(11)        # 週次輪盤小字
+    _font_bold[0]    = _get_font_bold(17)   # 粗體 size-17（按鈕 / 小文字）
+    _font_bold_lg[0] = _get_font_bold(22)   # 粗體 size-22（標題 / 上方視窗）
+    _font_bold_xl[0] = _get_font_bold(26)   # 粗體 size-26（日曆週次大字）
 
     # 版面 Rect
     sr = pygame.Rect(0, 0,           WIN_W, STATUS_H)   # 狀態欄
@@ -2799,12 +3962,15 @@ def run_ui():
                     _request_bgm("Music-Aether.mp3")
                 elif cmd[1] == "end":
                     _request_bgm(None)
+                elif cmd[1] == "game" and _weather_type[0] is None:
+                    _weather_reset()   # 首次進入遊戲階段時確保天氣已初始化
             elif tag == "ripple":
                 _ripple_t0[0] = pygame.time.get_ticks()
                 _play_sfx("cc_click")
             elif tag == "bgm_week":
                 _request_bgm(_WEEK_BGM.get(cmd[1]))
                 _request_week_bg(_WEEK_BG.get(cmd[1]))
+                _weather_reset()   # 每週隨機切換天氣
             elif tag == "reset":
                 _log.clear()
                 _player[0] = None
@@ -2840,7 +4006,21 @@ def run_ui():
                 _cc_data[0] = cmd[1]   # candidates list
                 _cc_sel.clear()
             elif tag == "set_time":
-                _time_units[0] = cmd[1]
+                new_time = cmd[1]
+                # 時間有減少 → 觸發震動特效（每次扣時都閃）
+                if new_time < _time_units[0]:
+                    _time_shake_t0[0] = pygame.time.get_ticks()
+                _time_units[0] = new_time
+            elif tag == "time_overflow_warn":
+                # 時間即將變負 → 震動 + damage6 音效
+                _time_shake_t0[0] = pygame.time.get_ticks()
+                _play_sfx("damage6")
+            elif tag == "subj_popup":
+                _subj_popup_title[0] = cmd[1]
+                _subj_popup_opts.clear()
+                _subj_popup_opts.extend(cmd[2])
+                _subj_popup_rects.clear()
+                _subj_popup_active[0] = True
             elif tag == "timetable":
                 _modal[0]      = "timetable"
                 _modal_data[0] = cmd[1]   # courses list
@@ -2938,23 +4118,42 @@ def run_ui():
                 _draw_cc_bg(screen)
         else:   # "game"
             _draw_game_bg(screen)
+            # ── 動態天氣特效（背景圖與 UI 之間）────────────────────
+            _draw_weather(screen, pygame.time.get_ticks())
             # 狀態欄（新版，含頭像 + 道具店按鈕，回傳 shop_btn_rect）
             shop_btn_rect = _draw_status_v2(screen, fm, fs, _player[0], sr, mpos)
-            # 狀態欄底部陰影（增加與人物區的層次感）
-            _panel_top_shadow(screen, sr.x, sr.bottom, sr.width, alpha=38, h=14)
             # 人物立繪區
             _draw_character_art(screen, cr)
             # 左側熟練度面板 / 右側成績記錄面板
             _draw_exp_panel(screen, fm, _font_micro[0], _player[0])
             _draw_grade_panel(screen, fm, _font_micro[0], _player[0])
-            # 行動面板頂部陰影
-            _panel_top_shadow(screen, ar.x, ar.y, ar.width, alpha=32, h=12)
-            # 底部行動面板（含圓形按鈕 / 敘述文字 / yn / text）
+            # 非標準選項 / yn → 需先計算，讓底部面板知道要不要留白
+            _cp_active = (
+                (_mode[0] == "choices" and bool(_choices)
+                 and not all(c in _STANDARD_ACTIONS for c in _choices))
+                or _mode[0] == "yn"
+            )
+            # 底部行動面板：中央彈窗已啟用時改用空白選項，避免重複顯示
+            _panel_mode    = "choices" if _cp_active else _mode[0]
+            _panel_choices = []        if _cp_active else _choices
             btn_rects, end_week_btn = _draw_action_panel(
-                screen, fm, fs, _mode[0], _choices, _log,
+                screen, fm, fs, _panel_mode, _panel_choices, _log,
                 _prompt, _tvalue, ar, _time_units[0], mpos)
             # 行動結果彈出視窗（右側由右而左滑入）
             _draw_action_popup(screen, fs)
+            # 中央彈出視窗（含全螢幕暗色遮罩）
+            if _cp_active:
+                _choice_popup_rects.clear()
+                _choice_popup_rects.extend(
+                    _draw_choice_popup(screen, fm, fs, _mode[0], _choices,
+                                       _log, _prompt[0], _yn_labels, mpos))
+            else:
+                _choice_popup_rects.clear()
+            # 科目選擇彈出視窗（中央 modal，蓋在所有遊戲 UI 之上）
+            if _subj_popup_active[0]:
+                _subj_popup_rects.clear()
+                _subj_popup_rects.extend(
+                    _draw_subj_popup(screen, fm, fs, mpos))
 
         # ── Modal 疊加（課表 / 成績公告，浮在所有畫面之上）────────
         _modal_ok_btn = None
@@ -3001,6 +4200,12 @@ def run_ui():
         # ── 漣漪轉場覆蓋層（最頂層，疊在所有內容之上）──────────
         _draw_ripple_overlay(screen)
 
+        # ── 行動成功白光閃爍（漣漪之上，點擊波紋之下）──────────
+        _draw_action_flash(screen, pygame.time.get_ticks())
+
+        # ── 點擊波紋特效（最最頂層，覆蓋一切 UI）──────────────
+        _draw_click_effects(screen, pygame.time.get_ticks())
+
         pygame.display.flip()
 
         # ── pygame 事件 ───────────────────────────────────────
@@ -3009,6 +4214,9 @@ def run_ui():
                 running = False
 
             elif ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1:
+                # 點擊波紋特效（任何畫面均觸發，無條件生成）
+                _click_spawn(ev.pos[0], ev.pos[1], pygame.time.get_ticks())
+
                 # 全螢幕切換按鈕（最高優先，任何畫面均有效）
                 if fs_btn.collidepoint(ev.pos):
                     if _is_fullscreen[0]:
@@ -3078,6 +4286,45 @@ def run_ui():
                         _restart_event.set()
                 else:
                     # ── 遊戲中 ────────────────────────────────
+
+                    # 非標準選項 / yn 中央彈窗優先攔截（最高優先）
+                    _cp_now = (
+                        (_mode[0] == "choices" and bool(_choices)
+                         and not all(c in _STANDARD_ACTIONS for c in _choices))
+                        or _mode[0] == "yn"
+                    )
+                    if _cp_now:
+                        for (br, val) in _choice_popup_rects:
+                            if br.collidepoint(ev.pos):
+                                _click_reg[(br.centerx, br.centery)] = pygame.time.get_ticks()
+                                if _mode[0] == "choices":
+                                    _play_sfx("ui_click")
+                                    _reply_val[0] = val
+                                    _mode[0] = None
+                                    _choices.clear()
+                                    _reply_event.set()
+                                else:  # yn
+                                    _play_sfx("ui_click" if val else "back")
+                                    _reply_val[0] = val
+                                    _mode[0] = None
+                                    _reply_event.set()
+                                break
+                        continue   # 彈窗開啟時所有點擊都不透傳
+
+                    # 科目選擇 popup 優先攔截所有點擊
+                    if _subj_popup_active[0]:
+                        for (br, val) in _subj_popup_rects:
+                            if br.collidepoint(ev.pos):
+                                _play_sfx("ui_click")
+                                _click_reg[(br.centerx, br.centery)] = pygame.time.get_ticks()
+                                _reply_val[0] = val
+                                _subj_popup_active[0] = False
+                                _subj_popup_opts.clear()
+                                _subj_popup_rects.clear()
+                                _reply_event.set()
+                                break
+                        continue   # 無論有沒有點中按鈕，都不透傳到下方邏輯
+
                     # 狀態欄道具店按鈕（僅在行動選單時有效）
                     if (shop_active
                             and shop_btn_rect is not None
