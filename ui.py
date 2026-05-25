@@ -1977,6 +1977,148 @@ def _draw_panel_log(surf, fs, log, rect, lines=5):
                   (rect.x + 14, rect.y + 8 + i * lh))
 
 
+# ── 側邊資訊面板常數 ──────────────────────────────────────────
+_SIDE_PANEL_W = 148   # 左右面板各佔 148px
+_SUBJ_DISPLAY = [     # (顯示短名, subject_exp 鍵值)
+    ("程設", "商管程式設計"),
+    ("統計", "統計學"),
+    ("經濟", "經濟學"),
+    ("管理", "管理學"),
+    ("會計", "會計學"),
+]
+_GRADE_ROWS = [       # (顯示名, grades 鍵值, 佔比)
+    ("參與度", "參與度", "10%"),
+    ("作  業", "作業",   "20%"),
+    ("小  考", "小考",   "10%"),
+    ("期  中", "期中",   "30%"),
+    ("期  末", "期末",   "30%"),
+]
+_EXP_LVL_COLORS = [
+    (148, 110, 72),   # 新手 — 暖沙
+    ( 78, 172, 90),   # 普通 — 草綠
+    ( 78, 165, 210),  # 熟練 — 晴天藍
+    (190, 128, 12),   # 精通 — 琥珀金
+]
+_EXP_LVL_NAMES  = ["新手", "普通", "熟練", "精通"]
+_EXP_LVL_THR    = [0, 30, 60, 90]
+
+
+def _side_panel_bg(surf: pygame.Surface, x: int, y: int, w: int, h: int) -> None:
+    """繪製半透明深棕圓角面板底色。"""
+    bg = pygame.Surface((w, h), pygame.SRCALPHA)
+    pygame.draw.rect(bg, (32, 18, 6, 190),  pygame.Rect(0, 0, w, h), border_radius=12)
+    pygame.draw.rect(bg, (105, 68, 35, 210), pygame.Rect(0, 0, w, h), 1, border_radius=12)
+    surf.blit(bg, (x, y))
+
+
+def _draw_exp_panel(surf: pygame.Surface, fm, fmic, player) -> None:
+    """左側：各科課業熟練度面板（進度條 + 等級）。"""
+    if player is None:
+        return
+    PW  = _SIDE_PANEL_W
+    PAD = 9
+    sx, sy = 6, STATUS_H + 6
+    sh  = CHAR_H - 12
+
+    _side_panel_bg(surf, sx, sy, PW, sh)
+
+    # 標題
+    title = fm.render("課業熟練度", True, YELLOW)
+    surf.blit(title, (sx + (PW - title.get_width()) // 2, sy + 7))
+    div_y = sy + 7 + title.get_height() + 5
+    pygame.draw.line(surf, (105, 68, 35),
+                     (sx + PAD, div_y), (sx + PW - PAD, div_y))
+
+    # 每科行高（平分剩餘高度）
+    content_h = sy + sh - 6 - (div_y + 8)
+    row_h     = content_h // len(_SUBJ_DISPLAY)
+    bar_w     = PW - PAD * 2
+    row_y     = div_y + 8
+
+    for short, full in _SUBJ_DISPLAY:
+        exp = player.subject_exp.get(full, 0)
+        # 計算等級
+        lvl = 0
+        for i, thr in enumerate(_EXP_LVL_THR):
+            if exp >= thr:
+                lvl = i
+        col      = _EXP_LVL_COLORS[lvl]
+        lvl_name = _EXP_LVL_NAMES[lvl]
+
+        # 科目短名（左）+ 等級名（右）
+        lbl  = fm.render(short, True, PANEL)
+        badge = fmic.render(lvl_name, True, col)
+        surf.blit(lbl,   (sx + PAD, row_y))
+        surf.blit(badge, (sx + PW - PAD - badge.get_width(),
+                          row_y + (fm.get_height() - badge.get_height()) // 2))
+
+        # 進度條底色
+        by = row_y + fm.get_height() + 3
+        pygame.draw.rect(surf, (65, 42, 22),
+                         pygame.Rect(sx + PAD, by, bar_w, 7), border_radius=3)
+        # 進度條填色
+        fw = int(bar_w * exp / 100)
+        if fw > 0:
+            pygame.draw.rect(surf, col,
+                             pygame.Rect(sx + PAD, by, fw, 7), border_radius=3)
+
+        # exp 數字
+        val_lbl = fmic.render(f"{exp} / 100", True, (148, 105, 68))
+        surf.blit(val_lbl, (sx + PAD, by + 10))
+
+        row_y += row_h
+
+
+def _draw_grade_panel(surf: pygame.Surface, fm, fmic, player) -> None:
+    """右側：已發生成績記錄面板（未公布項目顯示 ──）。"""
+    if player is None:
+        return
+    PW  = _SIDE_PANEL_W
+    PAD = 9
+    sx  = WIN_W - 6 - PW
+    sy  = STATUS_H + 6
+    sh  = CHAR_H - 12
+
+    _side_panel_bg(surf, sx, sy, PW, sh)
+
+    # 標題
+    title = fm.render("成績記錄", True, YELLOW)
+    surf.blit(title, (sx + (PW - title.get_width()) // 2, sy + 7))
+    div_y = sy + 7 + title.get_height() + 5
+    pygame.draw.line(surf, (105, 68, 35),
+                     (sx + PAD, div_y), (sx + PW - PAD, div_y))
+
+    # 每列行高
+    content_h = sy + sh - 6 - (div_y + 8)
+    row_h     = content_h // len(_GRADE_ROWS)
+    row_y     = div_y + 8
+
+    for label, key, weight in _GRADE_ROWS:
+        val      = player.grades.get(key, 0.0)
+        recorded = val > 0.0
+
+        # 科目名（左）+ 佔比（右）
+        lbl_s = fm.render(label, True, PANEL)
+        wt_s  = fmic.render(weight, True, (130, 90, 55))
+        surf.blit(lbl_s, (sx + PAD, row_y))
+        surf.blit(wt_s,  (sx + PW - PAD - wt_s.get_width(),
+                           row_y + (fm.get_height() - wt_s.get_height()) // 2))
+
+        # 分數（已公布用顏色標示；未公布灰色虛線）
+        if recorded:
+            col       = GREEN if val >= 80 else (YELLOW if val >= 60 else RED)
+            score_str = f"{val:.1f}"
+        else:
+            col       = GRAY
+            score_str = "──"
+        score_s = fm.render(score_str, True, col)
+        surf.blit(score_s,
+                  (sx + (PW - score_s.get_width()) // 2,
+                   row_y + fm.get_height() + 3))
+
+        row_y += row_h
+
+
 def _draw_character_art(surf, rect):
     """
     人物立繪占位（純幾何圖形，之後可替換為圖片）。
@@ -2782,6 +2924,9 @@ def run_ui():
             _panel_top_shadow(screen, sr.x, sr.bottom, sr.width, alpha=38, h=14)
             # 人物立繪區
             _draw_character_art(screen, cr)
+            # 左側熟練度面板 / 右側成績記錄面板
+            _draw_exp_panel(screen, fm, _font_micro[0], _player[0])
+            _draw_grade_panel(screen, fm, _font_micro[0], _player[0])
             # 行動面板頂部陰影
             _panel_top_shadow(screen, ar.x, ar.y, ar.width, alpha=32, h=12)
             # 底部行動面板（含圓形按鈕 / 敘述文字 / yn / text）
