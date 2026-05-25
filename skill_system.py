@@ -34,11 +34,11 @@ class SkillSystem:
         # 這裡直接引用同一個字典物件（改這裡等於改 player 裡的）
         self.exp_pool = player.subject_exp
 
-    def gain_exp(self, subject: str, base_amount: int):
+    def gain_exp(self, subject: str, base_amount: int) -> int:
         """
         增加某科目的熟練度經驗值。
         實際獲得的量 = base_amount × 當前等級乘數 × 智力乘數。
-        subject：科目名稱；base_amount：基礎增加量。
+        回傳：實際增加量（已套用乘數後的整數）。
         """
         player = self.player
 
@@ -66,6 +66,7 @@ class SkillSystem:
 
         # 順便同步到 player.subject_exp（其實同一個字典，多此一舉但幫助理解）
         player.subject_exp[subject] = self.exp_pool[subject]
+        return actual_gain
 
     def _get_level(self, subject: str) -> int:
         """

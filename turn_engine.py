@@ -409,8 +409,8 @@ class TurnEngine:
                 _chosen = _subj_opts[(_idx - 1) if _idx > 0 else 0]
             else:
                 _chosen = "綜合"
-            self.skill_sys.gain_exp(_chosen, exp)
-            results.append(f"【{_chosen}】熟練度 +{exp}")
+            _actual = self.skill_sys.gain_exp(_chosen, exp)
+            results.append(f"【{_chosen}】熟練度 +{_actual}")
 
         # ── 自我滿足度 ────────────────────────────────────────
         sat = action.get("satisfaction", 0)
