@@ -522,6 +522,44 @@ def _scaled_rect(base: pygame.Rect, scale: float) -> pygame.Rect:
                        base.width + dw, base.height + dh)
 
 
+def _float_offset(amp: int = 7, speed: float = 0.00180, phase: float = 0.0) -> int:
+    """
+    回傳緩慢正弦浮動的垂直偏移（像素）。
+    amp   : 振幅（像素），speed : 角速度（rad/ms），phase : 初始相位（rad）。
+    """
+    import math
+    return int(math.sin(pygame.time.get_ticks() * speed + phase) * amp)
+
+
+def _draw_float_label_card(surf, font, text, x_center, base_y,
+                           text_col=None,
+                           bg=(20, 10, 5), bg_alpha=135,
+                           pad_x=18, pad_y=8,
+                           amp=6, speed=0.00175, phase=0.0,
+                           radius=12):
+    """
+    在 (x_center, base_y) 處繪製帶半透明底色的浮動標籤卡片：
+      • 陰影 → 半透明底板（SRCALPHA） → CYAN 邊框 → 文字
+    回傳 (card_rect, float_y_offset)，供呼叫者對齊其他元素。
+    """
+    fy     = _float_offset(amp, speed, phase)
+    col    = text_col if text_col is not None else CYAN
+    t_surf = font.render(text, True, col)
+    tw, th = t_surf.get_width(), t_surf.get_height()
+    cw     = tw + pad_x * 2
+    ch     = th + pad_y * 2
+    cx     = x_center - cw // 2
+    cy     = base_y + fy
+    card_r = pygame.Rect(cx, cy, cw, ch)
+    _soft_shadow(surf, card_r, radius=radius, alpha=36, offset=(0, 5))
+    card_s = pygame.Surface((cw, ch), pygame.SRCALPHA)
+    card_s.fill((*bg, bg_alpha))
+    surf.blit(card_s, (cx, cy))
+    pygame.draw.rect(surf, CYAN, card_r, 1, border_radius=radius)
+    surf.blit(t_surf, (x_center - tw // 2, cy + pad_y))
+    return card_r, fy
+
+
 def _premium_btn(surf: pygame.Surface,
                  base:     pygame.Rect,
                  col:      tuple,
@@ -741,11 +779,21 @@ def _draw_status_v2(surf, fm, fs, player, rect, mpos):
     surf.blit(init_t, (av_cx - init_t.get_width() // 2,
                        av_cy - init_t.get_height() // 2))
 
-    # ── 名字 + 系級 ────────────────────────────────────────────
+    # ── 名字 + 系級（帶懸浮半透明名字卡）────────────────────
     info_x = rect.x + 106
     info_y = rect.y + 14
     name_t = fm.render(f"【{player.name}】 {player.department}", True, WHITE)
-    surf.blit(name_t, (info_x, info_y))
+    _fy_nc = _float_offset(amp=3, speed=0.00195, phase=0.8)
+    nc_px, nc_py = 10, 5
+    nc_r = pygame.Rect(info_x - nc_px,
+                       info_y + _fy_nc - nc_py,
+                       name_t.get_width() + nc_px * 2,
+                       name_t.get_height() + nc_py * 2)
+    nc_s = pygame.Surface((nc_r.width, nc_r.height), pygame.SRCALPHA)
+    nc_s.fill((255, 255, 255, 68))
+    surf.blit(nc_s, nc_r.topleft)
+    pygame.draw.rect(surf, CYAN, nc_r, 1, border_radius=8)
+    surf.blit(name_t, (info_x, info_y + _fy_nc))
 
     # ── 體力條 ────────────────────────────────────────────────
     bar_y  = info_y + fm.get_height() + 6
@@ -914,11 +962,13 @@ def _draw_cc_name(surf, fm, fs, mpos):
         surf.blit(_grads["start"], (0, 0))
     else:
         surf.fill(BG)
-    # modal card
+    # modal card（整張卡緩慢懸浮）
+    _fy = _float_offset(amp=7, speed=0.00170, phase=0.3)
     cw, ch = 520, 250
     cx = (WIN_W - cw) // 2
-    cy = (WIN_H - ch) // 2
+    cy = (WIN_H - ch) // 2 + _fy
     card = pygame.Rect(cx, cy, cw, ch)
+    _soft_shadow(surf, card, radius=20, alpha=50, offset=(0, 8))
     pygame.draw.rect(surf, PANEL, card, border_radius=20)
     pygame.draw.rect(surf, CYAN, card, 2, border_radius=20)
     # 標題
@@ -954,8 +1004,8 @@ def _draw_cc_dept(surf, fm, fs, options, mpos):
         surf.blit(_grads["start"], (0, 0))
     else:
         surf.fill(BG)
-    title = fm.render("選擇系級", True, CYAN)
-    surf.blit(title, ((WIN_W - title.get_width()) // 2, 100))
+    _draw_float_label_card(surf, fm, "選擇系級", WIN_W // 2, 88,
+                           pad_x=26, pad_y=11, amp=7, speed=0.00170, phase=0.0)
     cw, ch = 180, 120
     gap = 20
     total_w = len(options) * cw + (len(options) - 1) * gap
@@ -979,11 +1029,12 @@ def _draw_cc_drawbacks(surf, fm, fs, drawbacks, sel_indices, max_sel, mpos):
         surf.blit(_grads["start"], (0, 0))
     else:
         surf.fill(BG)
-    title = fm.render("選擇負面特質", True, CYAN)
-    surf.blit(title, ((WIN_W - title.get_width()) // 2, 60))
+    _draw_float_label_card(surf, fm, "選擇負面特質", WIN_W // 2, 48,
+                           pad_x=26, pad_y=11, amp=7, speed=0.00170, phase=0.5)
     sub_text = f"（最多選 {max_sel} 個，選取可獲得額外點數）"
-    sub = fs.render(sub_text, True, GRAY)
-    surf.blit(sub, ((WIN_W - sub.get_width()) // 2, 100))
+    _draw_float_label_card(surf, fs, sub_text, WIN_W // 2, 98,
+                           text_col=GRAY, bg=(30, 20, 8), bg_alpha=115,
+                           pad_x=16, pad_y=6, amp=7, speed=0.00170, phase=0.5)
 
     cw, ch = 250, 190
     gap = 24
@@ -1028,13 +1079,14 @@ def _draw_cc_stats(surf, fm, fs, total, vals, raw, active, mpos):
         surf.blit(_grads["start"], (0, 0))
     else:
         surf.fill(BG)
-    title = fm.render("分配能力點", True, CYAN)
-    surf.blit(title, ((WIN_W - title.get_width()) // 2, 80))
+    _draw_float_label_card(surf, fm, "分配能力點", WIN_W // 2, 68,
+                           pad_x=26, pad_y=11, amp=7, speed=0.00170, phase=1.0)
     used = sum(vals)
     rem  = total - used
-    info = fs.render(f"可用點數：{total}   已用：{used}   剩餘：{rem}  → 初始金錢 ＋{rem * 10} 元",
-                     True, YELLOW)
-    surf.blit(info, ((WIN_W - info.get_width()) // 2, 130))
+    info_text = f"可用點數：{total}   已用：{used}   剩餘：{rem}   初始金錢 +{rem * 10} 元"
+    _draw_float_label_card(surf, fs, info_text, WIN_W // 2, 118,
+                           text_col=YELLOW, bg=(30, 15, 0), bg_alpha=128,
+                           pad_x=16, pad_y=6, amp=7, speed=0.00170, phase=1.0)
 
     labels = ["體力", "智力", "運氣"]
     row_y  = [175, 245, 315]
@@ -1093,8 +1145,8 @@ def _draw_cc_talent(surf, fm, fs, candidates, sel_idx, mpos):
         surf.blit(_grads["start"], (0, 0))
     else:
         surf.fill(BG)
-    title = fm.render("選擇天賦", True, CYAN)
-    surf.blit(title, ((WIN_W - title.get_width()) // 2, 60))
+    _draw_float_label_card(surf, fm, "選擇天賦", WIN_W // 2, 48,
+                           pad_x=26, pad_y=11, amp=7, speed=0.00170, phase=1.5)
 
     cw, ch = 250, 200
     gap = 24
@@ -1726,25 +1778,32 @@ def _draw_start(surf, fm, fl, mpos):
     else:
         surf.fill(BG)
 
+    # ── 懸浮偏移（標題卡 + 按鈕同步浮動）────────────────────
+    _fy = _float_offset(amp=9, speed=0.00155)
+
     # ── 標題區半透明底板（確保圖片背景上文字可讀）─────────
-    card_w, card_h = 520, 180
+    card_w, card_h = 520, 190
     card_x = (WIN_W - card_w) // 2
-    card_y = WIN_H // 3 - 40
+    card_y = WIN_H // 3 - 40 + _fy
+    _soft_shadow(surf, pygame.Rect(card_x, card_y, card_w, card_h),
+                 radius=18, alpha=55, offset=(0, 8))
     card_s = pygame.Surface((card_w, card_h), pygame.SRCALPHA)
-    card_s.fill((20, 10, 5, 140))   # 深棕半透明
+    card_s.fill((20, 10, 5, 148))   # 深棕半透明
     surf.blit(card_s, (card_x, card_y))
-    pygame.draw.rect(surf, (*CYAN, 180), (card_x, card_y, card_w, card_h),
-                     2, border_radius=16)
+    pygame.draw.rect(surf, CYAN, (card_x, card_y, card_w, card_h),
+                     2, border_radius=18)
+    _gloss_rect(surf, pygame.Rect(card_x, card_y, card_w, card_h))
 
     # 標題
     title = fl.render("如何渡過這學期？", True, (255, 255, 255))
-    surf.blit(title, ((WIN_W - title.get_width()) // 2, card_y + 22))
+    surf.blit(title, ((WIN_W - title.get_width()) // 2, card_y + 24))
     # 副標
     sub = fm.render("一款大學生存模擬遊戲", True, (255, 230, 140))
-    surf.blit(sub, ((WIN_W - sub.get_width()) // 2, card_y + 22 + fl.get_height() + 14))
+    surf.blit(sub, ((WIN_W - sub.get_width()) // 2,
+                    card_y + 24 + fl.get_height() + 16))
 
-    # 按鈕
-    btn   = pygame.Rect((WIN_W - 220) // 2, WIN_H // 2 + 60, 220, 56)
+    # ── 按鈕（與標題卡同步浮動）──────────────────────────
+    btn   = pygame.Rect((WIN_W - 220) // 2, WIN_H // 2 + 68 + _fy, 220, 56)
     hover = btn.collidepoint(mpos)
     dr    = _premium_btn(surf, btn, BTN_N, hover, radius=16)
     t     = fm.render("開始遊戲", True, (255, 255, 255))
