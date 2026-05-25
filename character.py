@@ -10,7 +10,10 @@
 # ============================================================
 
 import random
-from ui import notify, ask_text, ask_choice, ask_yn
+from ui import (notify, ask_text, ask_choice, ask_yn,
+                begin_char_create, end_char_create,
+                ask_cc_name, ask_cc_dept,
+                ask_cc_drawbacks, ask_cc_stats, ask_cc_talent)
 
 # ── 天賦資料庫 ────────────────────────────────────────────────
 TALENTS = [
@@ -67,47 +70,34 @@ class Character:
     # ────────────────────────────────────────────────────────
     @classmethod
     def create_new(cls) -> "Character":
-        # print("\n【角色創建】")  # 因套用pygame而調整
-        notify("\n【角色創建】開始，請依序回答以下問題。")
+        # ── 切換到角色創建專屬畫面 ──────────────────────────────
+        begin_char_create()
 
-        # 輸入名字
-        # name = input("請輸入角色名字：").strip() or "無名大學生"  # 因套用pygame而調整
-        name = ask_text("請輸入角色名字：（留空則為「無名大學生」）").strip() or "無名大學生"
-        notify(f"  角色名字：{name}")
+        # 1. 輸入名字
+        name = ask_cc_name("請輸入角色名字").strip() or "無名大學生"
 
-        # 選擇系級
+        # 2. 選擇系級
         departments = ["資管系", "企管系", "財金系", "會計系"]
-        # print("\n請選擇系級：")  # 因套用pygame而調整
-        notify("\n請選擇系級：")
-        # for i, d in enumerate(departments, start=1):  # 因套用pygame而調整
-        #     print(f"  {i}. {d}")
-        # dept_idx = cls._safe_int_input("輸入編號：", 1, len(departments)) - 1  # 因套用pygame而調整
-        while True:
-            dept_choice = ask_choice(departments)
-            if dept_choice > 0:
-                dept_idx   = dept_choice - 1
-                department = departments[dept_idx]
-                break
-            notify("  請選擇一個系別！")
-        notify(f"  選擇系級：{department}")
+        dept_idx    = ask_cc_dept(departments) - 1
+        department  = departments[dept_idx]
 
-        # 選擇負面特質
+        # 3. 選擇負面特質（最多 2 個）
         base_pts         = 50
-        chosen_drawbacks = cls._pick_drawbacks(base_pts)
+        chosen_drawbacks = ask_cc_drawbacks(DRAWBACKS, 2)
         total_pts        = base_pts + sum(d["bonus_pts"] for d in chosen_drawbacks)
 
-        # print(f"\n你共有 {total_pts} 點可分配（體力 / 智力 / 運氣）")  # 因套用pygame而調整
-        notify(f"\n你共有 {total_pts} 點可分配（體力 / 智力 / 運氣）")
-
-        # 分配能力點
-        stamina, intel, luck, remaining = cls._distribute_points(total_pts)
-
-        # 剩餘點數轉換為金錢
+        # 4. 分配能力點
+        stamina, intel, luck = ask_cc_stats(total_pts)
+        remaining = total_pts - stamina - intel - luck
         money = 300 + remaining * 10
 
-        # 選擇天賦
-        talent = cls._pick_talent()
+        # 5. 選擇天賦（從 TALENTS 隨機抽 3 張）
+        candidates = random.sample(TALENTS, k=3)
+        talent = ask_cc_talent(candidates)
         money += talent.get("money", 0)
+
+        # ── 切回一般遊戲畫面 ─────────────────────────────────────
+        end_char_create()
 
         notify(f"\n角色創建完成！{name}（{department}）準備迎接這學期的挑戰。")
         return cls(name, department, stamina, intel, luck, money, talent, chosen_drawbacks)

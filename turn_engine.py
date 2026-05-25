@@ -15,7 +15,8 @@ from character import Character
 from event_system import EventSystem
 from skill_system import SkillSystem
 from shop_V03 import Shop
-from ui import notify, ask_yn, ask_choice, ask_text, set_player
+from ui import notify, ask_yn, ask_choice, ask_text, set_player, \
+               notify_timetable, notify_grade_report, set_time
 
 
 # ── 每週可選擇的行動清單 ──────────────────────────────────
@@ -94,6 +95,12 @@ class TurnEngine:
         self.skill_sys = skill_sys
         self.shop      = shop
 
+        # ── 跨週追蹤資料 ──────────────────────────────────────
+        self._quiz1_score  = 0     # 第四週計算，第五週展示
+        self._quiz2_score  = 0     # 第十二週計算，第十四週展示
+        self._week2_course = None  # {"name":str, "credits":int}
+        self._week9_job    = ""    # 美宣 / 公關 / 現場工人
+
     def run_week(self, week: int) -> bool:
         player = self.player
 
@@ -116,112 +123,23 @@ class TurnEngine:
     def _normal_week(self, week: int):
         player = self.player
 
-        # print(f"\n📅 【第 {week} 週 行事曆提示】")  # 因套用pygame而調整
         notify(f"\n📅 【第 {week} 週 行事曆提示】")
 
-        # ── 特殊週劇情 ─────────────────────────────────────
-        if week in (4, 12):
-            # print("  ⚠️ 助教提醒：本週有隨堂小考！大家準備好了嗎？")  # 因套用pygame而調整
-            notify("  ⚠️ 助教提醒：本週有隨堂小考！大家準備好了嗎？")
-            player.consume_stamina(2)
-
-            total_exp = sum(player.subject_exp.values())
-            if total_exp > 50:
-                # print("  ✅ 熟練度足夠，小考輕鬆過關！")  # 因套用pygame而調整
-                notify("  ✅ 熟練度足夠，小考輕鬆過關！")
-                player.grades["小考"] = max(player.grades["小考"], 80)
-                player.change_satisfaction(5)
-            else:
-                # print("  ❌ 準備不足，小考慘遭滑鐵盧……")  # 因套用pygame而調整
-                notify("  ❌ 準備不足，小考慘遭滑鐵盧……")
-                player.grades["小考"] = max(player.grades["小考"], 50)
-                player.change_satisfaction(-8)
-
-        elif week == 9:
-            # print("  🎉 系學會會長在群組裡公告招工事宜。")  # 因套用pygame而調整
-            notify("  🎉 系學會會長在群組裡公告招工事宜。")
-            # choice = input("  要答應幫忙辦活動嗎？(y/N)：").strip().lower()  # 因套用pygame而調整
-            choice = ask_yn("要答應幫忙辦活動嗎？")
-            if choice:
-                # print("  ✨ 答應成為工人！運氣 +10，但體力 -8。")  # 因套用pygame而調整
-                notify("  ✨ 答應成為工人！運氣 +10，但體力 -8。")
-                player.luck += 10
-                player.consume_stamina(8)
-                player.change_satisfaction(5)
-            else:
-                # print("  🛏️ 決定把時間留給自己，好好休息。")  # 因套用pygame而調整
-                notify("  🛏️ 決定把時間留給自己，好好休息。")
-                player.change_satisfaction(3)
-
-        elif week == 13:
-            # print("  ⚠️ 停修期限截止在即！看著成績，你陷入猶豫……")  # 因套用pygame而調整
-            notify("  ⚠️ 停修期限截止在即！看著成績，你陷入猶豫……")
-            # choice = input("  要壯士斷腕選擇停修某一科嗎？(y/N)：").strip().lower()  # 因套用pygame而調整
-            choice = ask_yn("要壯士斷腕選擇停修某一科嗎？")
-            if choice:
-                # print("  💥 停修成功！體力 +10，但運氣 -10。")  # 因套用pygame而調整
-                notify("  💥 停修成功！體力 +10，但運氣 -10。")
-                player.restore_stamina(10)
-                player.luck = max(0, player.luck - 10)
-                player.change_satisfaction(5)
-            else:
-                # print("  💪 決定硬著頭皮撐下去！滿足感 +5。")  # 因套用pygame而調整
-                notify("  💪 決定硬著頭皮撐下去！滿足感 +5。")
-                player.change_satisfaction(5)
-
-        elif week == 14:
-            # print("  🔥 簡報、報告、期末作業突然一起出現，deadline 大爆炸！")  # 因套用pygame而調整
-            notify("  🔥 簡報、報告、期末作業突然一起出現，deadline 大爆炸！")
-            # print("  你必須選擇優先完成哪一項：")  # 因套用pygame而調整
-            notify("  你必須選擇優先完成哪一項：")
-            # print("  1. 製作小組簡報：作業成績 70，體力 -10")  # 因套用pygame而調整
-            notify("  1. 製作小組簡報：作業成績 70，體力 -10")
-            # print("  2. 撰寫五千字報告：作業成績 85，體力 -20")  # 因套用pygame而調整
-            notify("  2. 撰寫五千字報告：作業成績 85，體力 -20")
-            # ans = input("  請做出抉擇 (1/2)：").strip()  # 因套用pygame而調整
-            ans = ask_choice(["製作小組簡報（作業 70，體力 -10）",
-                              "撰寫五千字報告（作業 85，體力 -20）"])
-            if ans == 2:
-                player.grades["作業"] = max(player.grades["作業"], 85)
-                player.consume_stamina(20)
-                player.change_satisfaction(-8)
-                # print("  📝 瘋狂趕工完成五千字報告！作業成績提升。")  # 因套用pygame而調整
-                notify("  📝 瘋狂趕工完成五千字報告！作業成績提升。")
-            else:
-                player.grades["作業"] = max(player.grades["作業"], 70)
-                player.consume_stamina(10)
-                player.change_satisfaction(-3)
-                # print("  🤝 順利完成小組簡報，至少不會被組員罵。")  # 因套用pygame而調整
-                notify("  🤝 順利完成小組簡報，至少不會被組員罵。")
-
-        else:
-            # print("  🍃 本週校園風平浪靜，照著自己的步調前進吧。")  # 因套用pygame而調整
-            notify("  🍃 本週校園風平浪靜，照著自己的步調前進吧。")
+        # ── 週前劇情（台詞、選擇、事件）──────────────────────
+        self._pre_action_narrative(week)
 
         # ── 行動選擇 ──────────────────────────────────────
         # （道具店已整合進行動選單，不再額外詢問）
         time_units = player.get_effective_time()
-        # print(f"\n本週可支配時間：{time_units} 單位")  # 因套用pygame而調整
         notify(f"\n本週可支配時間：{time_units} 單位")
 
         # ── 行動選擇迴圈 ──────────────────────────────────
         remaining_time = time_units
+        set_time(remaining_time)   # 初始化底部標籤列
 
         while remaining_time > 0:
-            set_player(player)   # 刷新狀態欄
-
-            # print(f"\n⏱ 本週剩餘時間：{remaining_time} 單位")  # 因套用pygame而調整
-            notify(f"\n⏱ 本週剩餘時間：{remaining_time} 單位")
-            # print("選擇本週行動：")  # 因套用pygame而調整
-            notify("可選行動（點選按鈕）：")
-
-            for i, action in enumerate(ACTIONS, start=1):
-                cost     = action["stamina_cost"]
-                cost_str = f"體力 {'恢復' if cost < 0 else '消耗'} {abs(cost)}"
-                # print(f"  {i}. {action['name']} ({cost_str}) — {action['desc']}")  # 因套用pygame而調整
-                notify(f"  {i}. {action['name']}（{cost_str}）— {action['desc']}")
-
-            # print("  0. 結束本週行動")  # 因套用pygame而調整
+            set_player(player)     # 刷新狀態欄
+            set_time(remaining_time)
 
             # choice = get_player_choice(ACTIONS)  # 因套用pygame而調整
             choice = ask_choice(ACTIONS)
@@ -246,6 +164,224 @@ class TurnEngine:
 
             self._execute_action(action)
             remaining_time -= 1
+            set_time(remaining_time)
+
+    # ============================================================
+    # 週前劇情（行動選單出現之前）
+    # ============================================================
+
+    # 固定課表資料（第一週展示）
+    _WEEK1_TIMETABLE = [
+        {"day": "週一", "name": "統計學",       "time": "08:10–09:00", "credits": 3},
+        {"day": "週一", "name": "管理學",       "time": "10:20–12:10", "credits": 3},
+        {"day": "週二", "name": "商管程式設計", "time": "13:20–16:20", "credits": 3},
+        {"day": "週三", "name": "統計學",       "time": "08:10–09:00", "credits": 0},
+        {"day": "週三", "name": "會計學",       "time": "10:20–12:10", "credits": 3},
+        {"day": "週四", "name": "經濟學",       "time": "09:10–12:10", "credits": 4},
+        {"day": "週五", "name": "管理學",       "time": "13:20–15:10", "credits": 0},
+    ]
+
+    # 第二週加簽課程選項
+    _WEEK2_COURSES = [
+        {"name": "普通心理學",   "credits": 3},
+        {"name": "商管程式設計", "credits": 3},
+        {"name": "總經原",       "credits": 4},
+        {"name": "普通化學丙",   "credits": 3},
+    ]
+
+    def _calc_quiz_score(self, base=40, rand_range=(-5, 5)) -> int:
+        """依體力比例 + 運氣 + 熟練度計算小考分數（0–100）。"""
+        p = self.player
+        stamina_ratio = p.stamina / max(p.stamina_max, 1)
+        score = (base
+                 + min(30, int(stamina_ratio * 30))
+                 + min(20, p.luck // 5)
+                 + min(10, sum(p.subject_exp.values()) // 10)
+                 + random.randint(*rand_range))
+        return max(0, min(100, score))
+
+    def _pre_action_narrative(self, week: int):
+        """每週行動選單出現前的劇情、台詞與互動選擇。"""
+        player = self.player
+
+        if week == 1:
+            notify("新的一學期又開始了，帶著暑假的好心情來上課。")
+            notify_timetable(self._WEEK1_TIMETABLE)
+            notify("「吼呦，雖然大部分的課是我自己選的，不過這學期的課表看起來也太無聊了吧！」")
+            notify("上課時太無聊，眼睛快要闔起來了，下課時要不要去商店裡繞一繞？")
+            if ask_yn("要前往道具店嗎？"):
+                self.shop.open_shop()
+            notify("「天啊這禮拜忘記去加簽了，只能下禮拜再去了TT」")
+
+        elif week == 2:
+            notify("因為上週忘記去加簽，加簽大地開始！")
+            notify("「太晚才想到了，目前還能加簽的課還有這些，要去簽什麼課啊？」")
+            labels = [f"{c['name']}（{c['credits']} 學分）" for c in self._WEEK2_COURSES]
+            choice = ask_choice(labels)
+            if choice > 0:
+                course = self._WEEK2_COURSES[choice - 1]
+                self._week2_course = course
+                notify(f"努力跑了好多課程，最後加簽成功科目有：{course['name']}。")
+                if course["name"] == "商管程式設計":
+                    self.skill_sys.gain_exp("綜合", 5)
+            else:
+                self._week2_course = {"name": "（無）", "credits": 0}
+                notify("猶豫了一下，最後還是沒有加任何課。")
+
+        elif week == 3:
+            notify("開始進入學期節奏。")
+            notify("「課表看起來還可以，但每天還是莫名很累。」")
+            notify("「有人已經默默開始翹課了。」")
+
+        elif week == 4:
+            notify("⚠️ 小考來臨(1)！")
+            notify("「原本想說作業應該不難，結果一打開發現要求比想像中還多。」")
+            notify("「都忘記這份作業居然要交三千字讀書心得，我完了。」")
+            notify("「等一下，居然還有兩個小考嗎！根本讀不完啊！」")
+            notify("「這幾天都要熬夜了，要先去商店看一下有什麼道具可以用嗎？」")
+            if ask_yn("要前往道具店嗎？"):
+                self.shop.open_shop()
+            # 計算並儲存小考一分數
+            self._quiz1_score = self._calc_quiz_score(base=40, rand_range=(-5, 5))
+            player.grades["小考"] = max(player.grades["小考"], float(self._quiz1_score))
+            if self._quiz1_score >= 80:
+                player.change_satisfaction(5)
+            else:
+                player.change_satisfaction(-8)
+            notify("助教：『小考成績約兩週後公布，請大家到時候留意 NTU COOL 的通知。』")
+
+        elif week == 5:
+            notify("⚡ 緊急狀況：作業和小考成績公布(1)！")
+            notify("「行事曆上的待辦事項開始變多，每次都覺得有東西快到期了。」")
+            notify("「原本以為還很閒，結果發現突然多了好多事情。欸？等等。」")
+            player.grades["作業"] = max(player.grades["作業"], 90.0)
+            notify_grade_report([
+                {"name": "小考一", "score": self._quiz1_score},
+                {"name": "作業一", "score": 90},
+            ])
+
+        elif week == 6:
+            notify("系上聚餐。")
+            notify("「朋友突然拉你去參加系上聚餐，原本只想待一下，結果不知不覺玩到很晚。」")
+            player.change_satisfaction(10)
+            player.consume_stamina(5)
+
+        elif week == 7:
+            notify("期中前夕，備考中。")
+            notify("「明明早八遲到了二十分鐘，但我居然是第五個到教室的。」")
+            notify("「來上課的人真的少了好多，而且圖書館變得好難找位置。」")
+
+        elif week == 9:
+            notify("🎉 系學會會長在群組裡公告招工事宜。")
+            notify("「好朋友問你想不想一起當工人。」")
+            if ask_yn("要答應幫忙辦活動嗎？"):
+                notify("✨ 答應成為工人！運氣 +10，但體力 -8。")
+                player.luck += 10
+                player.consume_stamina(8)
+                job_choice = ask_choice(["美宣：畫超級漂亮的圖",
+                                         "公關：寫文案、和廠商對接",
+                                         "現場工人：搬東西、場佈、場復"])
+                if job_choice == 1:
+                    self._week9_job = "美宣"
+                    player.change_satisfaction(10)
+                    notify("「你運用了你的美術天分，大家都說你畫的圖很棒！滿足感 +10。」")
+                elif job_choice == 2:
+                    self._week9_job = "公關"
+                    player.luck += 5
+                    player.change_satisfaction(8)
+                    notify("「你動用了你的社交技能，和廠商對接超順利！運氣 +5，滿足感 +8。」")
+                else:
+                    self._week9_job = "現場工人"
+                    player.consume_stamina(5)
+                    player.change_satisfaction(5)
+                    notify("「你負責搬東西、場佈、場復，累翻了但活動很成功！體力 -5，滿足感 +5。」")
+            else:
+                notify("🛏️ 決定把時間留給自己，好好休息。")
+                player.change_satisfaction(3)
+
+        elif week == 10:
+            notify("學期已經過了一半，大家開始討論暑假的規劃。")
+            notify("「朋友已經開始在討論暑假實習、雙主修和交換學生了。」")
+            notify("同學：「你有想好暑假要幹嘛了嗎？」")
+            notify("「呃...還沒。」")
+
+        elif week == 11:
+            notify("分組報告地獄開始。")
+            notify("「組員想要約時間討論，但大家的空堂完全對不上。」")
+            notify("「有人完全消失，在群組裡潛水，也有人凌晨兩點還在改簡報。」")
+
+        elif week == 12:
+            notify("⚠️ 小考來臨(2)！")
+            notify("「最近常常一邊吃飯一邊看 NTU COOL，深怕又漏掉什麼公告。」")
+            notify("「睡眠時間太混亂了，有時甚至不知道今天星期幾。」")
+            notify("「不過還好我已經讀完這週小考了，耶。」")
+            # 計算並儲存小考二分數
+            self._quiz2_score = self._calc_quiz_score(base=35, rand_range=(-10, 10))
+            player.grades["小考"] = max(player.grades["小考"], float(self._quiz2_score))
+            if self._quiz2_score >= 80:
+                player.change_satisfaction(5)
+            else:
+                player.change_satisfaction(-8)
+            notify("「考完小考後，大家開始討論題目。」")
+            notify("「欸？我剛才有寫到這題嗎？」")
+
+        elif week == 13:
+            notify("⚠️ 停修期限截止在即！")
+            notify("「天啊我的成績看起來超不妙，還是在停修截止前，趕快停修呢？」")
+            if ask_yn("要壯士斷腕選擇停修某一科嗎？"):
+                course_choice = ask_choice([
+                    "日文：好不容易加簽到的課，但作業太重、期末還要交報告",
+                    "統計學：系訂必修，作業不太會寫，不知道能不能撐到期末",
+                ])
+                player.restore_stamina(10)
+                player.luck = max(0, player.luck - 10)
+                if course_choice == 1:
+                    notify("💥 停修【日文】成功！體力 +10，但運氣 -10，滿足感 -5。")
+                    player.change_satisfaction(-5)
+                else:
+                    notify("💥 停修【統計學】成功！體力 +10，但運氣 -10，熟練度 -8。")
+                    player.subject_exp["統計學"] = max(0, player.subject_exp.get("統計學", 0) - 8)
+            else:
+                notify("💪 決定硬著頭皮撐下去！滿足感 +5。")
+                player.change_satisfaction(5)
+            notify("「無論是否停休，每堂課教授都在提醒：『距離期末只剩幾週了，大家要開始讀書囉！』」")
+
+        elif week == 14:
+            notify("🔥 期末報告和作業爆炸！")
+            notify("「簡報、報告、期末作業突然一起出現，行事曆被排得密密麻麻。」")
+            notify("「到底要先處理什麼東西啊！」")
+            ans = ask_choice([
+                "製作小組簡報：從零開始排版，完成後作業 70 分，體力 -10",
+                "撰寫個人五千字書面報告：最困難的部分還等著你，完成後作業 85 分，體力 -20",
+                "撰寫個人三千字觀影心得：要先重看一遍電影才能寫，完成後作業 65 分，體力 -5",
+            ])
+            if ans == 1:
+                player.grades["作業"] = max(player.grades["作業"], 70.0)
+                player.consume_stamina(10)
+                player.change_satisfaction(-3)
+                notify("🤝 順利完成小組簡報，至少不會被組員罵。")
+            elif ans == 2:
+                player.grades["作業"] = max(player.grades["作業"], 85.0)
+                player.consume_stamina(20)
+                player.change_satisfaction(-8)
+                notify("📝 瘋狂趕工完成五千字報告！作業成績提升。")
+            else:
+                player.grades["作業"] = max(player.grades["作業"], 65.0)
+                player.consume_stamina(5)
+                player.change_satisfaction(-2)
+                notify("🎬 重看了一遍電影，心得總算寫完了。")
+            notify("「唉，小考成績出來了，該來的還是來了。」")
+            notify_grade_report([{"name": "小考二", "score": self._quiz2_score}])
+
+        elif week == 15:
+            notify("最後衝刺！")
+            notify("「總圖、社科圖都沒位子，到處都有人在趕報告，去系館看看好了。」")
+            notify("「系館半夜依然燈火通明，平常大家此起彼落的聊天聲，都變成了敲擊鍵盤的聲音。」")
+            notify("「大家見面的第一句話從『要一起吃飯嗎』變成『你做完了嗎』。」")
+
+        else:
+            # 其餘週（無特定劇情）
+            notify("🍃 本週校園風平浪靜，照著自己的步調前進吧。")
 
     def _execute_action(self, action: dict):
         player = self.player
@@ -372,8 +508,9 @@ class TurnEngine:
     def _midterm_week(self):
         player = self.player
 
-        # print("\n📋 ═══ 期中考週！═══")  # 因套用pygame而調整
         notify("\n📋 ═══ 期中考週！═══")
+        notify("「每天都有人在便利商店熬夜念書，校園裡瀰漫著咖啡味。」")
+        notify("「考完一科後發現下一科根本還沒讀完。」")
 
         exam_modifier    = self._pre_exam_check()
         base_stats_score = self._calculate_exam_score("期中") * 0.5
@@ -429,6 +566,9 @@ class TurnEngine:
             notify("  ❌ 考卷上的分數宣判了你的死刑……")
             player.change_satisfaction(-20)
 
+        notify("「考完最後一科的瞬間，突然有種不真實感。」")
+        notify("「校園裡安靜了很多，路上可以見到許多拖著行李箱，準備回家的人。」")
+
     def _calculate_exam_score(self, exam_type: str) -> float:
         player = self.player
 
@@ -447,13 +587,42 @@ class TurnEngine:
     # ============================================================
     # 週末與最終結算
     # ============================================================
+    # 每週心情結語（第二週動態填入學分，其餘為固定字串）
+    _WEEKLY_QUOTES = {
+        1:  "下禮拜要開始加簽地獄了...",
+        3:  "開學的新鮮感好像慢慢消失了。",
+        4:  "還好最後有讀完，不管小考考得怎樣，我下週開始一定要改掉拖延的習慣。",
+        5:  "不是說兩週後公布嗎？我還沒準備好面對分數欸！",
+        6:  "參加活動還不錯，但這週待辦事項沒有做完TT。",
+        7:  "大家怎麼突然都開始讀書了？",
+        8:  "終於考完了…吧？",
+        9:  "原來系上要辦活動，之前怎麼沒聽說？",
+        10: "...蛤？為什麼只有我還在想明天晚餐要吃什麼。",
+        11: "比起報告本身，分組好像才是最大的挑戰，雷組員真的可以下去了╰(‵□′)╯",
+        12: "？？？？？完了。",
+        13: "我不聽我不聽，拜託不要再提醒我期末了啦。",
+        14: "哪有人在停修截止後才公布小考分數的！",
+        15: "撐過這週就快解脫了…",
+        16: "這學期終於結束了，好感動。",
+    }
+
     def _end_of_week_reflection(self, week: int):
-        # print("\n💭 【週末內心總結】")  # 因套用pygame而調整
         notify("\n💭 【週末內心總結】")
+        player = self.player
 
-        player        = self.player
-        stamina_ratio = player.stamina / player.stamina_max
+        # ── 週別專屬心情結語 ───────────────────────────────────
+        if week == 2:
+            course_name = self._week2_course["name"] if self._week2_course else "（無）"
+            credits     = self._week2_course["credits"] if self._week2_course else 0
+            quote = f"多了 {credits} 學分（{course_name}），真是太好了TT。"
+        else:
+            quote = self._WEEKLY_QUOTES.get(week, "")
 
+        if quote:
+            notify(f"  💭 {quote}")
+
+        # ── 體力狀態通用結語 ───────────────────────────────────
+        stamina_ratio = player.stamina / max(player.stamina_max, 1)
         if stamina_ratio > 0.7:
             outcome_text        = "狀態極佳，感覺下週能做更多事！"
             satisfaction_change = 5
@@ -464,7 +633,6 @@ class TurnEngine:
             outcome_text        = "筋疲力竭，只想躺在床上當植物人……"
             satisfaction_change = -8
 
-        # print(f"  本週狀態：{outcome_text}")  # 因套用pygame而調整
         notify(f"  本週狀態：{outcome_text}")
         player.change_satisfaction(satisfaction_change)
 

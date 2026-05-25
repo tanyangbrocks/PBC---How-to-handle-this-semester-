@@ -5,7 +5,7 @@
 # 玩家可以用打工賺來的錢購買道具，來恢復體力或提升能力。
 # ============================================================
 
-from ui import display_menu, get_player_choice, notify
+from ui import display_menu, get_player_choice, notify, open_shop_ui
 
 class Shop:
     """
@@ -95,29 +95,12 @@ class Shop:
 
     def open_shop(self):
         """
-        開啟商店介面，讓玩家可以反覆購買直到選擇離開。
+        開啟商店介面（使用 pygame 圖形化 UI）。
+        購買邏輯由 ui.py 事件處理器直接套用，此處只負責啟動與結束。
         """
-        # print("\n🏪 【校園道具店】")  # 因套用pygame而調整
-        notify("\n🏪 【校園道具店】")
-        # print(f"  目前餘額：${self.player.money}")  # 因套用pygame而調整
-        notify(f"  目前餘額：${self.player.money}")
-
-        while True:
-            # print("\n📋 商品列表")  # 因套用pygame而調整
-            notify("\n📋 商品列表")
-            for i, item in enumerate(self.items, start=1):
-                # print(f"  {i}. 【{item['name']}】 ${item['price']} 元　{item['desc']}")  # 因套用pygame而調整
-                notify(f"  {i}. 【{item['name']}】 ${item['price']} 元　{item['desc']}")
-            # print("  0. 離開商店")  # 因套用pygame而調整
-
-            choice = get_player_choice(self.items)
-            if choice == 0:
-                # print("👋 謝謝光臨，歡迎下次再來！")  # 因套用pygame而調整
-                notify("👋 謝謝光臨，歡迎下次再來！")
-                break
-
-            item = self.items[choice - 1]
-            self._buy_item(item)
+        notify("\n🏪 前往道具店選購！")
+        open_shop_ui(self.items)
+        notify("👋 謝謝光臨道具店，歡迎下次再來！")
 
     def _buy_item(self, item):
         """
