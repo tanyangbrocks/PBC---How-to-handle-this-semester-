@@ -62,6 +62,8 @@ _scroll    = [0]      # 訊息區往上捲動的行數（保留供 end 畫面使
 _composing = [""]   # IME 組字預覽（輸入法尚未確認的字）
 _time_units    = [0]      # 本週剩餘時間點（底部標籤列顯示用）
 _is_fullscreen = [False]  # 目前是否全螢幕
+_week          = [0]      # 當前週次（1–16，0 表示尚未開始）
+_font_micro    = [None]   # 極小字型（週次輪盤數字用）
 
 # ── 音效 ────────────────────────────────────────────────────
 _sfx: dict = {}   # name -> pygame.mixer.Sound（run_ui 啟動後載入）
@@ -180,6 +182,10 @@ def reset_ui():
 def set_time(n: int):
     """更新底部標籤列的剩餘時間點數字。"""
     _cmd_q.put(("set_time", n))
+
+def set_week(w: int):
+    """由遊戲執行緒呼叫，更新週次輪盤顯示。"""
+    _week[0] = w
 
 # ── 角色創建 API ─────────────────────────────────────────────
 
@@ -635,6 +641,73 @@ def _draw_status(surf, fs, fm, player, rect):
         surf.blit(fs.render(eff, True, RED), (x, y))
 
 
+def _draw_week_wheel(surf, cx: int, cy: int, r: int, week: int):
+    """
+    在狀態欄繪製週次輪盤。
+    cx, cy: 輪盤圓心（screen 座標）。r: 外圓半徑。week: 當前週次 1–16。
+    數字 1–16 排列於輪盤邊緣內側，指針從圓心指向當前週次。
+    """
+    import math
+
+    R_NUM    = r - 14    # 數字放置半徑（邊緣內縮一點）
+    R_NEEDLE = r - 18    # 指針末端半徑
+    R_TICK_O = r - 3     # 刻度線外端
+    R_TICK_I = r - 10    # 刻度線內端（一般）
+    R_TICK_IC= r - 12    # 刻度線內端（當前週）
+
+    fmicro = _font_micro[0]
+    if fmicro is None:
+        return
+
+    # ── 背景圓 + 邊框 ─────────────────────────────────────────
+    _soft_shadow_circle(surf, cx, cy, r + 3, alpha=40)
+    pygame.draw.circle(surf, PANEL, (cx, cy), r)
+    pygame.draw.circle(surf, CYAN,  (cx, cy), r, 2)
+
+    # ── 16 刻度 + 數字 ─────────────────────────────────────────
+    for w in range(1, 17):
+        angle = math.radians(-90 + (w - 1) * 22.5)
+        ca, sa = math.cos(angle), math.sin(angle)
+        is_cur = (w == week)
+
+        # 刻度線
+        ri = R_TICK_IC if is_cur else R_TICK_I
+        ro = R_TICK_O
+        pygame.draw.line(
+            surf,
+            CYAN if is_cur else GRAY,
+            (cx + int(ri * ca), cy + int(ri * sa)),
+            (cx + int(ro * ca), cy + int(ro * sa)),
+            2 if is_cur else 1,
+        )
+
+        # 數字（當前週用 CYAN，其他用 GRAY）
+        nt = fmicro.render(str(w), True, CYAN if is_cur else GRAY)
+        nx = cx + int(R_NUM * ca)
+        ny = cy + int(R_NUM * sa)
+        surf.blit(nt, (nx - nt.get_width() // 2, ny - nt.get_height() // 2))
+
+    # ── 指針 ──────────────────────────────────────────────────
+    if 1 <= week <= 16:
+        angle = math.radians(-90 + (week - 1) * 22.5)
+        ex = cx + int(R_NEEDLE * math.cos(angle))
+        ey = cy + int(R_NEEDLE * math.sin(angle))
+        # 指針本體
+        pygame.draw.line(surf, RED, (cx, cy), (ex, ey), 3)
+        # 指針根部（短反向三角形底座）
+        base_angle = angle + math.pi
+        bx = cx + int(6 * math.cos(base_angle))
+        by = cy + int(6 * math.sin(base_angle))
+        pygame.draw.line(surf, (160, 40, 40), (cx, cy), (bx, by), 3)
+
+    # ── 中心圓點 ──────────────────────────────────────────────
+    pygame.draw.circle(surf, WHITE, (cx, cy), 5)
+    pygame.draw.circle(surf, CYAN,  (cx, cy), 5, 2)
+
+    # ── 光澤 ──────────────────────────────────────────────────
+    _gloss_circle(surf, cx, cy, r)
+
+
 def _draw_status_v2(surf, fm, fs, player, rect, mpos):
     """
     新版狀態欄：
@@ -715,6 +788,15 @@ def _draw_status_v2(surf, fm, fs, player, rect, mpos):
     # ── 金錢 + 道具店按鈕（右側）─────────────────────────────
     money_t = fm.render(f"$ {player.money}", True, YELLOW)
     surf.blit(money_t, (rect.right - 140 - money_t.get_width(), rect.y + 18))
+
+    # ── 週次輪盤（自我滿足度文字右側 ↔ 金錢左側的空白區域）─
+    sat_right   = info_x + bar_w + 10 + sat_t.get_width() + 12
+    money_left  = rect.right - 140 - money_t.get_width() - 12
+    ww_r        = 55           # 輪盤外圓半徑
+    ww_cx       = (sat_right + money_left) // 2
+    ww_cy       = rect.y + STATUS_H // 2
+    if money_left - sat_right >= ww_r * 2 + 8:   # 空間夠才畫
+        _draw_week_wheel(surf, ww_cx, ww_cy, ww_r, _week[0])
 
     shop_r = pygame.Rect(rect.right - 130, rect.y + 58, 118, 40)
     hover  = shop_r.collidepoint(mpos)
@@ -1969,6 +2051,7 @@ def run_ui():
     fl = _get_font(40)   # 開始 / 結束畫面標題大字
     fm = _get_font(22)
     fs = _get_font(17)
+    _font_micro[0] = _get_font(11)   # 週次輪盤小字
 
     # 版面 Rect
     sr = pygame.Rect(0, 0,           WIN_W, STATUS_H)   # 狀態欄

@@ -62,6 +62,7 @@ def game_main():
             # display_status(player)  # 因套用pygame而調整（狀態欄由 pygame 持續顯示）
             ui.set_player(player)
 
+            ui.set_week(week)
             game_over = engine.run_week(week)
 
             if game_over:
