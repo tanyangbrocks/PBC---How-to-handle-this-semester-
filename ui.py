@@ -1996,7 +1996,7 @@ def _draw_panel_log(surf, fs, log, rect, lines=5):
 # ── 側邊資訊面板常數 ──────────────────────────────────────────
 _SIDE_PANEL_W = 148   # 左右面板各佔 148px
 _SUBJ_DISPLAY = [     # (顯示短名, subject_exp 鍵值)
-    ("程設", "商管程式設計"),
+    ("商管程", "商管程式設計"),
     ("統計", "統計學"),
     ("經濟", "經濟學"),
     ("管理", "管理學"),
@@ -2104,14 +2104,22 @@ def _draw_grade_panel(surf: pygame.Surface, fm, fmic, player) -> None:
     pygame.draw.line(surf, (105, 68, 35),
                      (sx + PAD, div_y), (sx + PW - PAD, div_y))
 
-    # 每列行高
+    # 只顯示已有分數的欄位
+    active_rows = [(label, key, weight)
+                   for label, key, weight in _GRADE_ROWS
+                   if player.grades.get(key, 0.0) > 0.0]
+
+    if not active_rows:
+        hint = fmic.render("尚無成績記錄", True, GRAY)
+        surf.blit(hint, (sx + (PW - hint.get_width()) // 2, div_y + 14))
+        return
+
     content_h = sy + sh - 6 - (div_y + 8)
-    row_h     = content_h // len(_GRADE_ROWS)
+    row_h     = content_h // len(active_rows)
     row_y     = div_y + 8
 
-    for label, key, weight in _GRADE_ROWS:
-        val      = player.grades.get(key, 0.0)
-        recorded = val > 0.0
+    for label, key, weight in active_rows:
+        val = player.grades.get(key, 0.0)
 
         # 科目名（左）+ 佔比（右）
         lbl_s = fm.render(label, True, PANEL)
@@ -2120,14 +2128,10 @@ def _draw_grade_panel(surf: pygame.Surface, fm, fmic, player) -> None:
         surf.blit(wt_s,  (sx + PW - PAD - wt_s.get_width(),
                            row_y + (fm.get_height() - wt_s.get_height()) // 2))
 
-        # 分數（已公布用顏色標示；未公布灰色虛線）
-        if recorded:
-            col       = GREEN if val >= 80 else (YELLOW if val >= 60 else RED)
-            score_str = f"{val:.1f}"
-        else:
-            col       = GRAY
-            score_str = "──"
-        score_s = fm.render(score_str, True, col)
+        # 分數
+        col       = GREEN if val >= 80 else (YELLOW if val >= 60 else RED)
+        score_str = f"{val:.1f}"
+        score_s   = fm.render(score_str, True, col)
         surf.blit(score_s,
                   (sx + (PW - score_s.get_width()) // 2,
                    row_y + fm.get_height() + 3))
