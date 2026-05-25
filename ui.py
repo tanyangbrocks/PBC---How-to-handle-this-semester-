@@ -1355,7 +1355,7 @@ def _draw_action_panel(surf, fm, fs, mode, choices, log, prompt, tvalue, rect, t
                 surf.blit(pt, (rect.x + 14,
                                prompt_y - (len(_wrap(prompt[0], fs, content_rect.width - 28)) - 1 - j)
                                * (fs.get_height() + 3)))
-        for i, (label, val) in enumerate([(_yn_labels[0], True), (_yn_labels[1], False)]):
+        for i, (label, val) in enumerate([(_yn_labels[1], False), (_yn_labels[0], True)]):
             br    = pygame.Rect(rect.x + 14 + i * (BTN_W2 + BTN_SP), btn_y, BTN_W2, BTN_H2)
             hover = br.collidepoint(mpos)
             col_b = BTN_N if val else DARK_GRAY
