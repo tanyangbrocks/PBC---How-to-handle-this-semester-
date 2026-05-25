@@ -11,6 +11,7 @@ import pygame
 import threading
 import queue
 import sys
+import os
 
 # ─────────────────────────────────────────
 #  顏色（陽光少女色系）
@@ -350,6 +351,26 @@ def _gradient_surf(w: int, h: int, c1: tuple, c2: tuple) -> pygame.Surface:
         col = tuple(int(c1[j] + (c2[j] - c1[j]) * t) for j in range(3))
         pygame.draw.line(surf, col, (0, i), (w - 1, i))
     return surf
+
+
+def _load_cover(path: str, w: int, h: int) -> "pygame.Surface | None":
+    """
+    載入圖片並以 cover 模式縮放（保持比例填滿目標尺寸，置中裁切）。
+    失敗時回傳 None，讓呼叫端 fallback 到漸層背景。
+    """
+    try:
+        img = pygame.image.load(path).convert()
+    except Exception:
+        return None
+    iw, ih = img.get_size()
+    scale  = max(w / iw, h / ih)
+    nw     = int(iw * scale)
+    nh     = int(ih * scale)
+    img    = pygame.transform.smoothscale(img, (nw, nh))
+    # 置中裁切到目標尺寸
+    out = pygame.Surface((w, h))
+    out.blit(img, (-((nw - w) // 2), -((nh - h) // 2)))
+    return out
 
 
 # ─────────────────────────────────────────
@@ -1557,17 +1578,29 @@ def _draw_start(surf, fm, fl, mpos):
         surf.blit(_grads["start"], (0, 0))
     else:
         surf.fill(BG)
+
+    # ── 標題區半透明底板（確保圖片背景上文字可讀）─────────
+    card_w, card_h = 520, 180
+    card_x = (WIN_W - card_w) // 2
+    card_y = WIN_H // 3 - 40
+    card_s = pygame.Surface((card_w, card_h), pygame.SRCALPHA)
+    card_s.fill((20, 10, 5, 140))   # 深棕半透明
+    surf.blit(card_s, (card_x, card_y))
+    pygame.draw.rect(surf, (*CYAN, 180), (card_x, card_y, card_w, card_h),
+                     2, border_radius=16)
+
     # 標題
-    title = fl.render("如何渡過這學期？", True, CYAN)
-    surf.blit(title, ((WIN_W - title.get_width()) // 2, WIN_H // 3 - 20))
+    title = fl.render("如何渡過這學期？", True, (255, 255, 255))
+    surf.blit(title, ((WIN_W - title.get_width()) // 2, card_y + 22))
     # 副標
-    sub = fm.render("一款大學生存模擬遊戲", True, YELLOW)
-    surf.blit(sub, ((WIN_W - sub.get_width()) // 2, WIN_H // 3 + 58))
+    sub = fm.render("一款大學生存模擬遊戲", True, (255, 230, 140))
+    surf.blit(sub, ((WIN_W - sub.get_width()) // 2, card_y + 22 + fl.get_height() + 14))
+
     # 按鈕
-    btn   = pygame.Rect((WIN_W - 220) // 2, WIN_H // 2 + 50, 220, 56)
+    btn   = pygame.Rect((WIN_W - 220) // 2, WIN_H // 2 + 60, 220, 56)
     hover = btn.collidepoint(mpos)
     dr    = _premium_btn(surf, btn, BTN_N, hover, radius=16)
-    t     = fm.render("開始遊戲", True, WHITE)
+    t     = fm.render("開始遊戲", True, (255, 255, 255))
     surf.blit(t, (dr.x + (dr.width  - t.get_width())  // 2,
                   dr.y + (dr.height - t.get_height()) // 2))
     return btn
@@ -1865,6 +1898,26 @@ def run_ui():
     _grads["status"] = _gradient_surf(WIN_W, STATUS_H, (255, 226, 190), (255, 242, 214))
     _grads["input"]  = _gradient_surf(WIN_W, ACTION_H, (255, 242, 214), (255, 226, 190))
     _grads["start"]  = _gradient_surf(WIN_W, WIN_H,    (255, 248, 226), (255, 228, 192))
+
+    # ── 匯入背景圖片（cover 縮放，失敗時保留漸層）───────────
+    _bg_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           "asset", "picture", "background")
+    _title_img = _load_cover(
+        os.path.join(_bg_dir, "title_background.webp"), WIN_W, WIN_H)
+    if _title_img is not None:
+        _grads["start"] = _title_img
+
+    _game_img = _load_cover(
+        os.path.join(_bg_dir, "1234_background.webp"), WIN_W, WIN_H)
+    if _game_img is not None:
+        _grads["bg"] = _game_img
+        # 圖片背景時，狀態欄與行動面板改為半透明疊層，讓建築圖透出
+        _st_ov = pygame.Surface((WIN_W, STATUS_H), pygame.SRCALPHA)
+        _st_ov.fill((255, 238, 212, 215))
+        _grads["status"] = _st_ov
+        _in_ov = pygame.Surface((WIN_W, ACTION_H), pygame.SRCALPHA)
+        _in_ov.fill((255, 238, 212, 215))
+        _grads["input"] = _in_ov
 
     # 全螢幕切換按鈕固定 Rect（右下角，各畫面常駐）
     fs_btn = pygame.Rect(WIN_W - 46, WIN_H - 46, 40, 40)
