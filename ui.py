@@ -53,9 +53,10 @@ _reply_val   = [None]           # 用 list 讓內層函式可修改
 # ─────────────────────────────────────────
 _log     = []       # 所有已換行的訊息字串
 _player  = [None]   # 角色物件參照
-_mode    = [None]   # "choices" | "yn" | "text" | None
-_choices = []       # 選項標籤列表
-_prompt  = [""]     # yn / text 提示文字
+_mode      = [None]   # "choices" | "yn" | "text" | None
+_choices   = []       # 選項標籤列表
+_prompt    = [""]     # yn / text 提示文字
+_yn_labels = ["是", "否"]   # yn 模式的按鈕文字（可自定義）
 _tvalue  = [""]     # text 模式的目前輸入內容
 _scroll    = [0]      # 訊息區往上捲動的行數（保留供 end 畫面使用）
 _composing = [""]   # IME 組字預覽（輸入法尚未確認的字）
@@ -137,9 +138,11 @@ def ask_text(prompt: str, default: str = "") -> str:
     _reply_event.wait()
     return _reply_val[0]
 
-def ask_yn(prompt: str) -> bool:
-    """取代 y/N 型的 input()：顯示「是 / 否」按鈕，回傳 True / False。"""
-    _cmd_q.put(("yn", prompt))
+def ask_yn(prompt: str,
+           yes_label: str = "是",
+           no_label:  str = "否") -> bool:
+    """取代 y/N 型的 input()：顯示自定義標籤按鈕，回傳 True / False。"""
+    _cmd_q.put(("yn", prompt, yes_label, no_label))
     _reply_event.clear()
     _reply_event.wait()
     return _reply_val[0]
@@ -1141,6 +1144,9 @@ _ACTION_INFO = {
 def _draw_action_popup(surf, fs):
     """
     在遊戲畫面右側繪製由右而左滑入的行動結果視窗。
+    特殊前綴：
+      "! " → 警示行（紅色，加上小分隔線）
+      "---" → 分隔線
     使用 _popup_t0[0] 與 _popup_lines 驅動動畫，由 run_ui 每幀呼叫。
     """
     if _popup_t0[0] == 0 or not _popup_lines:
@@ -1148,29 +1154,52 @@ def _draw_action_popup(surf, fs):
 
     elapsed = pygame.time.get_ticks() - _popup_t0[0]
     if elapsed >= POPUP_DURATION:
-        _popup_t0[0] = 0   # 時間到，關閉
+        _popup_t0[0] = 0
         return
 
-    POPUP_W  = 230
-    lh       = fs.get_height() + 5
-    title_h  = fs.get_height() + 10
-    ph       = title_h + 4 + len(_popup_lines) * lh + 14
+    POPUP_W = 250
+    lh      = fs.get_height() + 5
+    SEP_H   = 10   # 分隔線高度（含上下空隙）
+
+    # ── 預先展開所有行（支援自動換行）以計算總高度 ──────────
+    title_h = fs.get_height() + 10
+    rows    = []   # list of ("text", color) | ("sep",) | ("warn_sep",)
+    for raw in _popup_lines:
+        if raw == "---":
+            rows.append(("sep",))
+        elif raw.startswith("! "):
+            display = raw[2:]
+            rows.append(("warn_sep",))
+            for wl in _wrap(display, fs, POPUP_W - 28):
+                rows.append((wl, RED))
+        else:
+            if "+" in raw:
+                col = GREEN
+            elif "-" in raw:
+                col = RED
+            else:
+                col = WHITE
+            for wl in _wrap(raw, fs, POPUP_W - 28):
+                rows.append((wl, col))
+
+    ph = (title_h + 4
+          + sum(SEP_H if r[0] in ("sep", "warn_sep") else lh for r in rows)
+          + 14)
 
     # ── x 位置動畫 ─────────────────────────────────────────
     target_x = WIN_W - POPUP_W - 16
     if elapsed < POPUP_IN_MS:
         t  = elapsed / POPUP_IN_MS
-        t2 = 1 - (1 - t) ** 3          # ease_out_cubic
+        t2 = 1 - (1 - t) ** 3
         x  = WIN_W - int(t2 * (POPUP_W + 16))
     elif elapsed > POPUP_DURATION - POPUP_OUT_MS:
         t  = (elapsed - (POPUP_DURATION - POPUP_OUT_MS)) / POPUP_OUT_MS
-        t2 = t * t                      # ease_in_quad
+        t2 = t * t
         x  = target_x + int(t2 * (POPUP_W + 32))
     else:
         x  = target_x
 
-    # 垂直置中於人物立繪區
-    y = STATUS_H + (CHAR_H - ph) // 2
+    y     = STATUS_H + (CHAR_H - ph) // 2
     pop_r = pygame.Rect(x, y, POPUP_W, ph)
 
     # ── 繪製面板 ───────────────────────────────────────────
@@ -1189,16 +1218,17 @@ def _draw_action_popup(surf, fs):
     ty += 6
 
     # 結果行
-    for line in _popup_lines:
-        if "+" in line:
-            col = GREEN
-        elif "-" in line:
-            col = RED
+    for row in rows:
+        if row[0] in ("sep", "warn_sep"):
+            ty += SEP_H // 2
+            pygame.draw.line(surf, DARK_GRAY,
+                             (pop_r.x + 12, ty), (pop_r.right - 12, ty), 1)
+            ty += SEP_H // 2
         else:
-            col = WHITE
-        lt = fs.render(line, True, col)
-        surf.blit(lt, (pop_r.x + 14, ty))
-        ty += lh
+            text, col = row
+            lt = fs.render(text, True, col)
+            surf.blit(lt, (pop_r.x + 14, ty))
+            ty += lh
 
 
 def _draw_action_panel(surf, fm, fs, mode, choices, log, prompt, tvalue, rect, time_left, mpos):
@@ -1313,10 +1343,20 @@ def _draw_action_panel(surf, fm, fs, mode, choices, log, prompt, tvalue, rect, t
             content_rects.append((br, i + 1))
 
     elif mode == "yn":
-        # ── 是 / 否 按鈕 + 最新 log ───────────────────────────
-        _draw_panel_log(surf, fs, log, content_rect, lines=3)
-        for i, (label, val) in enumerate([("是", True), ("否", False)]):
-            br    = pygame.Rect(rect.x + 14 + i * 120, content_top + content_rect.height - 54, 108, 42)
+        # ── prompt 提示 + 是 / 否 按鈕 + 最新 log ────────────
+        BTN_H2, BTN_W2, BTN_SP = 44, 128, 14
+        btn_y   = content_top + content_rect.height - BTN_H2 - 8
+        prompt_y = btn_y - fs.get_height() - 8
+        _draw_panel_log(surf, fs, log, content_rect, lines=2)
+        # prompt 文字（紅色，顯示於按鈕正上方）
+        if prompt[0]:
+            for j, pln in enumerate(_wrap(prompt[0], fs, content_rect.width - 28)):
+                pt = fs.render(pln, True, RED)
+                surf.blit(pt, (rect.x + 14,
+                               prompt_y - (len(_wrap(prompt[0], fs, content_rect.width - 28)) - 1 - j)
+                               * (fs.get_height() + 3)))
+        for i, (label, val) in enumerate([(_yn_labels[0], True), (_yn_labels[1], False)]):
+            br    = pygame.Rect(rect.x + 14 + i * (BTN_W2 + BTN_SP), btn_y, BTN_W2, BTN_H2)
             hover = br.collidepoint(mpos)
             col_b = BTN_N if val else DARK_GRAY
             dr    = _premium_btn(surf, br, col_b, hover, radius=12)
@@ -1945,7 +1985,9 @@ def run_ui():
                 _choices.extend(cmd[1])
                 _mode[0] = "choices"
             elif tag == "yn":
-                _prompt[0] = cmd[1]
+                _prompt[0]    = cmd[1]
+                _yn_labels[0] = cmd[2] if len(cmd) > 2 else "是"
+                _yn_labels[1] = cmd[3] if len(cmd) > 3 else "否"
                 _mode[0] = "yn"
             elif tag == "text":
                 _prompt[0] = cmd[1]

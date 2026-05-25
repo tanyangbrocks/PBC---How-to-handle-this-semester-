@@ -155,10 +155,11 @@ class TurnEngine:
                 continue
 
             if action["stamina_cost"] > player.stamina:
-                # print(f"⚠️ 提醒：你的體力剩餘 {player.stamina}，執行此行動可能會導致生病！")  # 因套用pygame而調整
-                notify(f"⚠️ 提醒：你的體力剩餘 {player.stamina}，執行此行動可能會導致生病！")
-                # confirm = input("確定要執行嗎？(y/N)：").strip().lower()  # 因套用pygame而調整
-                confirm = ask_yn("確定要執行嗎？")
+                confirm = ask_yn(
+                    f"體力剩餘 {player.stamina} 點，執行此行動可能會導致生病！",
+                    yes_label="仍要執行",
+                    no_label="還是算了",
+                )
                 if not confirm:
                     continue
 
@@ -408,6 +409,10 @@ class TurnEngine:
         if sat != 0:
             sign = "+" if sat > 0 else ""
             results.append(f"自我滿足度 {sign}{sat}")
+        # 若自我滿足度過低，附加警示行到彈出視窗
+        if player.satisfaction < 60:
+            results.append("---")
+            results.append("! 自我滿足度過低，本週可支配時間大幅下降")
 
         # ── 課堂參與度 ────────────────────────────────────────
         if "participation" in action:
