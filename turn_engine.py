@@ -16,7 +16,7 @@ from event_system import EventSystem
 from skill_system import SkillSystem
 from shop_V03 import Shop
 from ui import notify, ask_yn, ask_choice, ask_text, set_player, \
-               notify_timetable, notify_grade_report, set_time
+               notify_timetable, notify_grade_report, set_time, show_action_result
 
 
 # ── 每週可選擇的行動清單 ──────────────────────────────────
@@ -384,31 +384,47 @@ class TurnEngine:
             notify("🍃 本週校園風平浪靜，照著自己的步調前進吧。")
 
     def _execute_action(self, action: dict):
-        player = self.player
-        cost   = action["stamina_cost"]
+        player  = self.player
+        cost    = action["stamina_cost"]
+        results = []   # 供彈出視窗顯示的結果列表
 
+        # ── 體力 ──────────────────────────────────────────────
         if cost > 0:
             player.consume_stamina(cost)
+            results.append(f"體力 -{cost}")
         else:
             player.restore_stamina(abs(cost))
+            results.append(f"體力 +{abs(cost)}")
 
-        if action.get("exp_gain", 0) > 0:
-            self.skill_sys.gain_exp("綜合", action["exp_gain"])
+        # ── 課業熟練度 ────────────────────────────────────────
+        exp = action.get("exp_gain", 0)
+        if exp > 0:
+            self.skill_sys.gain_exp("綜合", exp)
+            results.append(f"課業熟練度 +{exp}")
 
-        player.change_satisfaction(action.get("satisfaction", 0))
+        # ── 自我滿足度 ────────────────────────────────────────
+        sat = action.get("satisfaction", 0)
+        player.change_satisfaction(sat)
+        if sat != 0:
+            sign = "+" if sat > 0 else ""
+            results.append(f"自我滿足度 {sign}{sat}")
 
+        # ── 課堂參與度 ────────────────────────────────────────
         if "participation" in action:
-            player.grades["參與度"] = min(
-                100, player.grades["參與度"] + action["participation"]
-            )
+            gain = action["participation"]
+            player.grades["參與度"] = min(100, player.grades["參與度"] + gain)
+            results.append(f"課堂參與度 +{gain}")
 
+        # ── 金錢 ──────────────────────────────────────────────
         if "money_gain" in action:
             player.money += action["money_gain"]
-            # print(f"  💰 賺到 {action['money_gain']} 元（現有：{player.money} 元）")  # 因套用pygame而調整
-            notify(f"  💰 賺到 {action['money_gain']} 元（現有：{player.money} 元）")
+            results.append(f"金錢 +{action['money_gain']} 元")
+            notify(f"  賺到 {action['money_gain']} 元（現有：{player.money} 元）")
 
-        # print(f"  ✔ 執行【{action['name']}】完成。")  # 因套用pygame而調整
         notify(f"  ✔ 執行【{action['name']}】完成。")
+
+        # ── 觸發彈出結果視窗 ──────────────────────────────────
+        show_action_result(results)
 
     # ============================================================
     # 期中 / 期末考
@@ -675,8 +691,8 @@ class TurnEngine:
             # print("  💸 很遺憾……成績未達及格，明年準備重修吧。")  # 因套用pygame而調整
             notify("  💸 很遺憾……成績未達及格，明年準備重修吧。")
 
-        # print(f"\n  最終自我滿足感：{player.satisfaction}")  # 因套用pygame而調整
-        notify(f"\n  最終自我滿足感：{player.satisfaction}")
+        # print(f"\n  最終自我滿足度：{player.satisfaction}")  # 因套用pygame而調整
+        notify(f"\n  最終自我滿足度：{player.satisfaction}")
         # print(f"  剩餘金錢：{player.money} 元")  # 因套用pygame而調整
         notify(f"  剩餘金錢：{player.money} 元")
         # print("=" * 50)  # 因套用pygame而調整

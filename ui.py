@@ -97,6 +97,13 @@ _shop_msg        = [""]   # 購買結果訊息
 _shop_msg_time   = [0]    # 訊息顯示的時間戳（ms）
 _shop_exit_event = threading.Event()
 
+# ── 行動結果彈出視窗 ─────────────────────────────────────────
+_popup_lines   = []    # 結果文字行列表
+_popup_t0      = [0]   # 觸發時間戳（ms，0 = 未啟用）
+POPUP_DURATION = 3400  # 整體顯示時長（ms）
+POPUP_IN_MS    = 320   # 滑入動畫時長（ms）
+POPUP_OUT_MS   = 280   # 滑出動畫時長（ms）
+
 # ─────────────────────────────────────────
 #  供其他模組呼叫的 API
 # ─────────────────────────────────────────
@@ -234,6 +241,16 @@ def open_shop_ui(items: list) -> None:
     _cmd_q.put(("phase", "shop"))
     _shop_exit_event.wait()
     _cmd_q.put(("phase", "game"))
+
+
+def show_action_result(lines: list) -> None:
+    """
+    由遊戲執行緒呼叫，觸發畫面右側由右而左滑入的行動結果視窗。
+    lines: 要顯示的結果文字列表（如「體力 -4」、「金錢 +150」）。
+    """
+    _popup_lines.clear()
+    _popup_lines.extend(str(l) for l in lines)
+    _popup_t0[0] = pygame.time.get_ticks()
 
 # ─────────────────────────────────────────
 #  相容舊有介面（讓尚未修改的模組繼續可匯入）
@@ -570,7 +587,7 @@ def _draw_status(surf, fs, fm, player, rect):
     sc = GREEN if sr > 0.6 else (YELLOW if sr > 0.3 else RED)
     pygame.draw.rect(surf, DARK_GRAY, (x, y, bw, bh))
     pygame.draw.rect(surf, sc, (x, y, int(bw * sr), bh))
-    surf.blit(fs.render(f"滿足感 {player.satisfaction}%", True, WHITE),
+    surf.blit(fs.render(f"自我滿足度 {player.satisfaction}%", True, WHITE),
               (x + bw + 8, y))
     y += bh + gap
 
@@ -636,7 +653,7 @@ def _draw_status_v2(surf, fm, fs, player, rect, mpos):
     pygame.draw.rect(surf, DARK_GRAY, (info_x, sat_y, bar_w, bar_h), border_radius=7)
     pygame.draw.rect(surf, sat_c,     (info_x, sat_y, int(bar_w * sr_val), bar_h), border_radius=7)
     pygame.draw.rect(surf, GRAY,      (info_x, sat_y, bar_w, bar_h), 1, border_radius=7)
-    sat_t = fs.render(f"滿足感  {player.satisfaction}%", True, WHITE)
+    sat_t = fs.render(f"自我滿足度  {player.satisfaction}%", True, WHITE)
     surf.blit(sat_t, (info_x + bar_w + 10, sat_y))
 
     # ── 狀態效果（若有）───────────────────────────────────────
@@ -1086,6 +1103,79 @@ _cc_btn_cache: dict = {}
 _STANDARD_ACTIONS = {"認真讀書", "正常上課", "社團活動", "打工賺錢",
                      "好好休息", "幫助朋友", "🏪 前往道具店"}
 
+# 各行動的體力消耗說明 + 預期效果（用於 hover 提示列）
+_ACTION_INFO = {
+    "認真讀書": ("消耗體力 4", "課業熟練度 +8    自我滿足度 -5"),
+    "正常上課": ("消耗體力 2", "課業熟練度 +4    課堂參與度 +5"),
+    "社團活動": ("消耗體力 3", "自我滿足度 +10"),
+    "打工賺錢": ("消耗體力 4", "金錢 +150    自我滿足度 +3"),
+    "好好休息": ("恢復體力 6", "自我滿足度 +8"),
+    "幫助朋友": ("消耗體力 2", "自我滿足度 +12"),
+}
+
+
+def _draw_action_popup(surf, fs):
+    """
+    在遊戲畫面右側繪製由右而左滑入的行動結果視窗。
+    使用 _popup_t0[0] 與 _popup_lines 驅動動畫，由 run_ui 每幀呼叫。
+    """
+    if _popup_t0[0] == 0 or not _popup_lines:
+        return
+
+    elapsed = pygame.time.get_ticks() - _popup_t0[0]
+    if elapsed >= POPUP_DURATION:
+        _popup_t0[0] = 0   # 時間到，關閉
+        return
+
+    POPUP_W  = 230
+    lh       = fs.get_height() + 5
+    title_h  = fs.get_height() + 10
+    ph       = title_h + 4 + len(_popup_lines) * lh + 14
+
+    # ── x 位置動畫 ─────────────────────────────────────────
+    target_x = WIN_W - POPUP_W - 16
+    if elapsed < POPUP_IN_MS:
+        t  = elapsed / POPUP_IN_MS
+        t2 = 1 - (1 - t) ** 3          # ease_out_cubic
+        x  = WIN_W - int(t2 * (POPUP_W + 16))
+    elif elapsed > POPUP_DURATION - POPUP_OUT_MS:
+        t  = (elapsed - (POPUP_DURATION - POPUP_OUT_MS)) / POPUP_OUT_MS
+        t2 = t * t                      # ease_in_quad
+        x  = target_x + int(t2 * (POPUP_W + 32))
+    else:
+        x  = target_x
+
+    # 垂直置中於人物立繪區
+    y = STATUS_H + (CHAR_H - ph) // 2
+    pop_r = pygame.Rect(x, y, POPUP_W, ph)
+
+    # ── 繪製面板 ───────────────────────────────────────────
+    _soft_shadow(surf, pop_r, radius=12, alpha=60, offset=(4, 6), spread=5)
+    pygame.draw.rect(surf, PANEL, pop_r, border_radius=12)
+    pygame.draw.rect(surf, CYAN,  pop_r, 2, border_radius=12)
+    _gloss_rect(surf, pop_r)
+
+    # 標題列
+    ty = pop_r.y + 8
+    title_t = fs.render("行動結果", True, CYAN)
+    surf.blit(title_t, (pop_r.x + (POPUP_W - title_t.get_width()) // 2, ty))
+    ty += title_t.get_height() + 4
+    pygame.draw.line(surf, DARK_GRAY,
+                     (pop_r.x + 12, ty), (pop_r.right - 12, ty), 1)
+    ty += 6
+
+    # 結果行
+    for line in _popup_lines:
+        if "+" in line:
+            col = GREEN
+        elif "-" in line:
+            col = RED
+        else:
+            col = WHITE
+        lt = fs.render(line, True, col)
+        surf.blit(lt, (pop_r.x + 14, ty))
+        ty += lh
+
 
 def _draw_action_panel(surf, fm, fs, mode, choices, log, prompt, tvalue, rect, time_left, mpos):
     """
@@ -1104,9 +1194,42 @@ def _draw_action_panel(surf, fm, fs, mode, choices, log, prompt, tvalue, rect, t
     tab_rect    = pygame.Rect(rect.x, rect.y, rect.width, TAB_H)
     content_top = rect.y + TAB_H
 
+    # ── 預先計算 hover 狀態（供標籤列 tooltip 使用）─────────
+    is_std_action = (mode == "choices" and
+                     all(c in _STANDARD_ACTIONS for c in choices))
+    hovered_action = None
+    if is_std_action:
+        action_choices_pre = [c for c in choices if c != "🏪 前往道具店"]
+        n_pre    = len(action_choices_pre)
+        r_pre    = 36
+        sp_pre   = min(140, (rect.width - 40) // max(n_pre, 1))
+        sx_pre   = rect.x + (rect.width - n_pre * sp_pre) // 2 + sp_pre // 2
+        cy_pre   = content_top + r_pre + ((rect.height - TAB_H - r_pre * 2 - fs.get_height() - 8) // 2)
+        for i, lbl in enumerate(action_choices_pre):
+            cx_i = sx_pre + i * sp_pre
+            if pygame.Rect(cx_i - r_pre - 8, cy_pre - r_pre - 8,
+                           (r_pre + 8) * 2, (r_pre + 8) * 2).collidepoint(mpos):
+                hovered_action = lbl
+                break
+
     # 左側：剩餘時間點
-    time_txt = fs.render(f"⏱  剩餘時間點：{time_left}", True, WHITE)
+    time_txt = fs.render(f"剩餘時間點：{time_left}", True, WHITE)
     surf.blit(time_txt, (tab_rect.x + 14, tab_rect.y + (TAB_H - time_txt.get_height()) // 2))
+
+    # 中間：行動 hover 提示（體力消耗 + 預期效果）
+    if hovered_action and hovered_action in _ACTION_INFO:
+        cost_str, eff_str = _ACTION_INFO[hovered_action]
+        is_restore = cost_str.startswith("恢復")
+        cost_col   = GREEN if is_restore else RED
+        tip_x = tab_rect.x + 14 + time_txt.get_width() + 24
+        tip_y = tab_rect.y + (TAB_H - fs.get_height()) // 2
+        cost_t = fs.render(cost_str, True, cost_col)
+        surf.blit(cost_t, (tip_x, tip_y))
+        sep_x  = tip_x + cost_t.get_width() + 10
+        sep_t  = fs.render("|", True, GRAY)
+        surf.blit(sep_t, (sep_x, tip_y))
+        eff_t  = fs.render(eff_str, True, CYAN)
+        surf.blit(eff_t, (sep_x + sep_t.get_width() + 10, tip_y))
 
     # 右側：結束本週按鈕
     ew_btn   = pygame.Rect(rect.right - 110, tab_rect.y + 4, 100, TAB_H - 8)
@@ -1123,38 +1246,31 @@ def _draw_action_panel(surf, fm, fs, mode, choices, log, prompt, tvalue, rect, t
     content_rects = []
 
     # ── 內容區：依模式切換 ────────────────────────────────────
-    is_std_action = (mode == "choices" and
-                     all(c in _STANDARD_ACTIONS for c in choices))
 
     if mode == "choices" and is_std_action:
-        # ── 圓形行動按鈕 ─────────────────────────────────────
+        # ── 圓形行動按鈕（縮小 + 標籤移至按鈕下方）─────────
         action_choices = [c for c in choices if c != "🏪 前往道具店"]
         n       = len(action_choices)
-        r       = 44
-        spacing = min(148, (rect.width - 40) // max(n, 1))
+        r       = 36
+        spacing = min(140, (rect.width - 40) // max(n, 1))
         total_w = n * spacing
         sx      = rect.x + (rect.width - total_w) // 2 + spacing // 2
-        cy_btn  = content_top + (content_rect.height) // 2
+        # 垂直：圓心上移，留空間給下方標籤
+        lh      = fs.get_height()
+        cy_btn  = content_top + r + ((content_rect.height - r * 2 - lh - 8) // 2)
 
         for i, label in enumerate(action_choices):
             cx_btn   = sx + i * spacing
             orig_idx = choices.index(label) + 1
-            hover    = pygame.Rect(cx_btn - r, cy_btn - r, r * 2, r * 2).collidepoint(mpos)
+            hover    = pygame.Rect(cx_btn - r - 8, cy_btn - r - 8,
+                                   (r + 8) * 2, (r + 8) * 2).collidepoint(mpos)
             ar       = _premium_circle(surf, cx_btn, cy_btn, r,
                                        BTN_N, hover, key=(cx_btn, cy_btn))
             brect    = pygame.Rect(cx_btn - ar, cy_btn - ar, ar * 2, ar * 2)
-            # 標籤（最多兩行）
-            parts = label.replace("🏪 ", "").split()
-            if len(parts) >= 2 and fm.size(label)[0] > r * 2 - 8:
-                mid   = len(parts) // 2
-                lines = [" ".join(parts[:mid]), " ".join(parts[mid:])]
-            else:
-                lines = [label]
-            lh = fs.get_height()
-            ty = cy_btn - lh * len(lines) // 2
-            for li, ln in enumerate(lines):
-                lt = fs.render(ln, True, PANEL)
-                surf.blit(lt, (cx_btn - lt.get_width() // 2, ty + li * lh))
+            # 標籤顯示在按鈕正下方（文字移出按鈕外）
+            clean_label = label.replace("🏪 ", "")
+            lt = fs.render(clean_label, True, WHITE)
+            surf.blit(lt, (cx_btn - lt.get_width() // 2, cy_btn + r + 6))
             content_rects.append((brect, orig_idx))
 
     elif mode == "choices" and not is_std_action:
@@ -1893,6 +2009,8 @@ def run_ui():
             btn_rects, end_week_btn = _draw_action_panel(
                 screen, fm, fs, _mode[0], _choices, _log,
                 _prompt, _tvalue, ar, _time_units[0], mpos)
+            # 行動結果彈出視窗（右側由右而左滑入）
+            _draw_action_popup(screen, fs)
 
         # ── Modal 疊加（課表 / 成績公告，浮在所有畫面之上）────────
         _modal_ok_btn = None
