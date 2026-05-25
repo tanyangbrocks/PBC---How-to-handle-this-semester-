@@ -1357,6 +1357,9 @@ def _draw_action_popup(surf, fs):
       "! " → 警示行（紅色，加上小分隔線）
       "---" → 分隔線
     使用 _popup_t0[0] 與 _popup_lines 驅動動畫，由 run_ui 每幀呼叫。
+
+    注意：繪製前設定 clip 至遊戲邊界 (WIN_W, WIN_H)，防止全螢幕模式下
+    Surface 尺寸大於邏輯解析度時，動畫滑出位置超過右邊界並殘留上幀像素。
     """
     if _popup_t0[0] == 0 or not _popup_lines:
         return
@@ -1365,6 +1368,10 @@ def _draw_action_popup(surf, fs):
     if elapsed >= POPUP_DURATION:
         _popup_t0[0] = 0
         return
+
+    # ── 限制繪製區域於遊戲邊界內（全螢幕 bug 防護）──────────
+    _old_clip = surf.get_clip()
+    surf.set_clip(pygame.Rect(0, 0, WIN_W, WIN_H))
 
     POPUP_W = 250
     lh      = fs.get_height() + 5
@@ -1438,6 +1445,9 @@ def _draw_action_popup(surf, fs):
             lt = fs.render(text, True, col)
             surf.blit(lt, (pop_r.x + 14, ty))
             ty += lh
+
+    # ── 恢復原始 clip（避免影響後續繪製）────────────────────
+    surf.set_clip(_old_clip)
 
 
 def _draw_action_panel(surf, fm, fs, mode, choices, log, prompt, tvalue, rect, time_left, mpos):
@@ -2290,6 +2300,14 @@ def run_ui():
                 _modal_data[0] = cmd[1]   # items list
 
         # ── 繪製（依畫面階段切換內容）────────────────────────
+        # 全螢幕 fallback（無 SCALED）時 Surface 可能大於 WIN_W×WIN_H；
+        # 先把遊戲邊界外的區域填黑，防止上幀殘留像素堆疊成視覺垃圾。
+        _sw, _sh = screen.get_size()
+        if _sw > WIN_W:
+            screen.fill((0, 0, 0), pygame.Rect(WIN_W, 0, _sw - WIN_W, _sh))
+        if _sh > WIN_H:
+            screen.fill((0, 0, 0), pygame.Rect(0, WIN_H, _sw, _sh - WIN_H))
+
         btn_rects      = []
         start_btn      = None
         end_btn        = None
