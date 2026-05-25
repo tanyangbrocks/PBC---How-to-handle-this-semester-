@@ -63,6 +63,18 @@ _composing = [""]   # IME 組字預覽（輸入法尚未確認的字）
 _time_units    = [0]      # 本週剩餘時間點（底部標籤列顯示用）
 _is_fullscreen = [False]  # 目前是否全螢幕
 
+# ── 音效 ────────────────────────────────────────────────────
+_sfx: dict = {}   # name -> pygame.mixer.Sound（run_ui 啟動後載入）
+
+def _play_sfx(name: str) -> None:
+    """播放指定音效；若未載入或發生錯誤則靜默跳過。"""
+    snd = _sfx.get(name)
+    if snd:
+        try:
+            snd.play()
+        except Exception:
+            pass
+
 # ── 動畫 / 視覺特效狀態 ────────────────────────────────────────
 _anim_hover:   dict = {}   # (cx,cy) -> float 0..1  hover 進度
 _click_reg:    dict = {}   # (cx,cy) -> ticks_ms   點擊時間戳
@@ -1921,6 +1933,25 @@ def run_ui():
     """啟動 pygame 視窗並進入主迴圈，直到視窗關閉。"""
     pygame.init()
     pygame.key.set_repeat(400, 50)  # 長按重複：400ms 後開始，每 50ms 一次（backspace 連刪）
+
+    # ── 初始化音效 ────────────────────────────────────────────
+    try:
+        pygame.mixer.init()
+        _se_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               "asset", "audio", "se")
+        def _ld(fn):
+            try:
+                return pygame.mixer.Sound(os.path.join(_se_dir, fn))
+            except Exception:
+                return None
+        _sfx["start_click"] = _ld("soundreality-interface-6-204504.mp3")
+        _sfx["cc_click"]    = _ld("dropping (mp3cut.net).wav")
+        _sfx["action"]      = _ld("attack1.mp3")
+        _sfx["ui_click"]    = _ld("poka.mp3")
+        _sfx["back"]        = _ld("universfield-interface-03-277552.mp3")
+    except Exception:
+        pass
+
     screen = pygame.display.set_mode((WIN_W, WIN_H))
     pygame.display.set_caption("如何渡過這學期？")
     clock  = pygame.time.Clock()
@@ -2184,25 +2215,30 @@ def run_ui():
 
                 if _phase[0] == "start":
                     if start_btn and start_btn.collidepoint(ev.pos):
+                        _play_sfx("start_click")
                         _click_reg[(start_btn.centerx, start_btn.centery)] = pygame.time.get_ticks()
                         _phase[0] = "game"
                         _start_event.set()
                 elif _phase[0] == "shop":
                     # 離開按鈕
                     if shop_exit_btn and shop_exit_btn.collidepoint(ev.pos):
+                        _play_sfx("back")
                         _click_reg[(shop_exit_btn.centerx, shop_exit_btn.centery)] = pygame.time.get_ticks()
                         _shop_exit_event.set()
                     else:
                         # 購買按鈕
                         for (br, idx) in shop_buy_rects:
                             if br.collidepoint(ev.pos):
+                                _play_sfx("ui_click")
                                 _click_reg[(br.centerx, br.centery)] = pygame.time.get_ticks()
                                 _apply_shop_purchase(idx)
                                 break
                 elif _phase[0] == "char_create":
+                    _play_sfx("cc_click")
                     _handle_cc_action(ev.pos)
                 elif _phase[0] == "end":
                     if end_btn and end_btn.collidepoint(ev.pos):
+                        _play_sfx("ui_click")
                         _click_reg[(end_btn.centerx, end_btn.centery)] = pygame.time.get_ticks()
                         _phase[0] = "start"
                         _restart_event.set()
@@ -2212,6 +2248,7 @@ def run_ui():
                     if (shop_active
                             and shop_btn_rect is not None
                             and shop_btn_rect.collidepoint(ev.pos)):
+                        _play_sfx("ui_click")
                         _click_reg[(shop_btn_rect.centerx, shop_btn_rect.centery)] = pygame.time.get_ticks()
                         shop_idx = next(
                             (i + 1 for i, c in enumerate(_choices)
@@ -2227,6 +2264,7 @@ def run_ui():
                     if (_mode[0] == "choices"
                             and end_week_btn is not None
                             and end_week_btn.collidepoint(ev.pos)):
+                        _play_sfx("back")
                         _click_reg[(end_week_btn.centerx, end_week_btn.centery)] = pygame.time.get_ticks()
                         _reply_val[0] = 0
                         _mode[0] = None
@@ -2240,12 +2278,23 @@ def run_ui():
                         if br.collidepoint(ev.pos):
                             _click_reg[(br.centerx, br.centery)] = pygame.time.get_ticks()
                             if _mode[0] == "text" and val == "__ok__":
+                                _play_sfx("ui_click")
                                 _reply_val[0] = _tvalue[0]
                                 _mode[0] = None
                                 _composing[0] = ""
                                 pygame.key.stop_text_input()
                                 _reply_event.set()
                             elif _mode[0] in ("choices", "yn"):
+                                # 決定音效
+                                if _mode[0] == "choices":
+                                    _cname = (_choices[val - 1]
+                                              if isinstance(val, int) and 1 <= val <= len(_choices)
+                                              else "")
+                                    _play_sfx("action" if _cname in _STANDARD_ACTIONS
+                                                          and _cname != "🏪 前往道具店"
+                                              else "ui_click")
+                                else:  # yn
+                                    _play_sfx("ui_click" if val else "back")
                                 _reply_val[0] = val
                                 _mode[0] = None
                                 _choices.clear()
