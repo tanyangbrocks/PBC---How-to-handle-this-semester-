@@ -1718,10 +1718,13 @@ def _draw_action_popup(surf, fs):
     title_h = fs.get_height() + 10
     rows    = []   # list of ("text", color) | ("sep",) | ("warn_sep",)
     for raw in _popup_lines:
-        if isinstance(raw, tuple):
-            # 2-tuple (text, color_rgb)：直接以指定顏色渲染，略作縮排
+        if isinstance(raw, tuple) and raw[0] == "multi":
+            # ("multi", [(text, col), ...])：多色區段，單行渲染
+            rows.append(("multi", raw[1]))
+        elif isinstance(raw, tuple):
+            # 舊式 2-tuple (text, color_rgb)：直接以指定顏色渲染
             _annot_text, _annot_col = raw
-            rows.append((f"  {_annot_text}", _annot_col))
+            rows.append((_annot_text, _annot_col))
         elif raw == "---":
             rows.append(("sep",))
         elif raw.startswith("! "):
@@ -1742,6 +1745,7 @@ def _draw_action_popup(surf, fs):
     ph = (title_h + 4
           + sum(SEP_H if r[0] in ("sep", "warn_sep") else lh for r in rows)
           + 14)
+    # "multi" 行的 r[0] == "multi"，不在 sep/warn_sep 中，正確算 lh ✓
 
     # ── x 位置動畫 ─────────────────────────────────────────
     target_x = WIN_W - POPUP_W - 16
@@ -1781,6 +1785,14 @@ def _draw_action_popup(surf, fs):
             pygame.draw.line(surf, DARK_GRAY,
                              (pop_r.x + 12, ty), (pop_r.right - 12, ty), 1)
             ty += SEP_H // 2
+        elif row[0] == "multi":
+            # 多色區段：逐段橫向排列在同一行
+            xoff = pop_r.x + 14
+            for seg_text, seg_col in row[1]:
+                seg_s = fs.render(seg_text, True, seg_col)
+                surf.blit(seg_s, (xoff, ty))
+                xoff += seg_s.get_width()
+            ty += lh
         else:
             text, col = row
             lt = fs.render(text, True, col)

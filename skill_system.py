@@ -22,14 +22,24 @@ INTEL_NAMES = ["障礙", "困擾", "平均", "優秀", "聰明"]
 # 各程度的效益乘數
 INTEL_MULTIPLIERS = [0.6, 0.8, 1.0, 1.3, 1.6]
 
-# 智力等級對應的 popup 標注顏色（RGB）
+# ── popup 標注顏色（同一五色階）────────────────────────────────
+# 智力五級
 INTEL_ANNOT_COLORS = [
     (160,  40,  40),   # 障礙 — 暗紅
-    ( 72,  38,  18),   # 困擾 — 深棕黑（主文字色）
+    ( 72,  38,  18),   # 困擾 — 深棕黑
     ( 60, 120, 200),   # 平均 — 藍色
     ( 60, 160,  75),   # 優秀 — 綠色
     (190, 140,   0),   # 聰明 — 金色
 ]
+# 熟練度四級（對應五色階中間四格，新手略帶棕色、精通金色）
+LEVEL_ANNOT_COLORS = [
+    ( 72,  38,  18),   # 新手 — 深棕黑（困擾色）
+    ( 60, 120, 200),   # 普通 — 藍色（平均色）
+    ( 60, 160,  75),   # 熟練 — 綠色（優秀色）
+    (190, 140,   0),   # 精通 — 金色（聰明色）
+]
+# 標注括弧與分隔符號的顏色
+_ANNOT_PUNC = (105, 72, 45)
 
 
 class SkillSystem:
@@ -79,11 +89,16 @@ class SkillSystem:
         # 順便同步到 player.subject_exp（其實同一個字典，多此一舉但幫助理解）
         player.subject_exp[subject] = self.exp_pool[subject]
 
-        # 組合標注字串與顏色（供 popup 顯示用）
-        mult_display = f"{INTEL_MULTIPLIERS[intel_level]:g}"   # 去除多餘小數點
-        annot_str    = f"（{INTEL_NAMES[intel_level]}，×{mult_display}）"
-        annot_color  = INTEL_ANNOT_COLORS[intel_level]
-        return actual_gain, annot_str, annot_color
+        # 組合多色標注區段（供 popup "multi" 行使用）
+        sk_mult_str = f"×{LEVEL_MULTIPLIERS[level]:g}"
+        it_mult_str = f"×{INTEL_MULTIPLIERS[intel_level]:g}"
+        segments = [
+            ("  （",                           _ANNOT_PUNC),
+            (f"{LEVEL_NAMES[level]}{sk_mult_str}",   LEVEL_ANNOT_COLORS[level]),
+            ("，",                             _ANNOT_PUNC),
+            (f"{INTEL_NAMES[intel_level]}{it_mult_str}）", INTEL_ANNOT_COLORS[intel_level]),
+        ]
+        return actual_gain, segments
 
     def _get_level(self, subject: str) -> int:
         """
