@@ -183,6 +183,33 @@ _WEEK_BGM: dict = {
     16: None,   # 待定
 }
 
+# ── 遊戲背景 crossfade ─────────────────────────────────────────
+BG_FADE_MS  = 800         # crossfade 時長（ms）
+_bg_surfs   : dict = {}   # filename → pygame.Surface（啟動時載入）
+_bg_current = [None]      # 目前全額顯示的遊戲背景 Surface
+_bg_target  = [None]      # crossfade 目標 Surface（None = 未在過渡）
+_bg_fade_t0 = [0]         # crossfade 開始時間戳（ms）
+
+# 週次 → 背景圖檔名對照表（None = 待補圖，保持當前背景）
+_WEEK_BG: dict = {
+    1:  "1234_background.webp",
+    2:  "1234_background.webp",
+    3:  "34_background.webp",
+    4:  "34_background.webp",
+    5:  "56_background.webp",
+    6:  "56_background.webp",
+    7:  "7_background.webp",      # 待補
+    8:  "mid_background.webp",    # 待補
+    9:  "910_background.webp",
+    10: "910_background.webp",
+    11: "1112_background.webp",
+    12: "1112_background.webp",
+    13: "1314_background.webp",
+    14: "1314_background.webp",
+    15: "15_background.webp",     # 待補
+    16: "fin_background.webp",    # 待補
+}
+
 # ── 道具店滑動轉場 ────────────────────────────────────────────
 _shop_slide_dir = ["none"]   # "in" | "out" | "out_done" | "none"
 _shop_slide_t0  = [0]        # 動畫開始時間（ms）
@@ -468,6 +495,69 @@ def _load_cover(path: str, w: int, h: int) -> "pygame.Surface | None":
     out = pygame.Surface((w, h))
     out.blit(img, (-((nw - w) // 2), -((nh - h) // 2)))
     return out
+
+
+def _request_week_bg(name: "str | None") -> None:
+    """
+    請求切換遊戲底圖（帶 crossfade）。
+    name = None 或圖片不存在時：保持當前背景，不做任何切換。
+    若有正在進行中的 fade，立即完成後再開始新 fade。
+    """
+    if name is None:
+        return
+    surf = _bg_surfs.get(name)
+    if surf is None:
+        return   # 待補圖片：保持現狀
+    # 檢查目標是否已是當前（或進行中目標）
+    effective = _bg_target[0] if _bg_target[0] is not None else _bg_current[0]
+    if surf is effective:
+        return
+    # 強制完成任何進行中的 fade（重置 alpha）
+    if _bg_target[0] is not None:
+        _bg_target[0].set_alpha(255)
+        _bg_current[0] = _bg_target[0]
+        _bg_target[0]  = None
+        _bg_fade_t0[0] = 0
+    if surf is _bg_current[0]:
+        return   # 完成舊 fade 後目標與 current 相同
+    # 若目前完全沒有背景（遊戲剛啟動前），直接設定不淡入
+    if _bg_current[0] is None:
+        _bg_current[0] = surf
+        return
+    # 開始 crossfade
+    _bg_target[0]  = surf
+    surf.set_alpha(0)
+    _bg_fade_t0[0] = pygame.time.get_ticks()
+
+
+def _draw_game_bg(surf: pygame.Surface) -> None:
+    """
+    繪製遊戲底圖，處理 crossfade 過渡效果。
+    - 無 fade 時：直接 blit 當前背景
+    - fade 進行中：先畫 current，再把 target 以遞增 alpha 疊上
+    - fade 結束：自動 swap current ← target
+    """
+    cur = _bg_current[0] if _bg_current[0] is not None else _grads.get("bg")
+    if cur is None:
+        surf.fill(BG)
+    else:
+        surf.blit(cur, (0, 0))
+
+    if _bg_target[0] is None or _bg_fade_t0[0] == 0:
+        return
+
+    elapsed = pygame.time.get_ticks() - _bg_fade_t0[0]
+    if elapsed >= BG_FADE_MS:
+        # Fade 完成：還原 alpha，swap
+        _bg_target[0].set_alpha(255)
+        _bg_current[0] = _bg_target[0]
+        _bg_target[0]  = None
+        _bg_fade_t0[0] = 0
+        surf.blit(_bg_current[0], (0, 0))
+    else:
+        alpha = int(255 * elapsed / BG_FADE_MS)
+        _bg_target[0].set_alpha(alpha)
+        surf.blit(_bg_target[0], (0, 0))
 
 
 # ─────────────────────────────────────────
@@ -2453,10 +2543,17 @@ def run_ui():
     if _title_img is not None:
         _grads["start"] = _title_img
 
-    _game_img = _load_cover(
-        os.path.join(_bg_dir, "1234_background.webp"), WIN_W, WIN_H)
-    if _game_img is not None:
-        _grads["bg"] = _game_img
+    # ── 批次載入所有週次背景圖 ────────────────────────────────
+    _unique_bg_files = sorted(set(v for v in _WEEK_BG.values() if v is not None))
+    for _fn in _unique_bg_files:
+        _img = _load_cover(os.path.join(_bg_dir, _fn), WIN_W, WIN_H)
+        if _img is not None:
+            _bg_surfs[_fn] = _img
+    # 用第 1-2 週背景作初始底圖（無圖則保持漸層）
+    _init_bg = _bg_surfs.get("1234_background.webp")
+    if _init_bg is not None:
+        _bg_current[0] = _init_bg
+        _grads["bg"]   = _init_bg   # 保持 fallback 相容
         # 圖片背景時，狀態欄與行動面板改為半透明疊層，讓建築圖透出
         _st_ov = pygame.Surface((WIN_W, STATUS_H), pygame.SRCALPHA)
         _st_ov.fill((255, 238, 212, 215))
@@ -2545,6 +2642,7 @@ def run_ui():
                 _play_sfx("cc_click")
             elif tag == "bgm_week":
                 _request_bgm(_WEEK_BGM.get(cmd[1]))
+                _request_week_bg(_WEEK_BG.get(cmd[1]))
             elif tag == "reset":
                 _log.clear()
                 _player[0] = None
@@ -2630,11 +2728,11 @@ def run_ui():
 
             if _sdir == "out_done":
                 # 顯示遊戲底圖，等待相位切換為 "game"
-                screen.blit(_grads["bg"], (0, 0))
+                _draw_game_bg(screen)
                 shop_buy_rects, shop_exit_btn = [], None
             elif _yoff != 0:
                 # 動畫中：先畫遊戲底圖，再把道具店 Surface 蓋上並偏移
-                screen.blit(_grads["bg"], (0, 0))
+                _draw_game_bg(screen)
                 _shop_tmp = pygame.Surface((WIN_W, WIN_H))
                 shop_buy_rects, shop_exit_btn = _draw_shop(
                     _shop_tmp, fm, fs, fl, _shop_items, _player[0], (-1, -1))
@@ -2677,7 +2775,7 @@ def run_ui():
                 # 切換中的空白幀
                 _draw_cc_bg(screen)
         else:   # "game"
-            screen.blit(_grads["bg"], (0, 0))
+            _draw_game_bg(screen)
             # 狀態欄（新版，含頭像 + 道具店按鈕，回傳 shop_btn_rect）
             shop_btn_rect = _draw_status_v2(screen, fm, fs, _player[0], sr, mpos)
             # 狀態欄底部陰影（增加與人物區的層次感）
