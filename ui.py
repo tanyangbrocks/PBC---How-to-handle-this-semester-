@@ -78,6 +78,28 @@ def _play_sfx(name: str) -> None:
         except Exception:
             pass
 
+
+def _request_bgm(name: "str | None") -> None:
+    """
+    非阻塞 BGM 切換。
+    - 若目標與當前（或進行中切換目標）相同：不動作。
+    - 若目前無曲目在播：立即排程（下一幀載入），無淡出等待。
+    - 否則：fadeout 舊曲，等 BGM_FADE_MS ms 後主迴圈自動載入新曲。
+    """
+    target = _bgm_pending[0] if _bgm_pending[0] is not None else _bgm_current[0]
+    if name == target:
+        return
+    _bgm_pending[0] = name
+    if _bgm_current[0] is None:
+        # 目前沒有在播的曲目，不需要等待淡出
+        _bgm_switch_at[0] = pygame.time.get_ticks()
+    else:
+        _bgm_switch_at[0] = pygame.time.get_ticks() + BGM_FADE_MS
+        try:
+            pygame.mixer.music.fadeout(BGM_FADE_MS)
+        except Exception:
+            pass
+
 # ── 動畫 / 視覺特效狀態 ────────────────────────────────────────
 _anim_hover:   dict = {}   # (cx,cy) -> float 0..1  hover 進度
 _click_reg:    dict = {}   # (cx,cy) -> ticks_ms   點擊時間戳
@@ -133,6 +155,33 @@ _cc_video_fps    = [30.0]  # 影片 FPS
 _cc_video_surf   = [None]  # 當前幀的 pygame.Surface
 _cc_video_last   = [0]     # 上次更新幀的時間戳（ms）
 _cc_overlay_surf = [None]  # 奶茶↔奶白漸層遮罩（75% 透明，懶初始化）
+
+# ── BGM 狀態（非阻塞淡入淡出） ───────────────────────────────
+BGM_FADE_MS    = 1500        # 淡出 / 淡入各 1.5 秒
+_bgm_dir       = [""]        # BGM 資料夾路徑（run_ui 啟動後設定）
+_bgm_current   = [None]      # 目前播放的檔名（None = 靜音）
+_bgm_pending   = [None]      # 淡出後待播的檔名（None = 靜音）
+_bgm_switch_at = [0]         # 允許載入新曲的最早時間戳（ms）
+
+# 週次 → BGM 對照表（None = 待定，播放時靜音）
+_WEEK_BGM: dict = {
+    1:  "Music-Town_Day.mp3",
+    2:  "Music-Town_Day.mp3",
+    3:  "Music-Ocean_Day.mp3",
+    4:  "Music-Ocean_Day.mp3",
+    5:  "Music-Skeletron.mp3",
+    6:  "Music-Skeletron.mp3",
+    7:  "Music-Deerclops.mp3",
+    8:  "Music-Rainbow_Boulder_(loop).mp3",
+    9:  "Music-Forest_Day_(Otherworldly).mp3",
+    10: "Music-Forest_Day_(Otherworldly).mp3",
+    11: "Music-Storm.mp3",
+    12: "Music-Storm.mp3",
+    13: None,   # 待定
+    14: None,   # 待定
+    15: None,   # 待定
+    16: None,   # 待定
+}
 
 # ── 道具店滑動轉場 ────────────────────────────────────────────
 _shop_slide_dir = ["none"]   # "in" | "out" | "out_done" | "none"
@@ -202,8 +251,9 @@ def set_time(n: int):
     _cmd_q.put(("set_time", n))
 
 def set_week(w: int):
-    """由遊戲執行緒呼叫，更新週次輪盤顯示。"""
+    """由遊戲執行緒呼叫，更新週次輪盤顯示並觸發對應 BGM。"""
     _week[0] = w
+    _cmd_q.put(("bgm_week", w))
 
 # ── 角色創建 API ─────────────────────────────────────────────
 
@@ -2415,6 +2465,11 @@ def run_ui():
         _in_ov.fill((255, 238, 212, 215))
         _grads["input"] = _in_ov
 
+    # ── BGM 初始化（設定資料夾，播放標題音樂）──────────────────
+    _bgm_dir[0] = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               "asset", "audio", "bgm")
+    _request_bgm("Music-Morning_Rain.mp3")
+
     # ── 角色創建背景影片（WEBM）────────────────────────────────
     _cc_webm_path = os.path.join(_bg_dir, "skill_background.webm")
     try:
@@ -2437,6 +2492,21 @@ def run_ui():
         mpos = pygame.mouse.get_pos()
         # 道具店按鈕是否可點擊：只有在行動選單中且選項包含道具店時才亮起
         shop_active = (_mode[0] == "choices" and "🏪 前往道具店" in _choices)
+
+        # ── BGM 非阻塞切換 tick ───────────────────────────────
+        if (_bgm_pending[0] is not None
+                and pygame.time.get_ticks() >= _bgm_switch_at[0]):
+            _next_bgm      = _bgm_pending[0]
+            _bgm_pending[0] = None
+            _bgm_current[0] = _next_bgm
+            if _next_bgm is not None:
+                _bpath = os.path.join(_bgm_dir[0], _next_bgm)
+                if os.path.isfile(_bpath):
+                    try:
+                        pygame.mixer.music.load(_bpath)
+                        pygame.mixer.music.play(-1, fade_ms=BGM_FADE_MS)
+                    except Exception:
+                        pass
 
         # ── 消化遊戲執行緒的命令 ─────────────────────────────
         while not _cmd_q.empty():
@@ -2466,9 +2536,15 @@ def run_ui():
                 if cmd[1] == "shop":          # 道具店：觸發由上而下滑入
                     _shop_slide_dir[0] = "in"
                     _shop_slide_t0[0]  = pygame.time.get_ticks()
+                elif cmd[1] == "char_create":
+                    _request_bgm("Music-Aether.mp3")
+                elif cmd[1] == "end":
+                    _request_bgm(None)
             elif tag == "ripple":
                 _ripple_t0[0] = pygame.time.get_ticks()
                 _play_sfx("cc_click")
+            elif tag == "bgm_week":
+                _request_bgm(_WEEK_BGM.get(cmd[1]))
             elif tag == "reset":
                 _log.clear()
                 _player[0] = None
@@ -2478,6 +2554,7 @@ def run_ui():
                 _tvalue[0] = ""
                 _scroll[0] = 0
                 _composing[0] = ""
+                _request_bgm("Music-Morning_Rain.mp3")
             elif tag == "cc_name":
                 _cc_mode[0]      = "name"
                 _cc_data[0]      = tag
@@ -2734,6 +2811,7 @@ def run_ui():
                         _play_sfx("ui_click")
                         _click_reg[(end_btn.centerx, end_btn.centery)] = pygame.time.get_ticks()
                         _phase[0] = "start"
+                        _request_bgm("Music-Morning_Rain.mp3")
                         _restart_event.set()
                 else:
                     # ── 遊戲中 ────────────────────────────────
