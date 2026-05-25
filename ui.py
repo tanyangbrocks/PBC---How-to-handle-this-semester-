@@ -121,6 +121,15 @@ POPUP_DURATION = 3400  # 整體顯示時長（ms）
 POPUP_IN_MS    = 320   # 滑入動畫時長（ms）
 POPUP_OUT_MS   = 280   # 滑出動畫時長（ms）
 
+# ── 漣漪轉場效果（週次切換時） ───────────────────────────────
+_ripple_t0      = [0]   # 觸發時間戳（ms，0 = 未啟用）
+RIPPLE_DURATION = 680   # 總時長（ms）
+
+# ── 道具店滑動轉場 ────────────────────────────────────────────
+_shop_slide_dir = ["none"]   # "in" | "out" | "out_done" | "none"
+_shop_slide_t0  = [0]        # 動畫開始時間（ms）
+SHOP_SLIDE_MS   = 370        # 單向滑動時長（ms）
+
 # ─────────────────────────────────────────
 #  供其他模組呼叫的 API
 # ─────────────────────────────────────────
@@ -266,6 +275,11 @@ def open_shop_ui(items: list) -> None:
     _cmd_q.put(("phase", "game"))
 
 
+def trigger_ripple() -> None:
+    """觸發漣漪轉場效果；由遊戲執行緒在週次切換時呼叫。"""
+    _cmd_q.put(("ripple",))
+
+
 def show_action_result(lines: list, title: str = "行動結果") -> None:
     """
     由遊戲執行緒呼叫，觸發畫面右側由右而左滑入的行動結果視窗。
@@ -405,6 +419,55 @@ def _ease_out_back(t: float, ov: float = 1.55) -> float:
     """帶超出再回彈的緩動函式，用於按鈕彈跳感。"""
     t -= 1
     return t * t * ((ov + 1) * t + ov) + 1
+
+
+def _ease_out_quart(t: float) -> float:
+    """快速滑入、末端柔和停駐（道具店滑入）。"""
+    return 1.0 - (1.0 - t) ** 4
+
+
+def _ease_in_cubic(t: float) -> float:
+    """緩慢起步、快速離場（道具店滑出）。"""
+    return t ** 3
+
+
+def _draw_ripple_overlay(surf: pygame.Surface) -> None:
+    """
+    在畫面上疊加漣漪轉場效果（週次切換時）。
+    效果：初始白色閃光 + 3 圈依序向外擴散、逐漸淡出的同心環。
+    僅在 _ripple_t0[0] != 0 時有效。
+    """
+    if _ripple_t0[0] == 0:
+        return
+    elapsed = pygame.time.get_ticks() - _ripple_t0[0]
+    if elapsed >= RIPPLE_DURATION:
+        _ripple_t0[0] = 0
+        return
+
+    t  = elapsed / RIPPLE_DURATION          # 0 → 1
+    ov = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
+
+    # ── 初始白色閃光（前 13% 時間段）─────────────────────────
+    if t < 0.13:
+        ft = t / 0.13
+        ov.fill((255, 255, 255, int(125 * (1.0 - ft) ** 2)))
+
+    # ── 3 圈漣漪環，各自延遲 0.26 啟動 ──────────────────────
+    cx, cy = WIN_W // 2, WIN_H // 2
+    diag   = int((WIN_W ** 2 + WIN_H ** 2) ** 0.5 // 2 + 32)
+    for i in range(3):
+        delay = i * 0.26
+        lt    = (t - delay) / max(1.0 - delay, 0.001)
+        if lt <= 0.0 or lt > 1.0:
+            continue
+        lt_e  = 1.0 - (1.0 - lt) ** 2.4    # ease-out：快速擴散、末端減速
+        r     = int(diag * lt_e)
+        alpha = int(215 * (1.0 - lt_e) ** 1.7)
+        thick = max(2, int(26 * (1.0 - lt_e) + 2))
+        if r > 0 and alpha > 4:
+            pygame.draw.circle(ov, (190, 225, 255, alpha), (cx, cy), r, thick)
+
+    surf.blit(ov, (0, 0))
 
 
 def _soft_shadow(surf: pygame.Surface,
@@ -2179,6 +2242,11 @@ def run_ui():
                 pygame.key.start_text_input()  # Windows IME 必須主動開啟
             elif tag == "phase":
                 _phase[0] = cmd[1]
+                if cmd[1] == "shop":          # 道具店：觸發由上而下滑入
+                    _shop_slide_dir[0] = "in"
+                    _shop_slide_t0[0]  = pygame.time.get_ticks()
+            elif tag == "ripple":
+                _ripple_t0[0] = pygame.time.get_ticks()
             elif tag == "reset":
                 _log.clear()
                 _player[0] = None
@@ -2233,8 +2301,40 @@ def run_ui():
         if _phase[0] == "start":
             start_btn = _draw_start(screen, fm, fl, mpos)
         elif _phase[0] == "shop":
-            shop_buy_rects, shop_exit_btn = _draw_shop(
-                screen, fm, fs, fl, _shop_items, _player[0], mpos)
+            # ── 計算道具店滑動偏移 ──────────────────────────────
+            _sdir = _shop_slide_dir[0]
+            _sel  = max(pygame.time.get_ticks() - _shop_slide_t0[0], 0)
+            if _sdir == "in":
+                _rt  = min(_sel / SHOP_SLIDE_MS, 1.0)
+                _yoff = int(-WIN_H * (1.0 - _ease_out_quart(_rt)))
+                if _rt >= 1.0:
+                    _shop_slide_dir[0] = "none"
+                    _yoff = 0
+            elif _sdir == "out":
+                _rt  = min(_sel / SHOP_SLIDE_MS, 1.0)
+                _yoff = int(-WIN_H * _ease_in_cubic(_rt))
+                if _rt >= 1.0:
+                    _shop_slide_dir[0] = "out_done"
+                    _shop_exit_event.set()
+            elif _sdir == "out_done":
+                _yoff = -WIN_H   # 完全滑走，等待 phase 切換
+            else:
+                _yoff = 0
+
+            if _sdir == "out_done":
+                # 顯示遊戲底圖，等待相位切換為 "game"
+                screen.blit(_grads["bg"], (0, 0))
+                shop_buy_rects, shop_exit_btn = [], None
+            elif _yoff != 0:
+                # 動畫中：先畫遊戲底圖，再把道具店 Surface 蓋上並偏移
+                screen.blit(_grads["bg"], (0, 0))
+                _shop_tmp = pygame.Surface((WIN_W, WIN_H))
+                shop_buy_rects, shop_exit_btn = _draw_shop(
+                    _shop_tmp, fm, fs, fl, _shop_items, _player[0], (-1, -1))
+                screen.blit(_shop_tmp, (0, _yoff))
+            else:
+                shop_buy_rects, shop_exit_btn = _draw_shop(
+                    screen, fm, fs, fl, _shop_items, _player[0], mpos)
         elif _phase[0] == "end":
             end_btn = _draw_end(screen, fm, fs, lr, mpos)
         elif _phase[0] == "char_create":
@@ -2335,6 +2435,9 @@ def run_ui():
             pygame.draw.line(screen, _ic, (_ix+_iw,     _iy+_ih),    (_ix+_iw-_a,  _iy+_ih),       2)
             pygame.draw.line(screen, _ic, (_ix+_iw,     _iy+_ih),    (_ix+_iw,     _iy+_ih-_a),    2)
 
+        # ── 漣漪轉場覆蓋層（最頂層，疊在所有內容之上）──────────
+        _draw_ripple_overlay(screen)
+
         pygame.display.flip()
 
         # ── pygame 事件 ───────────────────────────────────────
@@ -2372,11 +2475,14 @@ def run_ui():
                         _phase[0] = "game"
                         _start_event.set()
                 elif _phase[0] == "shop":
-                    # 離開按鈕
-                    if shop_exit_btn and shop_exit_btn.collidepoint(ev.pos):
+                    # 離開按鈕：僅在靜止狀態（非動畫中）才響應
+                    if (shop_exit_btn and shop_exit_btn.collidepoint(ev.pos)
+                            and _shop_slide_dir[0] == "none"):
                         _play_sfx("back")
                         _click_reg[(shop_exit_btn.centerx, shop_exit_btn.centery)] = pygame.time.get_ticks()
-                        _shop_exit_event.set()
+                        # 觸發由下而上滑出動畫，動畫結束後才設定 exit event
+                        _shop_slide_dir[0] = "out"
+                        _shop_slide_t0[0]  = pygame.time.get_ticks()
                     else:
                         # 購買按鈕
                         for (br, idx) in shop_buy_rects:

@@ -63,6 +63,8 @@ def game_main():
             ui.set_player(player)
 
             ui.set_week(week)
+            if week > 1:
+                ui.trigger_ripple()   # 週次切換漣漪轉場
             game_over = engine.run_week(week)
 
             if game_over:
