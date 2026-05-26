@@ -1,19 +1,21 @@
 # ============================================================
 #  模組：event_system.py — 突發事件系統
 # ============================================================
-# 負責「扶老奶奶」、「腳踏車報銷」、「睡過頭」等隨機事件。
-# 每週結束後擲一次骰，依照運氣值決定觸發機率與好壞事件比例。
+# 每次行動後擲骰（機率為原本的一半），依週次範圍篩選事件。
 #
-# 事件分為四種類型：
-#   EVENTS        — 全學期加權隨機池（原有邏輯）
-#   PHASE_EVENTS  — 階段限定事件（固定機率，依週次篩選）
-#   WEEKLY_EVENTS — 每週獨立觸發事件（不進加權池）
-#   SPECIAL_EVENTS— 特殊突發事件（固定機率，有額外觸發條件）
+# 觸發規則（每次行動後）：
+#   1. 宿醉（強制）         — 有旗標時必觸發，不受週次限制
+#   2. 有週次範圍的事件     — phase / weekly，週次符合時擲骰（機率減半）
+#   3. 全學期事件           — 主事件池，15% 擲骰（原 30% / 2）
+#   ▸ 2 > 3 優先級，同級隨機選一，一次行動只觸發一個
+#   ▸ 一週累計至多 2 次突發事件（宿醉不計入上限）
+#
+# 「被戴綠帽」：週末獨立觸發（5%，週次 > 8），不受上述規則影響。
 # ============================================================
 
 import random
 from character import Character
-from ui import notify
+from ui import notify, ask_ok
 
 
 # ── 主事件資料庫（全學期，加權隨機）─────────────────────────────
@@ -74,7 +76,7 @@ PHASE_EVENTS = [
     {
         "id":       "add_drop_fail",
         "name":     "加簽失敗",
-        "prob":     0.20,
+        "prob":     0.20,   # 原機率；roll_event_after_action 內自動減半
         "week_range": (1, 3),
         "is_positive": False,
         "desc":     "等了整整兩週，教授直接把加簽單退回來了。課表就這樣，認了。",
@@ -128,7 +130,7 @@ WEEKLY_EVENTS = [
 ]
 
 
-# ── 特殊突發事件（固定 5%，有額外觸發條件）──────────────────────
+# ── 特殊突發事件（「被戴綠帽」：週末獨立，固定 5%）──────────────
 SPECIAL_EVENTS = [
     {
         "id":       "green_hat",
@@ -148,112 +150,76 @@ SPECIAL_EVENTS = [
 # ── 事件效果函式 ──────────────────────────────────────────────────
 
 def _grandma_effect(player: Character):
-    """扶老奶奶：50% 機率是董事會成員。"""
     if random.random() < 0.5:
-        # print("  ✨ 那個老奶奶竟然是董事會的！參與度 +5，賺到了。")  # 因套用pygame而調整
         notify("  ✨ 那個老奶奶竟然是董事會的！參與度 +5，賺到了。")
         player.grades["參與度"] = min(100, player.grades["參與度"] + 5)
     else:
-        # print("  😊 老奶奶一直跟你道謝，心情莫名好了起來。滿足感 +5。")  # 因套用pygame而調整
         notify("  😊 老奶奶一直跟你道謝，心情莫名好了起來。滿足感 +5。")
         player.change_satisfaction(5)
 
 def _flat_tire_effect(player: Character):
-    """腳踏車報銷：遲到 → 參與度 -5，需花錢修車。"""
     repair_cost = random.randint(100, 300)
     player.money = max(0, player.money - repair_cost)
     player.grades["參與度"] = max(0, player.grades["參與度"] - 5)
     player.change_satisfaction(-8)
-    # print(f"  🔧 修車費 {repair_cost} 元，還被教授點名。這天不用過了。")  # 因套用pygame而調整
     notify(f"  🔧 修車費 {repair_cost} 元，還被教授點名。這天不用過了。")
 
 def _oversleep_effect(player: Character):
-    """睡過頭：缺席早上的課，參與度與滿足感下跌。"""
     player.grades["參與度"] = max(0, player.grades["參與度"] - 8)
     player.change_satisfaction(-10)
-    # print("  😴 睜眼十一點半，傳了一則「老師我今天身體不舒服」然後繼續躺著。")  # 因套用pygame而調整
     notify("  😴 睜眼十一點半，傳了一則「老師我今天身體不舒服」然後繼續躺著。")
 
 def _scholarship_effect(player: Character):
-    """意外獎學金：入帳 300 元。"""
     player.money += 300
-    # or print("  💰 入帳 300 元，今晚可以吃好一點了。")  # 因套用pygame而調整
     notify("  💰 入帳 300 元，今晚可以吃好一點了。")
 
 def _group_project_effect(player: Character):
-    """組員跑路：體力大耗，但有 30% 機率教授憐憫加分。"""
     player.consume_stamina(5)
     player.change_satisfaction(-12)
     if random.random() < 0.3:
         player.grades["作業"] = min(100, player.grades["作業"] + 10)
-        # print("  📝 一個人做完了，教授還特別誇你。可喜可賀，但你累到說不出話。")  # 因套用pygame而調整
         notify("  📝 一個人做完了，教授還特別誇你。可喜可賀，但你累到說不出話。")
     else:
-        # print("  😩 做完了。沒什麼好說的，就是累。")  # 因套用pygame而調整
         notify("  😩 做完了。沒什麼好說的，就是累。")
 
 def _add_drop_fail_effect(player: Character):
-    """加簽失敗：課表一團亂，參與度與滿足感下跌。"""
     player.change_satisfaction(-10)
     player.grades["參與度"] = max(0, player.grades["參與度"] - 5)
-    # print("  📋 加簽單被退回來了。課表就這樣，能怎樣，修就修吧。")  # 因套用pygame而調整
     notify("  📋 加簽單被退回來了。課表就這樣，能怎樣，修就修吧。")
 
 def _club_drinking_effect(player: Character):
-    """
-    社團迎新被拱喝酒：當下滿足感上升，但體力大耗。
-    回傳 'TRIGGER_HANGOVER'，由 EventSystem 在下週強制觸發宿醉。
-    """
     player.change_satisfaction(10)
     player.consume_stamina(8)
-    # print("  🍺 喝得很盡興，當下覺得一切都值得。")  # 因套用pygame而調整
     notify("  🍺 喝得很盡興，當下覺得一切都值得。")
-    # print("  ⚠️  但現在是凌晨兩點，明天你會後悔的。")  # 因套用pygame而調整
     notify("  ⚠️  但現在是凌晨兩點，明天你會後悔的。")
     return "TRIGGER_HANGOVER"
 
 def _hangover_effect(player: Character):
-    """宿醉：由 pending_hangover 旗標在下週強制觸發。"""
     player.consume_stamina(10)
     player.change_satisfaction(-15)
     player.grades["參與度"] = max(0, player.grades["參與度"] - 10)
-    # print("  🤢 頭痛、想吐、光線太刺眼。今天的課？不存在的。")  # 因套用pygame而調整
     notify("  🤢 頭痛、想吐、光線太刺眼。今天的課？不存在的。")
 
 def _library_full_effect(player: Character):
-    """圖書館搶不到位子：在走廊讀書，效率下滑。"""
     player.consume_stamina(3)
     player.grades["作業"] = max(0, player.grades["作業"] - 5)
     player.change_satisfaction(-6)
-    # print("  📚 走廊地板坐了一整天，屁股麻、書沒讀多少，作業品質直接打折。")  # 因套用pygame而調整
     notify("  📚 走廊地板坐了一整天，屁股麻、書沒讀多少，作業品質直接打折。")
 
 def _drop_crisis_effect(player: Character):
-    """退選危機：被迫繼續修不想修的課，滿足感暴跌並額外花錢補救。"""
     player.change_satisfaction(-12)
     player.money = max(0, player.money - 100)
-    # print("  😰 截止日過了。那堂課退不掉了，只能硬撐到期末。")  # 因套用pygame而調整
     notify("  😰 截止日過了。那堂課退不掉了，只能硬撐到期末。")
 
 def _cafeteria_price_effect(player: Character):
-    """小福便當漲價：金錢小失血，滿足感微降。"""
     extra_cost = random.randint(10, 30)
     player.money = max(0, player.money - extra_cost)
     player.change_satisfaction(-2)
-    # print(f"  🍱 又漲了 {extra_cost} 元。默默付錢，默默難過。")  # 因套用pygame而調整
     notify(f"  🍱 又漲了 {extra_cost} 元。默默付錢，默默難過。")
 
 def _green_hat_effect(player: Character):
-    """
-    被戴綠帽了：
-      - 滿足感強制 -25
-      - 接下來 4 週每週再扣 25 滿足感（由 EventSystem debuff 系統追蹤）
-    回傳 "TRIGGER_GREEN_HAT_DEBUFF" 旗標，讓 EventSystem 註冊 debuff。
-    """
     player.change_satisfaction(-25)
-    # print("  💔 你盯著手機螢幕看了很久，然後把它蓋起來。什麼都不想說。")  # 因套用pygame而調整
     notify("  💔 你盯著手機螢幕看了很久，然後把它蓋起來。什麼都不想說。")
-    # print("  📉 接下來幾週大概也讀不進去什麼了。")  # 因套用pygame而調整
     notify("  📉 接下來幾週大概也讀不進去什麼了。")
     return "TRIGGER_GREEN_HAT_DEBUFF"
 
@@ -262,100 +228,131 @@ def _green_hat_effect(player: Character):
 
 class EventSystem:
     """
-    突發事件管理器：每週呼叫 roll_event(week) 來隨機觸發事件。
+    突發事件管理器。
 
-    觸發順序（每週依序執行）：
-      1. 強制待觸發事件（宿醉）— 若有旗標，直接觸發並結束本週
-      2. 每週固定獨立事件  （小福便當漲價）— 獨立 10% 擲骰，全學期至多一次
-      3. 特殊突發事件      （被戴綠帽了）  — 固定 5%，條件限制
-      4. 階段限定事件      （加簽失敗等）  — 固定機率，週次篩選
-      5. 主事件池          （原有加權邏輯）— 30% 基礎機率，運氣加權
+    per-action 觸發（roll_event_after_action）：
+      除「被戴綠帽」外的所有事件，每次行動後各自擲骰（機率減半），
+      至多一次行動觸發一個事件，且一週累計不超過 2 次。
+
+    週末獨立觸發（roll_green_hat）：
+      「被戴綠帽」固定 5%（週次 > 8），不受 per-action 計數影響。
+
+    週末 debuff 計時（tick_debuffs）：
+      每週末呼叫一次，處理持續 debuff 的週效果與倒計時。
     """
 
     def __init__(self, player: Character):
-        self.player = player
+        self.player           = player
         self.pending_hangover = False
-        self.triggered_once = set()
-        self.active_debuffs = []
+        self.triggered_once   = set()
+        self.active_debuffs   = []
+        self.events_this_week = 0   # 本週已觸發突發事件次數（最多 2）
 
-    def roll_event(self, week: int):
+    # ── 公開 API ──────────────────────────────────────────────────
+
+    def reset_weekly_count(self):
+        """每週開始時呼叫，重置本週事件計數器。"""
+        self.events_this_week = 0
+
+    def roll_event_after_action(self, week: int) -> bool:
+        """
+        每次行動結束後呼叫。
+        觸發規則：
+          - 宿醉（pending_hangover）：強制觸發，不受次數限制
+          - 一般事件：每週至多 2 次
+          - 有週次範圍的事件 > 全學期事件（同優先級隨機選一）
+        回傳 True 若有事件觸發。
+        """
         player = self.player
 
-        self._tick_debuffs()
-
-        candidates = []
-
+        # 強制宿醉（不受次數上限約束，但計入計數）
         if self.pending_hangover:
-            candidates.append(("hangover", None))
+            self._fire_event("hangover", None)
+            self.events_this_week += 1
+            return True
 
-        for we in WEEKLY_EVENTS:
-            start, end = we["week_range"]
-            if start <= week <= end:
-                if we.get("once") and we["id"] in self.triggered_once:
-                    continue
-                if random.random() < we["prob"]:
-                    candidates.append(("weekly", we))
+        # 已達本週上限
+        if self.events_this_week >= 2:
+            return False
 
-        for se in SPECIAL_EVENTS:
-            if se["trigger_condition"](player, week):
-                if random.random() < se["prob"]:
-                    candidates.append(("special", se))
+        # ── 有週次範圍的候選事件（機率減半）─────────────────
+        priority_candidates = []
 
         for pe in PHASE_EVENTS:
-            start, end = pe["week_range"]
-            if start <= week <= end:
-                if random.random() < pe["prob"]:
-                    candidates.append(("phase", pe))
+            s, e = pe["week_range"]
+            if s <= week <= e and random.random() < pe["prob"] / 2:
+                priority_candidates.append(("phase", pe))
 
-        eligible = [e for e in EVENTS if e["trigger_condition"](player)]
-        if eligible and random.random() < 0.30:
+        for we in WEEKLY_EVENTS:
+            s, e = we["week_range"]
+            if s <= week <= e:
+                if we.get("once") and we["id"] in self.triggered_once:
+                    continue
+                if random.random() < we["prob"] / 2:
+                    priority_candidates.append(("weekly", we))
+
+        # ── 全學期主事件候選（原 30% → 15%）─────────────────
+        main_candidate = None
+        eligible = [ev for ev in EVENTS if ev["trigger_condition"](player)]
+        if eligible and random.random() < 0.15:
             luck_bonus = (player.luck - 50) / 100
             weighted = []
-            for e in eligible:
-                w = e["weight"]
-                w *= (1 + luck_bonus) if e["is_positive"] else (1 - luck_bonus)
-                weighted.append((e, max(1, w)))
+            for ev in eligible:
+                w = ev["weight"]
+                w *= (1 + luck_bonus) if ev["is_positive"] else (1 - luck_bonus * 0.5)
+                weighted.append((ev, max(1.0, w)))
             evts, wts = zip(*weighted)
-            candidates.append(("main", random.choices(evts, weights=wts, k=1)[0]))
+            main_candidate = ("main", random.choices(evts, weights=wts, k=1)[0])
 
-        if not candidates:
-            return
-
-        forced   = [c for c in candidates if c[0] == "hangover"]
-        optional = [c for c in candidates if c[0] != "hangover"]
-
-        if forced:
-            to_trigger = [forced[0]]
-            if optional and random.random() < 0.10:
-                to_trigger.append(random.choice(optional))
+        # ── 選取（有週次範圍 > 全學期；同級隨機一個）────────
+        if priority_candidates:
+            event_type, event = random.choice(priority_candidates)
+        elif main_candidate:
+            event_type, event = main_candidate
         else:
-            first = random.choice(candidates)
-            to_trigger = [first]
-            rest = [c for c in candidates if c is not first]
-            if rest and random.random() < 0.10:
-                to_trigger.append(random.choice(rest))
+            return False
 
-        for event_type, event in to_trigger:
-            self._fire_event(event_type, event)
+        self._fire_event(event_type, event)
+        self.events_this_week += 1
+        return True
+
+    def roll_green_hat(self, week: int) -> None:
+        """
+        週末呼叫：「被戴綠帽」固定 5% 機率（週次 > 8）。
+        不受 events_this_week 計數影響。
+        """
+        for se in SPECIAL_EVENTS:
+            if (se["id"] == "green_hat"
+                    and se["trigger_condition"](self.player, week)
+                    and random.random() < se["prob"]):
+                self._fire_event("special", se)
+                break
+
+    def tick_debuffs(self) -> None:
+        """
+        週末呼叫：推進所有進行中的 debuff 倒計時並執行週效果。
+        """
+        self._tick_debuffs()
+
+    # ── 內部方法 ──────────────────────────────────────────────────
 
     def _fire_event(self, event_type: str, event):
-        """單一事件的執行邏輯，處理顯示、效果呼叫與旗標回傳。"""
+        """執行單一事件：彈窗通知 → 效果 → 旗標處理。"""
         player = self.player
 
         if event_type == "hangover":
             self.pending_hangover = False
-            # print("\n⚡ 強制事件：【宿醉發作】")  # 因套用pygame而調整
-            notify("\n⚡ 強制事件：【宿醉發作】")
-            # print("  🤢 昨晚喝太多，今天整個人不對勁。")  # 因套用pygame而調整
-            notify("  🤢 昨晚喝太多，今天整個人不對勁。")
+            popup_text = "⚡ 強制事件：【宿醉發作】\n昨晚喝太多，今天整個人不對勁。"
+            notify(popup_text)
+            ask_ok(popup_text)
             _hangover_effect(player)
             return
 
         prefix = "💥 特殊事件" if event_type == "special" else "⚡ 突發事件"
-        # print(f"\n{prefix}：【{event['name']}】")  # 因套用pygame而調整
+        popup_text = f"{prefix}：【{event['name']}】\n{event['desc']}"
         notify(f"\n{prefix}：【{event['name']}】")
-        # print(f"  {event['desc']}")  # 因套用pygame而調整
         notify(f"  {event['desc']}")
+        ask_ok(popup_text)
 
         result = event["effect"](player)
         if result == "TRIGGER_HANGOVER":
@@ -367,23 +364,15 @@ class EventSystem:
             self.triggered_once.add(event["id"])
 
     def _register_green_hat_debuff(self):
-        """
-        註冊「被戴綠帽」debuff：每週固定扣 25 滿足感，持續 4 週。
-        """
         self.active_debuffs.append({
             "id":              "green_hat_debuff",
             "name":            "心碎狀態",
             "weeks_remaining": 4,
             "weekly_effect":   lambda p: p.change_satisfaction(-25),
         })
-        # print("  🔻 心碎狀態啟動：接下來 4 週每週滿足感 -25，振作不起來。")  # 因套用pygame而調整
         notify("  🔻 心碎狀態啟動：接下來 4 週每週滿足感 -25，振作不起來。")
 
     def _tick_debuffs(self):
-        """
-        每週開始時呼叫，將所有進行中的 debuff 倒數一週並執行週效果。
-        週數歸零時解除效果並從列表移除。
-        """
         still_active = []
         for debuff in self.active_debuffs:
             if "weekly_effect" in debuff:
@@ -391,12 +380,7 @@ class EventSystem:
             debuff["weeks_remaining"] -= 1
             if debuff["weeks_remaining"] > 0:
                 still_active.append(debuff)
-                # print(  # 因套用pygame而調整
-                #     f"  ⏳ 【{debuff['name']}】還沒好，"
-                #     f"剩 {debuff['weeks_remaining']} 週。"
-                # )
                 notify(f"  ⏳ 【{debuff['name']}】還沒好，剩 {debuff['weeks_remaining']} 週。")
             else:
-                # print(f"  ✅ 【{debuff['name']}】總算過去了，狀態恢復正常。")  # 因套用pygame而調整
                 notify(f"  ✅ 【{debuff['name']}】總算過去了，狀態恢復正常。")
         self.active_debuffs = still_active

@@ -105,14 +105,17 @@ class TurnEngine:
     def run_week(self, week: int) -> bool:
         player = self.player
 
+        self.event_sys.reset_weekly_count()   # 每週開始重置突發事件計數
+
         if week == 8:
             self._midterm_week()
         elif week == 16:
             self._final_week()
         else:
             self._normal_week(week)
-            self.event_sys.roll_event(week)
+            self.event_sys.roll_green_hat(week)   # 被戴綠帽：週末獨立觸發
 
+        self.event_sys.tick_debuffs()             # 週末 debuff 計時（所有週）
         self._end_of_week_reflection(week)
         player.tick_status_effects()
 
@@ -159,9 +162,10 @@ class TurnEngine:
             if remaining_time - 1 < 0:
                 trigger_time_overflow_warning()   # 震動 + damage6
                 confirm = ask_yn(
-                    "本週時間已耗盡！強行行動會透支精力，確定繼續？",
+                    "本週時間已耗盡",
                     yes_label="強行繼續",
                     no_label="結束本週",
+                    show_ctx=False,
                 )
                 if not confirm:
                     break
@@ -175,6 +179,7 @@ class TurnEngine:
                     if not confirm2:
                         continue
                 self._execute_action(action)
+                self.event_sys.roll_event_after_action(week)   # 行動後突發事件
                 break
 
             if action["stamina_cost"] > player.stamina:
@@ -187,6 +192,7 @@ class TurnEngine:
                     continue
 
             self._execute_action(action)
+            self.event_sys.roll_event_after_action(week)   # 行動後突發事件
             remaining_time -= 1
             set_time(remaining_time)
 

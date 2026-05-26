@@ -70,7 +70,10 @@ _player  = [None]   # 角色物件參照
 _mode      = [None]   # "choices" | "yn" | "text" | None
 _choices   = []       # 選項標籤列表
 _prompt    = [""]     # yn / text 提示文字
-_yn_labels = ["是", "否"]   # yn 模式的按鈕文字（可自定義）
+_yn_labels       = ["是", "否"]   # yn 模式的按鈕文字（可自定義）
+_yn_show_ctx     = [True]         # yn 模式是否附帶 log 背景（預設 True）
+_event_ok_text   = [""]           # event_ok 模式：彈窗全文（title\nbody）
+_event_ok_popup_rects: list = []  # event_ok 模式：確認按鈕 rect 清單
 _tvalue  = [""]     # text 模式的目前輸入內容
 _scroll    = [0]      # 訊息區往上捲動的行數（保留供 end 畫面使用）
 _composing = [""]   # IME 組字預覽（輸入法尚未確認的字）
@@ -806,12 +809,21 @@ def ask_text(prompt: str, default: str = "") -> str:
 
 def ask_yn(prompt: str,
            yes_label: str = "是",
-           no_label:  str = "否") -> bool:
-    """取代 y/N 型的 input()：顯示自定義標籤按鈕，回傳 True / False。"""
-    _cmd_q.put(("yn", prompt, yes_label, no_label))
+           no_label:  str = "否",
+           show_ctx:  bool = True) -> bool:
+    """取代 y/N 型的 input()：顯示自定義標籤按鈕，回傳 True / False。
+    show_ctx=False 時不附帶 log 背景，只顯示 prompt 本身。"""
+    _cmd_q.put(("yn", prompt, yes_label, no_label, show_ctx))
     _reply_event.clear()
     _reply_event.wait()
     return _reply_val[0]
+
+def ask_ok(text: str) -> None:
+    """顯示突發事件通知彈窗（單一「確認」按鈕），block 直到玩家確認。
+    text 格式：「前綴：【事件名】\\n描述文字」"""
+    _cmd_q.put(("event_ok", text))
+    _reply_event.clear()
+    _reply_event.wait()
 
 def wait_start():
     """遊戲執行緒呼叫：阻塞直到玩家點擊「開始遊戲」。"""
@@ -2559,14 +2571,17 @@ def _draw_choice_popup(surf, fm, fs, mode, choices, log, prompt_text,
     _yn_ctx_count = 0   # yn 模式：紀錄「文案背景行數」，用於分色渲染
     if mode == "yn":
         raw = prompt_text or ""
-        # 取最近幾條 log 純字串作為文案背景（最多 3 條）
-        ctx_entries = [l for l in log if isinstance(l, str)][-3:]
-        ctx_lines   = []
-        for entry in ctx_entries:
-            ctx_lines.extend(_wrap(entry, fb, text_w))
-        _yn_ctx_count = len(ctx_lines)
-        # 問題本身接在文案後面
-        q_lines = ctx_lines + (_wrap(raw, fb, text_w) if raw else [])
+        if _yn_show_ctx[0]:
+            # 取最近幾條 log 純字串作為文案背景（最多 3 條）
+            ctx_entries = [l for l in log if isinstance(l, str)][-3:]
+            ctx_lines   = []
+            for entry in ctx_entries:
+                ctx_lines.extend(_wrap(entry, fb, text_w))
+            _yn_ctx_count = len(ctx_lines)
+            q_lines = ctx_lines + (_wrap(raw, fb, text_w) if raw else [])
+        else:
+            # 不附帶 log 背景，只顯示 prompt 本身
+            q_lines = _wrap(raw, fb, text_w) if raw else []
     else:
         q_lines = list(log[-6:]) if log else []
 
@@ -2665,6 +2680,111 @@ def _draw_choice_popup(surf, fm, fs, mode, choices, log, prompt_text,
 
     surf.set_clip(old_clip)
     return btn_rects
+
+
+def _draw_event_ok_popup(surf: pygame.Surface, fm, fs, mpos) -> list:
+    """
+    突發事件通知彈窗（單一「確認」按鈕）。
+    _event_ok_text[0] 格式：「前綴：【事件名】\\n描述文字」
+    回傳 [(rect, True)] 確認按鈕 rect 清單。
+    """
+    fb    = _font_bold[0]    or fs
+    fb_lg = _font_bold_lg[0] or fm
+
+    # ── 解析文字 ─────────────────────────────────────────────
+    raw   = _event_ok_text[0] or ""
+    parts = raw.split("\n", 1)
+    title = parts[0]
+    body  = parts[1].strip() if len(parts) > 1 else ""
+
+    # ── 版面常數 ─────────────────────────────────────────────
+    popup_w = min(WIN_W - 80, 760)
+    PAD_X   = 28
+    PAD_TOP = 18
+    PAD_BOT = 24
+    HDR_H   = fb_lg.get_height() + 22
+    SEP_H   = 14
+    BTN_H   = 48
+    BTN_W   = 180
+    text_w  = popup_w - PAD_X * 2
+
+    # ── 包裹文字 ─────────────────────────────────────────────
+    title_lines = _wrap(title, fb_lg, text_w)
+    body_lines  = _wrap(body, fb, text_w) if body else []
+    q_lh_lg = fb_lg.get_height() + 4
+    q_lh    = fb.get_height()    + 4
+    body_h  = len(body_lines) * q_lh
+
+    total_h = min(HDR_H + PAD_TOP + body_h + SEP_H + BTN_H + PAD_BOT,
+                  WIN_H - 60)
+    px = (WIN_W - popup_w) // 2
+    py = max(30, (WIN_H - total_h) // 2)
+
+    # ── 全螢幕遮罩 ────────────────────────────────────────────
+    ov = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
+    ov.fill((0, 0, 0, 165))
+    surf.blit(ov, (0, 0))
+
+    # ── 投影 ──────────────────────────────────────────────────
+    sh = pygame.Surface((popup_w, total_h), pygame.SRCALPHA)
+    pygame.draw.rect(sh, (0, 0, 0, 60),
+                     pygame.Rect(0, 0, popup_w, total_h), border_radius=18)
+    surf.blit(sh, (px + 4, py + 4))
+
+    # ── 主體（米白）──────────────────────────────────────────
+    card = pygame.Surface((popup_w, total_h), pygame.SRCALPHA)
+    pygame.draw.rect(card, (255, 248, 238, 252),
+                     pygame.Rect(0, 0, popup_w, total_h), border_radius=18)
+    surf.blit(card, (px, py))
+
+    # ── 標題列（深橙棕，僅上方圓角）─────────────────────────
+    _HDR_COL = (165, 88, 32)
+    hdr = pygame.Surface((popup_w, HDR_H), pygame.SRCALPHA)
+    pygame.draw.rect(hdr, (*_HDR_COL, 255),
+                     pygame.Rect(0, 0, popup_w, HDR_H), border_radius=18)
+    pygame.draw.rect(hdr, (*_HDR_COL, 255),
+                     pygame.Rect(0, 14, popup_w, HDR_H - 14))
+    surf.blit(hdr, (px, py))
+
+    # 標題文字（居中，亮米色）
+    hdr_ty = py + (HDR_H - len(title_lines) * q_lh_lg) // 2
+    for line in title_lines:
+        ts = fb_lg.render(line, True, (255, 232, 190))
+        surf.blit(ts, (px + (popup_w - ts.get_width()) // 2, hdr_ty))
+        hdr_ty += q_lh_lg
+
+    # ── 邊框 ──────────────────────────────────────────────────
+    pygame.draw.rect(surf, (155, 100, 50),
+                     pygame.Rect(px, py, popup_w, total_h), 2, border_radius=18)
+
+    # ── clip ─────────────────────────────────────────────────
+    old_clip = surf.get_clip()
+    surf.set_clip(pygame.Rect(px + 2, py + 2, popup_w - 4, total_h - 4))
+
+    # ── 描述文字 ──────────────────────────────────────────────
+    cur_y = py + HDR_H + PAD_TOP
+    for line in body_lines:
+        ls = fb.render(line, True, WHITE)
+        surf.blit(ls, (px + PAD_X, cur_y))
+        cur_y += q_lh
+
+    # ── 分隔線 ────────────────────────────────────────────────
+    sep_y = py + total_h - PAD_BOT - BTN_H - SEP_H // 2
+    pygame.draw.line(surf, (210, 190, 165),
+                     (px + PAD_X, sep_y), (px + popup_w - PAD_X, sep_y), 1)
+
+    # ── 確認按鈕（置中）──────────────────────────────────────
+    btn_x = px + (popup_w - BTN_W) // 2
+    btn_y = py + total_h - PAD_BOT - BTN_H
+    br    = pygame.Rect(btn_x, btn_y, BTN_W, BTN_H)
+    hover = br.collidepoint(mpos)
+    dr    = _premium_btn(surf, br, BTN_N, hover, radius=12)
+    ct    = fb_lg.render("確認", True, PANEL)
+    surf.blit(ct, (dr.x + (dr.width  - ct.get_width())  // 2,
+                   dr.y + (dr.height - ct.get_height()) // 2))
+
+    surf.set_clip(old_clip)
+    return [(br, True)]
 
 
 def _draw_subj_popup(surf, fm, fs, mpos):
@@ -3944,10 +4064,14 @@ def run_ui():
                 _choices.extend(cmd[1])
                 _mode[0] = "choices"
             elif tag == "yn":
-                _prompt[0]    = cmd[1]
-                _yn_labels[0] = cmd[2] if len(cmd) > 2 else "是"
-                _yn_labels[1] = cmd[3] if len(cmd) > 3 else "否"
+                _prompt[0]      = cmd[1]
+                _yn_labels[0]   = cmd[2] if len(cmd) > 2 else "是"
+                _yn_labels[1]   = cmd[3] if len(cmd) > 3 else "否"
+                _yn_show_ctx[0] = cmd[4] if len(cmd) > 4 else True
                 _mode[0] = "yn"
+            elif tag == "event_ok":
+                _event_ok_text[0] = cmd[1]
+                _mode[0] = "event_ok"
             elif tag == "text":
                 _prompt[0] = cmd[1]
                 _tvalue[0] = cmd[2] if len(cmd) > 2 else ""
@@ -4127,11 +4251,11 @@ def run_ui():
             # 左側熟練度面板 / 右側成績記錄面板
             _draw_exp_panel(screen, fm, _font_micro[0], _player[0])
             _draw_grade_panel(screen, fm, _font_micro[0], _player[0])
-            # 非標準選項 / yn → 需先計算，讓底部面板知道要不要留白
+            # 非標準選項 / yn / event_ok → 需先計算，讓底部面板知道要不要留白
             _cp_active = (
                 (_mode[0] == "choices" and bool(_choices)
                  and not all(c in _STANDARD_ACTIONS for c in _choices))
-                or _mode[0] == "yn"
+                or _mode[0] in ("yn", "event_ok")
             )
             # 底部行動面板：中央彈窗已啟用時改用空白選項，避免重複顯示
             _panel_mode    = "choices" if _cp_active else _mode[0]
@@ -4141,14 +4265,26 @@ def run_ui():
                 _prompt, _tvalue, ar, _time_units[0], mpos)
             # 行動結果彈出視窗（右側由右而左滑入）
             _draw_action_popup(screen, fs)
-            # 中央彈出視窗（含全螢幕暗色遮罩）
-            if _cp_active:
+            # 中央彈出視窗（yn / 非標準選項）
+            _draw_cp = (
+                (_mode[0] == "choices" and bool(_choices)
+                 and not all(c in _STANDARD_ACTIONS for c in _choices))
+                or _mode[0] == "yn"
+            )
+            if _draw_cp:
                 _choice_popup_rects.clear()
                 _choice_popup_rects.extend(
                     _draw_choice_popup(screen, fm, fs, _mode[0], _choices,
                                        _log, _prompt[0], _yn_labels, mpos))
             else:
                 _choice_popup_rects.clear()
+            # 突發事件通知彈窗（單按鈕，最上層）
+            if _mode[0] == "event_ok":
+                _event_ok_popup_rects.clear()
+                _event_ok_popup_rects.extend(
+                    _draw_event_ok_popup(screen, fm, fs, mpos))
+            else:
+                _event_ok_popup_rects.clear()
             # 科目選擇彈出視窗（中央 modal，蓋在所有遊戲 UI 之上）
             if _subj_popup_active[0]:
                 _subj_popup_rects.clear()
@@ -4286,6 +4422,19 @@ def run_ui():
                         _restart_event.set()
                 else:
                     # ── 遊戲中 ────────────────────────────────
+
+                    # 突發事件彈窗優先攔截（最高優先）
+                    if _mode[0] == "event_ok":
+                        for (br, _) in _event_ok_popup_rects:
+                            if br.collidepoint(ev.pos):
+                                _play_sfx("ui_click")
+                                _click_reg[(br.centerx, br.centery)] = pygame.time.get_ticks()
+                                _reply_val[0] = True
+                                _mode[0] = None
+                                _event_ok_popup_rects.clear()
+                                _reply_event.set()
+                                break
+                        continue   # 彈窗開啟時阻擋所有點擊
 
                     # 非標準選項 / yn 中央彈窗優先攔截（最高優先）
                     _cp_now = (
