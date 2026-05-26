@@ -77,7 +77,7 @@ PHASE_EVENTS = [
         "id":       "add_drop_fail",
         "name":     "加簽失敗",
         "prob":     0.20,   # 原機率；roll_event_after_action 內自動減半
-        "week_range": (1, 3),
+        "week_range": (2, 3),
         "is_positive": False,
         "desc":     "等了整整兩週，教授直接把加簽單退回來了。課表就這樣，認了。",
         "effect":   lambda p: _add_drop_fail_effect(p),
@@ -242,17 +242,19 @@ class EventSystem:
     """
 
     def __init__(self, player: Character):
-        self.player           = player
-        self.pending_hangover = False
-        self.triggered_once   = set()
-        self.active_debuffs   = []
-        self.events_this_week = 0   # 本週已觸發突發事件次數（最多 2）
+        self.player              = player
+        self.pending_hangover    = False
+        self.triggered_once      = set()
+        self.active_debuffs      = []
+        self.events_this_week    = 0    # 本週已觸發突發事件次數（最多 2）
+        self.triggered_this_week = set()  # 本週已觸發的事件 ID（防重複）
 
     # ── 公開 API ──────────────────────────────────────────────────
 
     def reset_weekly_count(self):
-        """每週開始時呼叫，重置本週事件計數器。"""
-        self.events_this_week = 0
+        """每週開始時呼叫，重置本週事件計數器與已觸發集合。"""
+        self.events_this_week    = 0
+        self.triggered_this_week = set()
 
     def roll_event_after_action(self, week: int) -> bool:
         """
@@ -280,11 +282,15 @@ class EventSystem:
 
         for pe in PHASE_EVENTS:
             s, e = pe["week_range"]
+            if pe["id"] in self.triggered_this_week:
+                continue
             if s <= week <= e and random.random() < pe["prob"] / 2:
                 priority_candidates.append(("phase", pe))
 
         for we in WEEKLY_EVENTS:
             s, e = we["week_range"]
+            if we["id"] in self.triggered_this_week:
+                continue
             if s <= week <= e:
                 if we.get("once") and we["id"] in self.triggered_once:
                     continue
@@ -293,7 +299,9 @@ class EventSystem:
 
         # ── 全學期主事件候選（原 30% → 15%）─────────────────
         main_candidate = None
-        eligible = [ev for ev in EVENTS if ev["trigger_condition"](player)]
+        eligible = [ev for ev in EVENTS
+                    if ev["trigger_condition"](player)
+                    and ev["id"] not in self.triggered_this_week]
         if eligible and random.random() < 0.15:
             luck_bonus = (player.luck - 50) / 100
             weighted = []
@@ -360,6 +368,7 @@ class EventSystem:
         elif result == "TRIGGER_GREEN_HAT_DEBUFF":
             self._register_green_hat_debuff()
 
+        self.triggered_this_week.add(event["id"])
         if event_type == "weekly" and event.get("once"):
             self.triggered_once.add(event["id"])
 
