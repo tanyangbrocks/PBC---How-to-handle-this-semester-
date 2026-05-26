@@ -72,8 +72,7 @@ class Shop:
                 "id": "exam_pencil",
                 "name": "考試鉛筆組",
                 "price": 80,
-                "desc": "運氣提升 1 點（1週）。考前衝刺必備！",
-                "luck_gain": 1,
+                "desc": "獲得「幸運」狀態 1 週。考前衝刺必備！",
                 "status": "幸運",
                 "duration": 1
             },

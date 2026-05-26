@@ -18,7 +18,7 @@ from shop_V03 import Shop
 from ui import notify, ask_yn, ask_choice, ask_text, set_player, \
                notify_timetable, notify_grade_report, set_time, show_action_result, \
                ask_subject_popup, trigger_time_overflow_warning, tell_story, \
-               show_extra_event_popup
+               show_extra_event_popup, ask_exam_start
 
 
 # ── 每週可選擇的行動清單 ──────────────────────────────────
@@ -135,15 +135,20 @@ class TurnEngine:
             ev = ev_map.get(ev_id)
             if not ev:
                 continue
-            tc = ev.get("time_cost", 0)
-            md = ev.get("money_delta", 0)
+            tc  = ev.get("time_cost", 0)
+            md  = ev.get("money_delta", 0)
+            sat = ev.get("satisfaction_delta", 0)
             total_t      += tc
             player.money += md
+            if sat != 0:
+                player.change_satisfaction(sat)
             lines = []
             if tc > 0:
                 lines.append(f"時間 -{tc}")
             if md != 0:
                 lines.append(f"金錢 {'+' if md >= 0 else ''}{md}")
+            if sat != 0:
+                lines.append(f"自我滿足度 {'+' if sat > 0 else ''}{sat}")
             show_extra_event_popup(lines or ["（本週生效）"], ev["name"],
                                    ev.get("popup_color", (155, 100, 50)))
         return total_t
@@ -160,11 +165,16 @@ class TurnEngine:
         self._pre_action_narrative(week)
 
         # ── 額外事件（第 2 週起）──────────────────────────
-        time_units = player.get_effective_time()
+        extra_cost = 0
         if week > 1:
             extra_cost = self._apply_extra_events()
-            time_units = max(1, time_units - extra_cost)
 
+        # ── 自我滿意度狀態判定（所有週初事件結束後、行動開始前）──
+        for name, msg, color in player.apply_weekly_status():
+            show_extra_event_popup([msg], f"【{name}】", color)
+
+        # ── 計算本週可支配時間（狀態乘數已套用）──────────────
+        time_units = max(1, player.get_effective_time() - extra_cost)
         notify(f"\n本週可支配時間：{time_units} 單位")
 
         # ── 行動選擇迴圈 ──────────────────────────────────
@@ -629,6 +639,8 @@ class TurnEngine:
         notify("「每天都有人在便利商店熬夜念書，校園裡瀰漫著咖啡味。」")
         notify("「考完一科後發現下一科根本還沒讀完。」")
 
+        ask_exam_start("準備期中考")
+
         exam_modifier    = self._pre_exam_check()
         base_stats_score = self._calculate_exam_score("期中") * 0.5
         mini_game_rate   = self._run_exam_mini_game("期中")
@@ -659,6 +671,8 @@ class TurnEngine:
 
         # print("\n🎯 ═══ 期末考週！（最終關卡）═══")  # 因套用pygame而調整
         notify("\n🎯 ═══ 期末考週！（最終關卡）═══")
+
+        ask_exam_start("準備期末考")
 
         exam_modifier    = self._pre_exam_check()
         base_stats_score = self._calculate_exam_score("期末") * 0.5

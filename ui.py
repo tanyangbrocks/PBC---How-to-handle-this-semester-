@@ -80,8 +80,22 @@ _tvalue  = [""]     # text 模式的目前輸入內容
 _scroll    = [0]      # 訊息區往上捲動的行數（保留供 end 畫面使用）
 _composing = [""]   # IME 組字預覽（輸入法尚未確認的字）
 _time_units    = [0]      # 本週剩餘時間點（底部標籤列顯示用）
-_is_fullscreen = [False]  # 目前是否全螢幕
-_week          = [0]      # 當前週次（1–16，0 表示尚未開始）
+_is_fullscreen    = [False]  # 目前是否全螢幕
+_week             = [0]      # 當前週次（1–16，0 表示尚未開始）
+_exam_ready_label = [""]     # "準備期中考" | "準備期末考"（exam_ready 模式用）
+
+# ── 人物立繪系統 ──────────────────────────────────────────────────────
+_CHAR_ART_DIR      = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                   "asset", "picture", "character")
+_portrait_prefix   = [""]    # "b1" | "g1"，角色創建時選定
+_portrait_curr_key = [""]    # 目前顯示的立繪 key（變更偵測用）
+_portrait_curr     = [None]  # 目前顯示的立繪 Surface（已縮放）
+_portrait_prev     = [None]  # 淡出中的前一張立繪 Surface
+_portrait_fade_t0  = [0]     # 淡入開始時間戳（ms，0=無淡入中）
+_PORTRAIT_FADE_MS  = 200     # 淡入總時長（ms）
+_portrait_orig:   dict = {}  # key -> 原始 Surface（未縮放，已快取）
+_portrait_scl:    dict = {}  # (key,w,h) -> 縮放後 Surface（已快取）
+_portrait_head_cache: dict = {}  # prefix -> 圓形頭像 Surface (84px，已快取)
 _font_micro    = [None]   # 極小字型（週次輪盤數字用）
 _font_bold     = [None]   # 粗體字型 size-17（行動按鈕標籤用）
 _font_bold_lg  = [None]   # 粗體字型 size-22（標題 / 上方視窗用）
@@ -864,6 +878,13 @@ def ask_ok(text: str) -> None:
     _reply_event.clear()
     _reply_event.wait()
 
+def ask_exam_start(exam_name: str) -> None:
+    """在底部行動面板顯示單一「準備期中考」/「準備期末考」大按鈕，
+    阻塞直到玩家點擊後才繼續（進入考試流程）。"""
+    _reply_event.clear()
+    _cmd_q.put(("exam_ready", exam_name))
+    _reply_event.wait()
+
 def tell_story(lines: list) -> None:
     """顯示劇情對話框，每次點擊推進一行，全部結束後解除阻塞。
     lines: list of str 或 {"speaker": str, "text": str}。
@@ -931,6 +952,13 @@ def ask_cc_name(prompt: str) -> str:
     """顯示姓名輸入 modal，回傳玩家輸入的字串。"""
     _cmd_q.put(("cc_name", prompt))
     _cc_reply_event.clear()
+    _cc_reply_event.wait()
+    return _cc_reply_val[0]
+
+def ask_cc_portrait() -> str:
+    """讓玩家選擇人物外觀（b1 / g1），回傳前綴字串。"""
+    _cc_reply_event.clear()
+    _cmd_q.put(("cc_portrait",))
     _cc_reply_event.wait()
     return _cc_reply_val[0]
 
@@ -1652,7 +1680,10 @@ def _draw_status(surf, fs, fm, player, rect):
     y += bh + gap
 
     if player.status_effects:
-        eff = "  ".join([f"{k} {v}週" for k, v in player.status_effects.items()])
+        eff = "  ".join(
+            k if v == 0 else f"{k} {v}週"
+            for k, v in player.status_effects.items()
+        )
         surf.blit(fs.render(eff, True, RED), (x, y))
 
 
@@ -1938,16 +1969,20 @@ def _draw_status_v2(surf, fm, fs, player, rect, mpos):
         pygame.draw.rect(surf, DARK_GRAY, shop_r, border_radius=14)
         return shop_r, None
 
-    # ── 圓形頭像 ──────────────────────────────────────────────
+    # ── 圓形頭像（立繪 _head，若無則顯示姓名首字）─────────────
     av_cx = pr.x + 52
     av_cy = pr.y + 58
     av_r  = 42
-    pygame.draw.circle(surf, PANEL, (av_cx, av_cy), av_r)
-    pygame.draw.circle(surf, CYAN,  (av_cx, av_cy), av_r, 3)
-    init_ch = player.name[0] if player.name else "？"
-    init_t  = fb_lg.render(init_ch, True, TITLE)
-    surf.blit(init_t, (av_cx - init_t.get_width() // 2,
-                       av_cy - init_t.get_height() // 2))
+    _head = _portrait_head_load(_portrait_prefix[0]) if _portrait_prefix[0] else None
+    if _head:
+        surf.blit(_head, (av_cx - av_r, av_cy - av_r))
+    else:
+        pygame.draw.circle(surf, PANEL, (av_cx, av_cy), av_r)
+        init_ch = player.name[0] if player.name else "？"
+        init_t  = fb_lg.render(init_ch, True, TITLE)
+        surf.blit(init_t, (av_cx - init_t.get_width() // 2,
+                           av_cy - init_t.get_height() // 2))
+    pygame.draw.circle(surf, CYAN, (av_cx, av_cy), av_r, 3)
 
     # ── 名字 + 系級 + 狀態效果（同一行，純文字，無外框）────
     info_x = pr.x + 106
@@ -1956,9 +1991,12 @@ def _draw_status_v2(surf, fm, fs, player, rect, mpos):
     _base_str = f"{player.name}  {player.department}{' ' + _de_name if _de_name else ''}"
     name_t = fb_lg.render(_base_str, True, WHITE)
     surf.blit(name_t, (info_x, info_y))
-    # 狀態效果（接在年級後，紅色，無括號）
+    # 狀態效果（接在年級後，紅色，無括號；v=0 表示條件型，不顯示週數）
     if player.status_effects:
-        _eff_str = "  " + "  ".join(f"{k} {v}週" for k, v in player.status_effects.items())
+        _eff_str = "  " + "  ".join(
+            k if v == 0 else f"{k} {v}週"
+            for k, v in player.status_effects.items()
+        )
         _eff_t   = fb_lg.render(_eff_str, True, RED)
         surf.blit(_eff_t, (info_x + name_t.get_width(), info_y))
     # 名字下細線
@@ -2322,6 +2360,60 @@ def _draw_cc_name(surf, fm, fs, mpos):
     surf.blit(t, (dr.x + (dr.width  - t.get_width())  // 2,
                   dr.y + (dr.height - t.get_height()) // 2))
     return ok
+
+
+def _draw_cc_portrait(surf, fm, fs, mpos):
+    """
+    角色外觀選擇畫面（CC 第 1.5 步）。
+    左：b1_1（男角），右：g1_1（女角）。
+    回傳 [(card_rect, prefix_str), ...] 供 _handle_cc_action 使用。
+    """
+    fb_lg = _font_bold_lg[0] or fm
+    _draw_cc_bg(surf)
+
+    # ── 標題 ──────────────────────────────────────────────────
+    title_y = (WIN_H - 480) // 2 - 20
+    _draw_float_label_card(surf, fm, "選擇人物外觀",
+                           WIN_W // 2, title_y,
+                           pad_x=26, pad_y=11, amp=7, speed=0.00170, phase=0.0)
+
+    # ── 卡片尺寸與位置 ────────────────────────────────────────
+    CARD_W, CARD_H = 260, 420
+    GAP            = 60
+    total_w        = CARD_W * 2 + GAP
+    base_x         = (WIN_W - total_w) // 2
+    base_y         = (WIN_H - CARD_H) // 2 + 20
+    rects_out      = []
+
+    for i, (prefix, label) in enumerate([("b1", "男角"), ("g1", "女角")]):
+        cx     = base_x + i * (CARD_W + GAP)
+        card_r = pygame.Rect(cx, base_y, CARD_W, CARD_H)
+        hover  = card_r.collidepoint(mpos)
+
+        # 投影
+        _soft_shadow(surf, card_r, radius=16, alpha=50, offset=(0, 6))
+        # 卡片底色
+        bg_col = (240, 228, 210) if hover else PANEL
+        pygame.draw.rect(surf, bg_col, card_r, border_radius=16)
+        pygame.draw.rect(surf, CYAN,   card_r, 2, border_radius=16)
+
+        # 立繪（縮放置入卡片，底部對齊）
+        img_key = f"{prefix}_1"
+        img     = _portrait_scaled_load(img_key, CARD_W - 16, CARD_H - 56)
+        if img:
+            iw, ih = img.get_size()
+            img_x  = card_r.x + (CARD_W - iw) // 2
+            img_y  = card_r.y + CARD_H - 50 - ih
+            surf.blit(img, (img_x, img_y))
+
+        # 標籤
+        lt = fb_lg.render(label, True, WHITE if hover else GRAY)
+        surf.blit(lt, (card_r.x + (CARD_W - lt.get_width()) // 2,
+                       card_r.bottom - 44))
+
+        rects_out.append((card_r, prefix))
+
+    return rects_out
 
 
 def _draw_cc_dept(surf, fm, fs, options, mpos):
@@ -3086,6 +3178,15 @@ def _handle_cc_action(ev_pos):
             pygame.key.stop_text_input()
             _cc_reply_event.set()
 
+    elif mode == "portrait":
+        for (r, prefix) in (_cc_btn_cache.get("portrait_cards") or []):
+            if r.collidepoint(ev_pos):
+                _portrait_prefix[0] = prefix
+                _cc_reply_val[0]    = prefix
+                _cc_mode[0]         = ""
+                _cc_reply_event.set()
+                return
+
     elif mode == "dept":
         for (r, idx) in (_cc_btn_cache.get("dept_cards") or []):
             if r.collidepoint(ev_pos):
@@ -3785,13 +3886,16 @@ def _draw_action_panel(surf, fm, fs, mode, choices, log, prompt, tvalue, rect, t
         eff_t  = fb.render(eff_str, True, YELLOW)
         surf.blit(eff_t, (sep_x + sep_t.get_width() + 10, tip_y))
 
-    # 右側：結束本週按鈕（紅色，類似離開道具店）
-    ew_btn   = pygame.Rect(pr.right - 110, tab_rect.y + 4, 100, TAB_H - 8)
-    ew_hover = ew_btn.collidepoint(mpos)
-    ew_dr    = _premium_btn(surf, ew_btn, (200, 78, 58), ew_hover, radius=10)
-    ew_t     = fb.render("結束本週", True, PANEL)
-    surf.blit(ew_t, (ew_dr.x + (ew_dr.width  - ew_t.get_width())  // 2,
-                     ew_dr.y + (ew_dr.height - ew_t.get_height()) // 2))
+    # 右側：結束本週按鈕（考試週隱藏）
+    if mode != "exam_ready":
+        ew_btn   = pygame.Rect(pr.right - 110, tab_rect.y + 4, 100, TAB_H - 8)
+        ew_hover = ew_btn.collidepoint(mpos)
+        ew_dr    = _premium_btn(surf, ew_btn, (200, 78, 58), ew_hover, radius=10)
+        ew_t     = fb.render("結束本週", True, PANEL)
+        surf.blit(ew_t, (ew_dr.x + (ew_dr.width  - ew_t.get_width())  // 2,
+                         ew_dr.y + (ew_dr.height - ew_t.get_height()) // 2))
+    else:
+        ew_btn = None
 
     # 分隔線
     pygame.draw.line(surf, GRAY, (pr.x, content_top), (pr.right, content_top), 1)
@@ -3983,6 +4087,21 @@ def _draw_action_panel(surf, fm, fs, mode, choices, log, prompt, tvalue, rect, t
             surf.blit(arr, (content_rect.right - arr.get_width() - PAD,
                             content_rect.bottom - arr.get_height() - 6))
 
+    elif mode == "exam_ready":
+        # ── 考試開始按鈕（單一大按鈕，居中）────────────────────
+        ex_label = _exam_ready_label[0]
+        bw_ex    = min(320, content_rect.width - 48)
+        bh_ex    = 56
+        bx_ex    = content_rect.x + (content_rect.width - bw_ex) // 2
+        by_ex    = content_rect.y + (content_rect.height - bh_ex) // 2
+        br_ex    = pygame.Rect(bx_ex, by_ex, bw_ex, bh_ex)
+        ex_hover = br_ex.collidepoint(mpos)
+        _premium_btn(surf, br_ex, (180, 80, 30), ex_hover, radius=14)
+        lt_ex = fb_lg.render(ex_label, True, PANEL)
+        surf.blit(lt_ex, (br_ex.x + (br_ex.width  - lt_ex.get_width())  // 2,
+                          br_ex.y + (br_ex.height - lt_ex.get_height()) // 2))
+        content_rects.append((br_ex, 1))
+
     else:
         # ── 敘述模式（mode == None）：顯示最新 log ────────────
         _draw_panel_log(surf, fs, log, content_rect, lines=6)
@@ -4034,6 +4153,64 @@ _EXP_LVL_COLORS = [
 ]
 _EXP_LVL_NAMES  = ["新手", "普通", "熟練", "精通"]
 _EXP_LVL_THR    = [0, 30, 60, 90]
+
+
+def _draw_exam_stress_fx(surf: pygame.Surface) -> None:
+    """
+    考前壓力視覺特效：
+      距期中（第 8 週）或期末（第 16 週）剩 ≤ 2 週時
+        → 各面板邊框套用紅色顫抖鬼影效果。
+      距考試剩 1 週時
+        → 額外在全畫面疊加微量紅色底色。
+    """
+    week = _week[0]
+    if week <= 0:
+        return
+
+    # 計算距最近考試的週數
+    dist_mid = 8  - week if week < 8  else 999
+    dist_fin = 16 - week if week < 16 else 999
+    dist     = min(dist_mid, dist_fin)
+
+    if dist > 2 or dist <= 0:
+        return
+
+    # ── 各面板邊框 Rect（與 _draw_status_v2 / _side_panel_bg 對齊）──
+    M  = 8
+    PW = _SIDE_PANEL_W
+    panels = [
+        (pygame.Rect(M,             M,               WIN_W - M*2,  STATUS_H - M*2), 14),
+        (pygame.Rect(M,             STATUS_H + M,    PW,           CHAR_H - M*2),   13),
+        (pygame.Rect(WIN_W - M - PW, STATUS_H + M,  PW,           CHAR_H - M*2),   13),
+        (pygame.Rect(M,             STATUS_H + CHAR_H + M, WIN_W - M*2, ACTION_H - M*2), 14),
+    ]
+
+    # 單張合併疊加 Surface → 只 blit 一次，效能最佳
+    overlay = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
+
+    # dist == 1：全畫面底色微微泛紅
+    if dist == 1:
+        overlay.fill((200, 30, 20, 22))   # alpha ≈ 8.6%，極淡紅暈
+
+    # 邊框顫抖：用時間種子亂數產生偏移，每 80 ms 換一次 → 顫抖感
+    now = pygame.time.get_ticks()
+    rng = random.Random(now // 80)
+    amp = 3 if dist == 1 else 2           # 越近考試抖得越厲害
+    red = (215, 68, 62)                   # 草莓紅（= RED 常數）
+
+    for rect, brad in panels:
+        for layer_i in range(3):
+            alpha = 70 - layer_i * 20     # 70 → 50 → 30
+            dx    = rng.randint(-amp, amp)
+            dy    = rng.randint(-amp, amp)
+            pygame.draw.rect(
+                overlay,
+                (*red, alpha),
+                pygame.Rect(rect.x + dx, rect.y + dy, rect.width, rect.height),
+                2, border_radius=brad,
+            )
+
+    surf.blit(overlay, (0, 0))
 
 
 def _side_panel_bg(surf: pygame.Surface, x: int, y: int, w: int, h: int) -> None:
@@ -4169,95 +4346,161 @@ def _draw_grade_panel(surf: pygame.Surface, fm, fmic, player) -> None:
         row_y += row_h
 
 
+# ═══════════════════════════════════════════════════════════════
+#  人物立繪輔助函式
+# ═══════════════════════════════════════════════════════════════
+
+def _portrait_orig_load(key: str):
+    """載入並快取原始立繪（未縮放）。"""
+    if key in _portrait_orig:
+        return _portrait_orig[key]
+    path = os.path.join(_CHAR_ART_DIR, f"{key}.webp")
+    if not os.path.isfile(path):
+        return None
+    try:
+        surf = pygame.image.load(path).convert_alpha()
+        _portrait_orig[key] = surf
+        return surf
+    except Exception:
+        return None
+
+
+def _portrait_scaled_load(key: str, w: int, h: int):
+    """取得縮放至 (w, h) 的立繪（等比填滿高度，水平置中，不拉伸）。"""
+    ck = (key, w, h)
+    if ck in _portrait_scl:
+        return _portrait_scl[ck]
+    orig = _portrait_orig_load(key)
+    if orig is None:
+        return None
+    ow, oh = orig.get_size()
+    scale = h / oh
+    nw, nh = int(ow * scale), h
+    if nw > w:
+        scale = w / ow
+        nw, nh = w, int(oh * scale)
+    scaled = pygame.transform.smoothscale(orig, (nw, nh))
+    _portrait_scl[ck] = scaled
+    return scaled
+
+
+def _portrait_head_load(prefix: str):
+    """取得圓形頭像 Surface（直徑 84px，SRCALPHA，已快取）。"""
+    if prefix in _portrait_head_cache:
+        return _portrait_head_cache[prefix]
+    key  = f"{prefix}_head"
+    orig = _portrait_orig_load(key)
+    if orig is None:
+        return None
+    D      = 84
+    scaled = pygame.transform.smoothscale(orig, (D, D))
+    mask   = pygame.Surface((D, D), pygame.SRCALPHA)
+    mask.fill((0, 0, 0, 0))
+    pygame.draw.circle(mask, (255, 255, 255, 255), (D // 2, D // 2), D // 2)
+    result = scaled.copy()
+    result.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+    _portrait_head_cache[prefix] = result
+    return result
+
+
+def _get_portrait_key() -> str:
+    """根據當前遊戲狀態決定應顯示哪張立繪的 key。"""
+    prefix = _portrait_prefix[0]
+    if not prefix:
+        return ""
+    week   = _week[0]
+    mode   = _mode[0]
+    player = _player[0]
+
+    # ── 基礎 key（依週次距考試距離）──────────────────────────
+    if week in (8, 16):
+        base = f"{prefix}_8"
+    elif week > 0:
+        dist_mid = (8  - week) if week < 8  else 999
+        dist_fin = (16 - week) if week < 16 else 999
+        dist = min(dist_mid, dist_fin)
+        base = f"{prefix}_6" if 0 < dist <= 3 else f"{prefix}_1"
+    else:
+        base = f"{prefix}_1"
+
+    # ── 覆蓋：成績公告 modal → _4 ───────────────────────────
+    if _modal[0] == "grade_report":
+        return f"{prefix}_4"
+
+    # ── 覆蓋：突發事件彈窗 → _4 ─────────────────────────────
+    if mode == "event_ok":
+        return f"{prefix}_4"
+
+    # ── 覆蓋：劇情對話 / yn / 非標準選項 → _3 ───────────────
+    if mode in ("story", "yn"):
+        return f"{prefix}_3"
+    if (mode == "choices" and _choices
+            and not all(c in _STANDARD_ACTIONS for c in _choices)):
+        return f"{prefix}_3"
+
+    # ── 覆蓋：行動後狀態（體力 / 滿足感）──────────────────────
+    if player is not None:
+        sat   = player.satisfaction
+        ratio = player.stamina / max(player.stamina_max, 1)
+        if sat <= 60:
+            return f"{prefix}_5"
+        if ratio < 1 / 3:
+            return f"{prefix}_0"
+        if ratio >= 0.5 and sat >= 80:
+            return f"{prefix}_2"
+
+    return base
+
+
+def _portrait_switch(new_key: str, rect_w: int, rect_h: int) -> None:
+    """若目標 key 與當前不同，啟動淡入淡出轉場。"""
+    if new_key == _portrait_curr_key[0]:
+        return
+    new_surf = _portrait_scaled_load(new_key, rect_w, rect_h) if new_key else None
+    _portrait_prev[0]     = _portrait_curr[0]
+    _portrait_curr[0]     = new_surf
+    _portrait_curr_key[0] = new_key
+    _portrait_fade_t0[0]  = pygame.time.get_ticks() if new_surf is not None else 0
+
+
 def _draw_character_art(surf, rect):
     """
-    人物立繪占位（純幾何圖形，之後可替換為圖片）。
-    在 rect 區域內繪製一個可愛的簡單角色。
+    人物立繪區：顯示玩家選擇的角色立繪（含淡入淡出轉場）。
+    rect 為整個立繪區的 Rect（STATUS_H..STATUS_H+CHAR_H, 全寬）。
     """
-    cx = rect.centerx
-    # 陰影橢圓（地面感）
-    pygame.draw.ellipse(surf, (220, 200, 175),
-                        (cx - 55, rect.bottom - 22, 110, 18))
+    key = _get_portrait_key()
+    _portrait_switch(key, rect.width, rect.height)
 
-    # ── 身體（裙子：梯形用 polygon）─────────────────────────
-    body_top_y  = rect.y + 148
-    body_bot_y  = rect.bottom - 22
-    skirt_t_w   = 54
-    skirt_b_w   = 110
-    skirt_pts   = [
-        (cx - skirt_t_w // 2, body_top_y),
-        (cx + skirt_t_w // 2, body_top_y),
-        (cx + skirt_b_w // 2, body_bot_y),
-        (cx - skirt_b_w // 2, body_bot_y),
-    ]
-    pygame.draw.polygon(surf, BTN_H, skirt_pts)
-    pygame.draw.polygon(surf, (78, 165, 210),  skirt_pts, 2)
+    now = pygame.time.get_ticks()
+    if _portrait_fade_t0[0] > 0:
+        t = min((now - _portrait_fade_t0[0]) / _PORTRAIT_FADE_MS, 1.0)
+    else:
+        t = 1.0
 
-    # 裙子腰帶
-    waist_r = pygame.Rect(cx - 30, body_top_y - 6, 60, 14)
-    pygame.draw.rect(surf, BTN_N, waist_r, border_radius=7)
+    def _blit_p(p_surf, alpha):
+        if p_surf is None:
+            return
+        pw = p_surf.get_width()
+        ph = p_surf.get_height()
+        px = rect.x + (rect.width - pw) // 2
+        py = rect.y + rect.height - ph   # 底部對齊
+        if alpha < 255:
+            tmp = p_surf.copy()
+            tmp.set_alpha(alpha)
+            surf.blit(tmp, (px, py))
+        else:
+            surf.blit(p_surf, (px, py))
 
-    # 上衣（圓角矩形）
-    top_r = pygame.Rect(cx - 28, rect.y + 100, 56, 52)
-    pygame.draw.rect(surf, MILK, top_r, border_radius=8)
-    pygame.draw.rect(surf, (78, 165, 210), top_r, 2, border_radius=8)
+    # 淡出：前一張
+    if _portrait_prev[0] is not None and t < 1.0:
+        _blit_p(_portrait_prev[0], int(255 * (1.0 - t)))
 
-    # 衣領小V
-    collar_pts = [(cx, rect.y + 108), (cx - 10, rect.y + 100), (cx + 10, rect.y + 100)]
-    pygame.draw.polygon(surf, BTN_H, collar_pts)
-
-    # 手臂（左右各一個小圓角矩形）
-    for side in (-1, 1):
-        arm_r = pygame.Rect(cx + side * 32 - 10, rect.y + 105, 18, 44)
-        pygame.draw.rect(surf, MILK, arm_r, border_radius=9)
-        pygame.draw.rect(surf, (78, 165, 210), arm_r, 1, border_radius=9)
-
-    # ── 頸部 ─────────────────────────────────────────────────
-    pygame.draw.rect(surf, MILK, (cx - 9, rect.y + 74, 18, 28), border_radius=5)
-
-    # ── 頭部（圓形）─────────────────────────────────────────
-    head_cx, head_cy, head_r = cx, rect.y + 62, 42
-    pygame.draw.circle(surf, MILK, (head_cx, head_cy), head_r)
-    pygame.draw.circle(surf, (78, 165, 210), (head_cx, head_cy), head_r, 2)
-
-    # ── 頭髮（深棕弧形蓋在頭上）─────────────────────────────
-    hair_col = (140, 88, 40)
-    # 後髮（先畫，在頭後面）
-    pygame.draw.ellipse(surf, hair_col,
-                        (head_cx - 46, head_cy - head_r - 2, 92, 54))
-    # 前劉海（蓋在頭前）
-    pygame.draw.ellipse(surf, hair_col,
-                        (head_cx - 40, head_cy - head_r - 4, 80, 36))
-    # 兩側長髮（細長橢圓）
-    for side in (-1, 1):
-        pygame.draw.ellipse(surf, hair_col,
-                            (head_cx + side * 30, head_cy - 10, 20, 68))
-
-    # ── 臉部 ─────────────────────────────────────────────────
-    # 眼睛（橢圓）
-    for ex in (head_cx - 14, head_cx + 14):
-        pygame.draw.ellipse(surf, WHITE, (ex - 7, head_cy - 8, 14, 10))
-        pygame.draw.ellipse(surf, (50, 30, 10), (ex - 4, head_cy - 6, 8, 7))  # 瞳孔
-    # 腮紅
-    for ex in (head_cx - 18, head_cx + 12):
-        blush = pygame.Surface((18, 10), pygame.SRCALPHA)
-        blush.fill((255, 180, 160, 100))
-        surf.blit(blush, (ex, head_cy + 2))
-    # 微笑嘴巴
-    pygame.draw.arc(surf, (210, 120, 100),
-                    (head_cx - 10, head_cy + 6, 20, 12),
-                    3.14, 0, 2)
-
-    # ── 裝飾：頭上小蝴蝶結 ─────────────────────────────────
-    bow_cx, bow_cy = head_cx + 24, head_cy - head_r + 4
-    for dx in (-10, 10):
-        bow_pts = [
-            (bow_cx,      bow_cy),
-            (bow_cx + dx, bow_cy - 8),
-            (bow_cx + dx, bow_cy + 8),
-        ]
-        pygame.draw.polygon(surf, RED, bow_pts)
-    pygame.draw.circle(surf, YELLOW, (bow_cx, bow_cy), 5)
+    # 淡入：當前張
+    if _portrait_curr[0] is not None:
+        _blit_p(_portrait_curr[0], int(255 * t))
+        if t >= 1.0:
+            _portrait_prev[0]    = None
+            _portrait_fade_t0[0] = 0
 
 
 def _draw_modal_overlay(surf):
@@ -4894,6 +5137,8 @@ def run_ui():
                 _cc_tvalue[0]    = ""
                 _cc_composing[0] = ""
                 pygame.key.start_text_input()
+            elif tag == "cc_portrait":
+                _cc_mode[0] = "portrait"
             elif tag == "cc_dept":
                 _cc_mode[0] = "dept"
                 _cc_data[0] = cmd[1]   # options list
@@ -4967,6 +5212,9 @@ def run_ui():
                 _story_lines.extend(cmd[1])
                 _story_index[0] = 0
                 _mode[0] = "story"
+            elif tag == "exam_ready":
+                _exam_ready_label[0] = cmd[1]
+                _mode[0] = "exam_ready"
 
         # ── 繪製（依畫面階段切換內容）────────────────────────
         # 全螢幕 fallback（無 SCALED）時 Surface 可能大於 WIN_W×WIN_H；
@@ -5030,6 +5278,9 @@ def run_ui():
             if cm == "name":
                 ok = _draw_cc_name(screen, fm, fs, mpos)
                 _cc_btn_cache["name_ok"] = ok
+            elif cm == "portrait":
+                pcards = _draw_cc_portrait(screen, fm, fs, mpos)
+                _cc_btn_cache["portrait_cards"] = pcards
             elif cm == "dept":
                 drects = _draw_cc_dept(screen, fm, fs, _cc_data[0] or [], mpos)
                 _cc_btn_cache["dept_cards"] = drects
@@ -5098,6 +5349,8 @@ def run_ui():
             btn_rects, end_week_btn = _draw_action_panel(
                 screen, fm, fs, _panel_mode, _panel_choices, _log,
                 _prompt, _tvalue, ar, _time_units[0], mpos)
+            # 考前壓力特效（邊框顫抖 + 底色微微泛紅）：疊在所有面板之上、彈窗之下
+            _draw_exam_stress_fx(screen)
             # 行動結果彈出視窗（右側由右而左滑入）
             _draw_action_popup(screen, fs)
             # 中央彈出視窗（yn / 非標準選項）
@@ -5410,6 +5663,12 @@ def run_ui():
                                 _reply_val[0] = val
                                 _mode[0] = None
                                 _choices.clear()
+                                _reply_event.set()
+                            elif _mode[0] == "exam_ready":
+                                _play_sfx("ui_click")
+                                _reply_val[0] = val
+                                _mode[0] = None
+                                _exam_ready_label[0] = ""
                                 _reply_event.set()
 
             elif ev.type == pygame.TEXTEDITING:

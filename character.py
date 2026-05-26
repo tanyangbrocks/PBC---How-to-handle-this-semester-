@@ -12,7 +12,7 @@
 import random
 from ui import (notify, ask_text, ask_choice, ask_yn,
                 begin_char_create, end_char_create,
-                ask_cc_name, ask_cc_dept, ask_cc_de_level,
+                ask_cc_name, ask_cc_portrait, ask_cc_dept, ask_cc_de_level,
                 ask_cc_drawbacks, ask_cc_stats, ask_cc_talent,
                 ask_cc_extra_events, ask_cc_summary)
 
@@ -43,7 +43,7 @@ EXTRA_EVENTS = [
         "id":          "part_time",
         "name":        "打工",
         "time_cost":   3,
-        "money_delta": 500,
+        "money_delta": 250,
         "intel_req":   0,
         "exclusive":   ["tutoring"],
         "popup_color": (235, 130, 30),
@@ -52,19 +52,20 @@ EXTRA_EVENTS = [
         "id":          "tutoring",
         "name":        "家教",
         "time_cost":   2,
-        "money_delta": 350,
+        "money_delta": 300,
         "intel_req":   75,
         "exclusive":   ["part_time"],
         "popup_color": (200, 50, 50),
     },
     {
-        "id":          "club",
-        "name":        "參加社團",
-        "time_cost":   0,
-        "money_delta": -260,
-        "intel_req":   0,
-        "exclusive":   [],
-        "popup_color": (110, 50, 185),
+        "id":              "club",
+        "name":            "參加社團",
+        "time_cost":       2,
+        "money_delta":     -225,
+        "satisfaction_delta": 20,
+        "intel_req":       0,
+        "exclusive":       [],
+        "popup_color":     (110, 50, 185),
     },
 ]
 
@@ -80,7 +81,8 @@ class Character:
     def __init__(self, name: str, department: str,
                  stamina: int, intel: int, luck: int, money: int,
                  talent: dict, drawbacks: list, de_level: dict = None,
-                 extra_events: list = None, slot_results: list = None):
+                 extra_events: list = None, slot_results: list = None,
+                 portrait_prefix: str = ""):
         self.name       = name
         self.department = department
         self.stamina_max = stamina
@@ -92,6 +94,7 @@ class Character:
         self.drawbacks   = drawbacks
         self.extra_events = list(extra_events or [])
         self.slot_results = list(slot_results or [])
+        self.portrait_prefix = portrait_prefix
         self.de_level    = de_level or {"name": "大一", "base_time": 5, "intel": 0, "luck": 5}
         self.base_time_bonus = self.de_level.get("base_time", 0)
         self.base_time_mult  = 1.0
@@ -128,6 +131,9 @@ class Character:
         while True:
             # 1. 輸入名字
             name = ask_cc_name("請輸入角色名字").strip() or "無名大學生"
+
+            # 1.5. 選擇人物外觀
+            portrait_prefix = ask_cc_portrait()
 
             # 2. 選擇系級
             departments = [
@@ -193,7 +199,8 @@ class Character:
 
         notify(f"\n角色創建完成！{name}（{department} {de_level['name']}）準備迎接這學期的挑戰。")
         return cls(name, department, stamina, intel, luck, money, combined_talent,
-                   chosen_drawbacks, de_level, extra_evs, slot_results)
+                   chosen_drawbacks, de_level, extra_evs, slot_results,
+                   portrait_prefix)
 
     # ────────────────────────────────────────────────────────
     #  角色行為方法
@@ -213,38 +220,96 @@ class Character:
 
     def change_satisfaction(self, delta: int):
         self.satisfaction = max(0, min(100, self.satisfaction + delta))
-        if self.satisfaction < 60:
-            # print("😞 自我滿足感過低，你陷入無力狀態……本週可支配時間大幅下降。")  # 因套用pygame而調整
-            notify("😞 自我滿足感過低，你陷入無力狀態……本週可支配時間大幅下降。")
 
     def add_status(self, name: str, duration: int):
+        """手動賦予計時型狀態（如 consume_stamina 觸發的生病）。"""
         self.status_effects[name] = duration
-        # print(f"  ➕ 獲得狀態：【{name}】（持續 {duration} 週）")  # 因套用pygame而調整
         notify(f"  ➕ 獲得狀態：【{name}】（持續 {duration} 週）")
 
+    def apply_weekly_status(self) -> list:
+        """
+        每週行動前依自我滿意度判定並賦予玩家狀態。
+        須在所有週初事件（劇情、額外事件）結束後、行動迴圈開始前呼叫。
+
+        回傳新增狀態列表：[(name, popup_msg, border_color), ...]
+        規則：
+          satisfaction < sick_thr（預設 60）→ 賦予「生病」（2 週，新觸發才加）
+          satisfaction < 80           → 賦予「無力狀態」（條件型，v=0 不倒數）
+          satisfaction > 80 且未生病  → 賦予「神采奕奕」（1 週，新觸發才加）
+          注意：生病時無法被賦予神采奕奕。
+        """
+        new_statuses = []
+        sick_thr = self.sick_threshold if self.sick_threshold > 0 else 60
+
+        # ── 「生病」：滿足感低於閾值且尚未生病 ────────────────
+        if self.satisfaction < sick_thr and "生病" not in self.status_effects:
+            self.status_effects["生病"] = 2
+            new_statuses.append((
+                "生病",
+                "😷 身體出了狀況……本週行動時間大幅縮水，好好休息吧。",
+                (200, 60, 60),
+            ))
+
+        # ── 「無力狀態」：條件型（v=0 表示不倒數、不自動解除）──
+        if self.satisfaction < 80:
+            if "無力狀態" not in self.status_effects:
+                self.status_effects["無力狀態"] = 0   # 0 = 永久跟隨條件
+                new_statuses.append((
+                    "無力狀態",
+                    "😔 最近提不起勁……本週行動效率有所下降。",
+                    (160, 95, 40),
+                ))
+        else:
+            # 滿足感回升到 80 以上 → 條件不成立，直接解除
+            self.status_effects.pop("無力狀態", None)
+
+        # ── 「神采奕奕」：滿足感 > 80 且未生病（新觸發才加）──
+        if self.satisfaction > 80 and "生病" not in self.status_effects:
+            if "神采奕奕" not in self.status_effects:
+                self.status_effects["神采奕奕"] = 1
+                new_statuses.append((
+                    "神采奕奕",
+                    "✨ 今天狀態超棒！精神滿滿，本週行動效率大幅提升！",
+                    (200, 155, 20),
+                ))
+
+        return new_statuses
+
     def tick_status_effects(self):
-        if self.sick_threshold > 0 and self.satisfaction < self.sick_threshold \
-                and "生病" not in self.status_effects:
-            self.add_status("生病", duration=1)
-        expired = [name for name, weeks in self.status_effects.items() if weeks <= 1]
+        """
+        週末倒數與解除計時型狀態。
+        「幸運」：點數型，每週衰退 _LUCK_DECAY_PER_WEEK 點，降到 0 時移除。
+        v == 0 ：條件型（無力狀態），由 apply_weekly_status 管理，此處跳過。
+        v >= 1 ：計時型（生病/神采奕奕等），v==1 時解除，其餘 -1。
+        """
+        # ── 一般計時型：v==1 解除，v>1 倒數 ──────────────────
+        expired = [name for name, weeks in self.status_effects.items()
+                   if weeks == 1]
         for name in expired:
             del self.status_effects[name]
-            # print(f"  ➖ 狀態解除：【{name}】")  # 因套用pygame而調整
             notify(f"  ➖ 狀態解除：【{name}】")
-        for name in self.status_effects:
-            self.status_effects[name] -= 1
+        for name in list(self.status_effects):
+            if self.status_effects[name] >= 1:
+                self.status_effects[name] -= 1
 
     def get_effective_time(self) -> int:
+        """計算本週可支配時間（已套用狀態乘數）。"""
         base_time = 10 + self.base_time_bonus
-        if self.satisfaction < 60:
-            base_time = 5 + self.base_time_bonus
+        mult      = self.base_time_mult   # 天賦乘數（如勤奮學渣 0.9）
+
+        # 滿意度狀態（互斥系統）
+        if "無力狀態" in self.status_effects:
+            mult *= 0.7
         if "生病" in self.status_effects:
-            base_time -= 3
-        if "疲勞" in self.status_effects:
-            base_time -= 2
+            mult *= 0.5
+        if "神采奕奕" in self.status_effects:
+            mult *= 1.5
+
+        # 道具店效果：激勵（+20%，可與滿意度狀態疊加）
         if "激勵" in self.status_effects:
-            base_time += 2
-        return max(1, int(base_time * self.base_time_mult))
+            mult *= 1.2
+
+        return max(1, int(base_time * mult))
 
     def is_game_over(self) -> bool:
         if self.stamina <= 0 and "生病" in self.status_effects:
