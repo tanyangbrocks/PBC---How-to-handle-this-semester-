@@ -2218,27 +2218,40 @@ def _draw_cc_name(surf, fm, fs, mpos):
 
 
 def _draw_cc_dept(surf, fm, fs, options, mpos):
-    """系級橫向卡片，回傳各卡 (Rect, 1-based idx) 列表。"""
+    """學院格狀卡片（4 欄），回傳各卡 (Rect, 1-based idx) 列表。"""
     fb_lg = _font_bold_lg[0] or fm
     _draw_cc_bg(surf)
-    # ── 垂直置中計算 ──────────────────────────────────────────
-    cw, ch = 180, 120
-    gap         = 20
-    label_h     = fm.get_height() + 22   # pad_y=11 × 2
-    TITLE_GAP   = 28
-    total_h     = label_h + TITLE_GAP + ch
-    top_y       = (WIN_H - total_h) // 2
-    sy          = top_y + label_h + TITLE_GAP
-    _draw_float_label_card(surf, fm, "選擇系級", WIN_W // 2, top_y,
+    # ── 格狀版型參數 ───────────────────────────────────────────
+    COLS      = 4
+    cw, ch    = 196, 64
+    gap_x     = 14
+    gap_y     = 12
+    n         = len(options)
+    n_rows    = (n + COLS - 1) // COLS
+    label_h   = fm.get_height() + 22   # pad_y=11 × 2
+    TITLE_GAP = 24
+    grid_h    = n_rows * ch + (n_rows - 1) * gap_y
+    total_h   = label_h + TITLE_GAP + grid_h
+    top_y     = (WIN_H - total_h) // 2
+    grid_y    = top_y + label_h + TITLE_GAP
+    _draw_float_label_card(surf, fm, "選擇學院", WIN_W // 2, top_y,
                            pad_x=26, pad_y=11, amp=7, speed=0.00170, phase=0.0)
-    total_w = len(options) * cw + (len(options) - 1) * gap
-    sx = (WIN_W - total_w) // 2
     rects = []
     for i, opt in enumerate(options):
-        r     = pygame.Rect(sx + i * (cw + gap), sy, cw, ch)
-        hover = r.collidepoint(mpos)
-        dr    = _premium_btn(surf, r, BTN_N, hover, radius=16)
-        t     = fb_lg.render(opt, True, WHITE)
+        row = i // COLS
+        col = i %  COLS
+        # 最後一行若不滿 COLS，整排置中
+        row_start = row * COLS
+        row_end   = min(row_start + COLS, n)
+        row_cnt   = row_end - row_start
+        row_w     = row_cnt * cw + (row_cnt - 1) * gap_x
+        sx        = (WIN_W - row_w) // 2
+        rx        = sx + col * (cw + gap_x)
+        ry        = grid_y + row * (ch + gap_y)
+        r         = pygame.Rect(rx, ry, cw, ch)
+        hover     = r.collidepoint(mpos)
+        dr        = _premium_btn(surf, r, BTN_N, hover, radius=14)
+        t         = fb_lg.render(opt, True, WHITE)
         surf.blit(t, (dr.x + (dr.width  - t.get_width())  // 2,
                       dr.y + (dr.height - t.get_height()) // 2))
         rects.append((r, i + 1))

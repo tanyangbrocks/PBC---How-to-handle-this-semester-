@@ -77,7 +77,11 @@ class Character:
         name = ask_cc_name("請輸入角色名字").strip() or "無名大學生"
 
         # 2. 選擇系級
-        departments = ["資管系", "企管系", "財金系", "會計系"]
+        departments = [
+            "文學院", "理學院", "社會科學院", "醫學院",
+            "工學院", "生物資源暨農學院", "管理學院", "公共衛生學院",
+            "電機資訊學院", "法律學院", "生命科學院",
+        ]
         dept_idx    = ask_cc_dept(departments) - 1
         department  = departments[dept_idx]
 
