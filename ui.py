@@ -1652,7 +1652,7 @@ def _draw_status(surf, fs, fm, player, rect):
     y += bh + gap
 
     if player.status_effects:
-        eff = "  ".join([f"[{k} {v}週]" for k, v in player.status_effects.items()])
+        eff = "  ".join([f"{k} {v}週" for k, v in player.status_effects.items()])
         surf.blit(fs.render(eff, True, RED), (x, y))
 
 
