@@ -4133,10 +4133,11 @@ def _draw_grade_panel(surf: pygame.Surface, fm, fmic, player) -> None:
     pygame.draw.line(surf, (205, 188, 168),
                      (sx + PAD, div_y), (sx + PW - PAD, div_y))
 
-    # 只顯示已有分數的欄位
+    # 只顯示已公布且有分數的欄位
+    _revealed = getattr(player, "revealed_grades", set())
     active_rows = [(label, key, weight)
                    for label, key, weight in _GRADE_ROWS
-                   if player.grades.get(key, 0.0) > 0.0]
+                   if key in _revealed and player.grades.get(key, 0.0) > 0.0]
 
     if not active_rows:
         hint = fmic.render("尚無成績記錄", True, GRAY)

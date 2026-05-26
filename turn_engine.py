@@ -332,6 +332,7 @@ class TurnEngine:
                 {"name": "小考一", "score": self._quiz1_score},
                 {"name": "作業一", "score": 90},
             ])
+            player.revealed_grades.update(["作業", "小考"])
 
         elif week == 6:
             tell_story([
@@ -465,6 +466,7 @@ class TurnEngine:
                 tell_story(["🎬 重看了一遍電影，心得總算寫完了。"])
             tell_story(["「唉，小考成績出來了，該來的還是來了。」"])
             notify_grade_report([{"name": "小考二", "score": self._quiz2_score}])
+            player.revealed_grades.add("小考")
 
         elif week == 15:
             tell_story([
@@ -521,6 +523,7 @@ class TurnEngine:
         if "participation" in action:
             gain = action["participation"]
             player.grades["參與度"] = min(100, player.grades["參與度"] + gain)
+            player.revealed_grades.add("參與度")
             results.append(f"課堂參與度 +{gain}")
 
         # ── 金錢 ──────────────────────────────────────────────
@@ -631,6 +634,7 @@ class TurnEngine:
 
         total_score = (base_stats_score + mini_game_score) * exam_modifier
         player.grades["期中"] = max(0.0, min(100.0, total_score))
+        player.revealed_grades.add("期中")
 
         # print(f"\n📊 期中考最終成績：{player.grades['期中']:.1f} 分")  # 因套用pygame而調整
         notify(f"\n📊 期中考最終成績：{player.grades['期中']:.1f} 分")
@@ -661,6 +665,7 @@ class TurnEngine:
 
         total_score = (base_stats_score + mini_game_score) * exam_modifier
         player.grades["期末"] = max(0.0, min(100.0, total_score))
+        player.revealed_grades.add("期末")
 
         # print(f"\n📊 期末考最終成績：{player.grades['期末']:.1f} 分")  # 因套用pygame而調整
         notify(f"\n📊 期末考最終成績：{player.grades['期末']:.1f} 分")

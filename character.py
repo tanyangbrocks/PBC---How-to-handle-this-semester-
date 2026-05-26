@@ -99,6 +99,7 @@ class Character:
         self.sick_threshold  = 0
         self.satisfaction = 80
         self.status_effects: dict[str, int] = {}
+        self.revealed_grades: set = set()   # 已公布、可在面板顯示的成績 key
         self.subject_exp: dict[str, int] = {
             "商管程式設計": 0,
             "統計學":       0,
