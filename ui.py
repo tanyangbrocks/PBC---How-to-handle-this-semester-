@@ -3952,19 +3952,20 @@ def _draw_action_panel(surf, fm, fs, mode, choices, log, prompt, tvalue, rect, t
             hover    = pygame.Rect(cx_btn - r - 8, cy_btn - r - 8,
                                    (r + 8) * 2, (r + 8) * 2).collidepoint(mpos)
 
-            # ── 按鈕脈動：1 Hz，動畫段速度與原 2Hz 相同 ───────────
-            # 每 1000ms 週期：前 500ms 播完一個完整 sin 週期（與原同速），
-            # 後 500ms 靜止在自然大小；sin(0)=sin(τ)=0 確保首尾無跳變。
+            # ── 按鈕脈動：hover 時暫停，離開後自動與所有按鈕同步 ────
+            # 因為全部按鈕都以 ms_now % cycle 計算，游標移開時自動銜接。
             _PULSE_CYCLE = 1000
             _PULSE_SPAN  = 500
             _t_p         = ms_now % _PULSE_CYCLE
-            if _t_p < _PULSE_SPAN:
+            if hover:
+                r_draw = r              # hover → 暫停脈動，固定自然大小
+            elif _t_p < _PULSE_SPAN:
                 _pulse_phase = (_t_p / _PULSE_SPAN) * math.tau
-                r_pulse = r + int(math.sin(_pulse_phase) * 3.0)
+                r_draw = r + int(math.sin(_pulse_phase) * 3.0)
             else:
-                r_pulse = r   # 靜止
+                r_draw = r              # 靜止段
 
-            ar    = _premium_circle(surf, cx_btn, cy_btn, r_pulse,
+            ar    = _premium_circle(surf, cx_btn, cy_btn, r_draw,
                                     BTN_N, hover, key=(cx_btn, cy_btn))
             _draw_action_icon(surf, cx_btn, cy_btn, ar, label)
             # icon 蓋住 _premium_circle 的邊框，補畫一圈
@@ -3973,7 +3974,17 @@ def _draw_action_panel(surf, fm, fs, mode, choices, log, prompt, tvalue, rect, t
             brect = pygame.Rect(cx_btn - r - 8, cy_btn - r - 8,
                                 (r + 8) * 2, (r + 8) * 2)   # 點擊判定用原始 r
 
-            # ── 波浪標籤：每 2 秒 1 次，動畫段速度與原 1Hz 相同 ──────
+            # ── Hover 光暈：SRCALPHA 同心圓環，畫在按鈕邊框外側 ─────
+            if hover:
+                _glow_sz = (ar + 28) * 2
+                _glow_sf = pygame.Surface((_glow_sz, _glow_sz), pygame.SRCALPHA)
+                _gc      = _glow_sz // 2
+                for _gr, _ga in [(ar + 24, 28), (ar + 16, 50), (ar + 8, 72)]:
+                    pygame.draw.circle(_glow_sf, (160, 210, 255, _ga),
+                                       (_gc, _gc), _gr, 4)
+                surf.blit(_glow_sf, (cx_btn - _gc, cy_btn - _gc))
+
+            # ── 波浪標籤：每 2 秒 1 次，hover 時靜止 ────────────────
             # 每 2000ms 週期：前 1000ms 播波浪（同速），後 1000ms 靜止；
             # 以 Hann 包絡 sin(π·t) 讓振幅平滑淡入淡出，避免首尾跳變。
             clean_label  = label.replace("🏪 ", "")
@@ -3988,7 +3999,12 @@ def _draw_action_panel(surf, fm, fs, mode, choices, log, prompt, tvalue, rect, t
             x_cur     = cx_btn - txt_total // 2
             label_y   = cy_btn + r + 12
 
-            if _t_w < _WAVE_SPAN:
+            if hover:
+                # hover → 標籤靜止，不做波浪
+                for ch_s in ch_surfs:
+                    surf.blit(ch_s, (x_cur, label_y))
+                    x_cur += ch_s.get_width()
+            elif _t_w < _WAVE_SPAN:
                 _t_norm    = _t_w / _WAVE_SPAN          # 0.0 → 1.0
                 _wave_base = _t_norm * math.tau          # 與原 1Hz 相同速度
                 _env       = math.sin(_t_norm * math.pi) # Hann 包絡，首尾振幅→0

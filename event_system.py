@@ -15,7 +15,7 @@
 
 import random
 from character import Character
-from ui import notify, ask_ok
+from ui import notify, ask_ok, trigger_screen_shake
 
 
 # ── 主事件資料庫（全學期，加權隨機）─────────────────────────────
@@ -352,6 +352,7 @@ class EventSystem:
             self.pending_hangover = False
             popup_text = "⚡ 強制事件：【宿醉發作】\n昨晚喝太多，今天整個人不對勁。"
             notify(popup_text)
+            trigger_screen_shake()
             ask_ok(popup_text)
             _hangover_effect(player)
             return
@@ -360,6 +361,7 @@ class EventSystem:
         popup_text = f"{prefix}：【{event['name']}】\n{event['desc']}"
         notify(f"\n{prefix}：【{event['name']}】")
         notify(f"  {event['desc']}")
+        trigger_screen_shake()
         ask_ok(popup_text)
 
         result = event["effect"](player)
