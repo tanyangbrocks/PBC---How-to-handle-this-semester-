@@ -1988,29 +1988,40 @@ def _draw_status_v2(surf, fm, fs, player, rect, mpos):
     surf.blit(money_t, (_mx0 + _COIN_R * 2 + 5, pr.y + 14))
 
     # ── 考試倒數提示（道具店按鈕正下方，靠右對齊）──────────────
-    _fmic = _font_micro[0]
-    _w    = _week[0]
-    if _fmic and _w > 0:
+    _w = _week[0]
+    if fb and _w > 0:
         if _w < 8:
-            _cdwn_txt      = f"距離期中考還有{8 - _w}週"
+            _cdwn_txt      = f"距離期中考還有 {8 - _w} 週"
             _cdwn_base_col = WHITE
+            _cdwn_bg       = (80, 40, 10, 140)
         elif _w == 8:
             _cdwn_txt      = "期中考週！"
             _cdwn_base_col = RED
+            _cdwn_bg       = (160, 30, 20, 170)
         elif _w < 16:
-            _cdwn_txt      = f"距離期末考還有{16 - _w}週"
+            _cdwn_txt      = f"距離期末考還有 {16 - _w} 週"
             _cdwn_base_col = WHITE
-        else:                                            # _w == 16
+            _cdwn_bg       = (80, 40, 10, 140)
+        else:
             _cdwn_txt      = "期末考週！"
             _cdwn_base_col = RED
-        # 第 7、15 週：每秒 4 次閃爍（250ms 週期，前 125ms 紅，後 125ms 正常）
+            _cdwn_bg       = (160, 30, 20, 170)
+        # 第 7、15 週：每秒 4 次閃爍
         if _w in (7, 15):
             _cdwn_col = RED if (pygame.time.get_ticks() % 250) < 125 else WHITE
         else:
             _cdwn_col = _cdwn_base_col
-        _cdwn_s = _fmic.render(_cdwn_txt, True, _cdwn_col)
-        surf.blit(_cdwn_s, (shop_r.right - _cdwn_s.get_width(),
-                            shop_r.bottom + 5))
+        _cdwn_s  = fb.render(_cdwn_txt, True, _cdwn_col)
+        _cdwn_px, _cdwn_py = 12, 5
+        _cdwn_w  = _cdwn_s.get_width()  + _cdwn_px * 2
+        _cdwn_h  = _cdwn_s.get_height() + _cdwn_py * 2
+        _cdwn_rx = shop_r.right - _cdwn_w
+        _cdwn_ry = shop_r.bottom + 16
+        _cdwn_pill = pygame.Surface((_cdwn_w, _cdwn_h), pygame.SRCALPHA)
+        pygame.draw.rect(_cdwn_pill, _cdwn_bg,
+                         pygame.Rect(0, 0, _cdwn_w, _cdwn_h), border_radius=10)
+        surf.blit(_cdwn_pill, (_cdwn_rx, _cdwn_ry))
+        surf.blit(_cdwn_s,    (_cdwn_rx + _cdwn_px, _cdwn_ry + _cdwn_py))
 
     # ── 週次日曆（條右邊緣 ↔ 道具店左 中間空白）──────────────
     sat_right  = bar_x + bar_w + 12   # 條右邊緣 + 間距
