@@ -91,15 +91,14 @@ class Character:
         bonus_pts        = sum(d["bonus_pts"] for d in chosen_drawbacks)
         total_pts        = base_pts + bonus_pts
 
-        # 4. 分配能力點
-        stamina, intel, luck = ask_cc_stats(total_pts, base_pts)
-        remaining = total_pts - stamina - intel - luck
-        money = 300 + remaining * 10
-
-        # 5. 選擇天賦（從 TALENTS 隨機抽 3 張）
+        # 4. 選擇天賦（從 TALENTS 隨機抽 3 張）
         candidates = random.sample(TALENTS, k=3)
         talent = ask_cc_talent(candidates)
-        money += talent.get("money", 0)
+
+        # 5. 分配能力點（天賦加成顯示在面板上）
+        stamina, intel, luck = ask_cc_stats(total_pts, base_pts, talent)
+        remaining = total_pts - stamina - intel - luck
+        money = 300 + remaining * 10 + talent.get("money", 0)
 
         # ── 切回一般遊戲畫面 ─────────────────────────────────────
         end_char_create()

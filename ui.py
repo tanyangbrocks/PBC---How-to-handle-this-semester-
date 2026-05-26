@@ -147,6 +147,7 @@ _cc_composing   = [""]          # name 輸入法組字預覽
 _cc_stat_vals   = [10, 10, 10]  # [體力, 智力, 運氣]
 _cc_stat_total  = [30]          # 本次可分配總點數
 _cc_stat_base   = [30]          # 其中基礎點數（不含負面特質加成）
+_cc_stat_talent = [{}]          # 已選天賦字典（供能力點面板顯示加成用）
 _cc_active_stat = [None]        # 鍵盤焦點在哪個 stat（0|1|2|None）
 _cc_stat_raw    = ["10","10","10"]  # 三個 stat 輸入框的原始字串
 _cc_reply_event = threading.Event()
@@ -892,9 +893,9 @@ def ask_cc_drawbacks(drawbacks: list, max_sel: int = 2) -> list:
     _cc_reply_event.wait()
     return _cc_reply_val[0]
 
-def ask_cc_stats(total_pts: int, base_pts: int = 0) -> tuple:
+def ask_cc_stats(total_pts: int, base_pts: int = 0, talent: dict = None) -> tuple:
     """顯示能力點分配畫面，回傳 (stamina, intel, luck)。"""
-    _cmd_q.put(("cc_stats", total_pts, base_pts))
+    _cmd_q.put(("cc_stats", total_pts, base_pts, talent or {}))
     _cc_reply_event.clear()
     _cc_reply_event.wait()
     return _cc_reply_val[0]
@@ -2328,7 +2329,7 @@ def _draw_cc_drawbacks(surf, fm, fs, drawbacks, sel_indices, max_sel, mpos):
     return card_rects, ok
 
 
-def _draw_cc_stats(surf, fm, fs, total, base, vals, raw, active, mpos):
+def _draw_cc_stats(surf, fm, fs, total, base, talent, vals, raw, active, mpos):
     """能力點分配畫面，回傳 (minus_rects, plus_rects, confirm_rect)。"""
     fb_lg = _font_bold_lg[0] or fm
     _draw_cc_bg(surf)
@@ -2362,8 +2363,9 @@ def _draw_cc_stats(surf, fm, fs, total, base, vals, raw, active, mpos):
                            text_col=YELLOW, bg=(30, 15, 0), bg_alpha=128,
                            pad_x=16, pad_y=6, amp=7, speed=0.00170, phase=1.0)
 
-    labels = ["體力", "智力", "運氣"]
-    cx     = WIN_W // 2
+    labels      = ["體力", "智力", "運氣"]
+    talent_keys = ["stamina", "intel", "luck"]
+    cx          = WIN_W // 2
     minus_rects = []
     plus_rects  = []
 
@@ -2400,6 +2402,15 @@ def _draw_cc_stats(surf, fm, fs, total, base, vals, raw, active, mpos):
         surf.blit(pt, (pr_dr.x + (pr_dr.width  - pt.get_width())  // 2,
                        pr_dr.y + (pr_dr.height - pt.get_height()) // 2))
         plus_rects.append(pr)
+        # 天賦加成標注（若有）
+        t_bonus = (talent or {}).get(talent_keys[i], 0)
+        if t_bonus:
+            final_val = vals[i] + t_bonus
+            ann_txt   = f"+{t_bonus} 天賦  →  最終 {final_val}"
+            ann_s     = fs.render(ann_txt, True, YELLOW)
+            ann_x     = pr.right + 14
+            ann_y     = ry + (box_h - ann_s.get_height()) // 2
+            surf.blit(ann_s, (ann_x, ann_y))
 
     # 確認
     ok          = pygame.Rect((WIN_W - 160) // 2, ok_y, 160, btn_h)
@@ -4150,6 +4161,7 @@ def run_ui():
                 _cc_mode[0]          = "stats"
                 _cc_stat_total[0]    = cmd[1]
                 _cc_stat_base[0]     = cmd[2] if len(cmd) > 2 else cmd[1]
+                _cc_stat_talent[0]   = cmd[3] if len(cmd) > 3 else {}
                 _cc_stat_vals[:]     = [10, 10, 10]
                 _cc_stat_raw[:]      = ["10", "10", "10"]
                 _cc_active_stat[0]   = None
@@ -4254,7 +4266,8 @@ def run_ui():
             elif cm == "stats":
                 mr, pr, ok = _draw_cc_stats(
                     screen, fm, fs,
-                    _cc_stat_total[0], _cc_stat_base[0], _cc_stat_vals, _cc_stat_raw,
+                    _cc_stat_total[0], _cc_stat_base[0], _cc_stat_talent[0],
+                    _cc_stat_vals, _cc_stat_raw,
                     _cc_active_stat[0], mpos)
                 _cc_btn_cache["stats_minus"] = mr
                 _cc_btn_cache["stats_plus"]  = pr
