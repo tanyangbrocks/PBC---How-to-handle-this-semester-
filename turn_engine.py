@@ -151,6 +151,9 @@ class TurnEngine:
     def _normal_week(self, week: int):
         player = self.player
 
+        # 每週開始體力回滿
+        player.stamina = player.stamina_max
+
         notify(f"\n📅 【第 {week} 週 行事曆提示】")
 
         # ── 週前劇情（台詞、選擇、事件）──────────────────────
