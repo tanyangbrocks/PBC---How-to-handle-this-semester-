@@ -105,6 +105,11 @@ _font_bold_xl  = [None]   # 粗體字型 size-26（日曆週次大字用）
 _time_shake_t0 = [0]      # 震動觸發時間戳（ms，0 = 未啟用）
 _TIME_SHAKE_MS = 520      # 整段動畫時長（ms）
 
+# ── 突發事件全螢幕震動 ──────────────────────────────────────────
+_evt_shake_t0  = [0]      # 震動觸發時間戳（ms，0 = 未啟用）
+_EVT_SHAKE_MS  = 480      # 震動總時長（ms）
+_EVT_SHAKE_AMP = 14       # 最大震動幅度（px）
+
 # ── 行動成功白光閃爍 ────────────────────────────────────────────
 _action_flash_t0 = [0]    # 閃爍觸發時間戳（ms，0 = 未啟用）
 _ACTION_FLASH_MS = 300    # 整段閃爍時長（ms）
@@ -932,6 +937,27 @@ def trigger_time_overflow_warning():
     由 turn_engine 在玩家即將將時間扣成負數時呼叫。
     """
     _cmd_q.put(("time_overflow_warn", None))
+
+def trigger_screen_shake() -> None:
+    """觸發全螢幕短暫劇烈晃動效果（突發事件出現時）。非阻塞。"""
+    _cmd_q.put(("screen_shake",))
+
+def _get_evt_shake_offset() -> tuple:
+    """回傳突發事件全螢幕震動的 (dx, dy) 位移量（px）。震動結束後自動清除。"""
+    t0 = _evt_shake_t0[0]
+    if t0 == 0:
+        return 0, 0
+    elapsed = pygame.time.get_ticks() - t0
+    if elapsed >= _EVT_SHAKE_MS:
+        _evt_shake_t0[0] = 0
+        return 0, 0
+    decay = (1.0 - elapsed / _EVT_SHAKE_MS) ** 1.5
+    amp   = int(_EVT_SHAKE_AMP * decay)
+    if amp < 1:
+        _evt_shake_t0[0] = 0
+        return 0, 0
+    rng = random.Random(elapsed // 14)   # ~70fps 下每幀不同
+    return rng.randint(-amp, amp), rng.randint(-amp, amp)
 
 def set_week(w: int):
     """由遊戲執行緒呼叫，更新週次輪盤顯示並觸發對應 BGM。"""
@@ -5195,6 +5221,9 @@ def run_ui():
                 # 時間即將變負 → 震動 + damage6 音效
                 _time_shake_t0[0] = pygame.time.get_ticks()
                 _play_sfx("damage6")
+            elif tag == "screen_shake":
+                _evt_shake_t0[0] = pygame.time.get_ticks()
+                _play_sfx("damage6")
             elif tag == "subj_popup":
                 _subj_popup_title[0] = cmd[1]
                 _subj_popup_opts.clear()
@@ -5434,6 +5463,13 @@ def run_ui():
 
         # ── 點擊波紋特效（最最頂層，覆蓋一切 UI）──────────────
         _draw_click_effects(screen, pygame.time.get_ticks())
+
+        # ── 突發事件全螢幕震動（最後一步，copy+blit 整張畫面偏移）──
+        _sdx, _sdy = _get_evt_shake_offset()
+        if _sdx != 0 or _sdy != 0:
+            _shk_copy = screen.copy()
+            screen.fill((0, 0, 0))
+            screen.blit(_shk_copy, (_sdx, _sdy))
 
         pygame.display.flip()
 
