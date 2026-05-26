@@ -146,6 +146,7 @@ _cc_tvalue      = [""]          # name 輸入框文字
 _cc_composing   = [""]          # name 輸入法組字預覽
 _cc_stat_vals   = [10, 10, 10]  # [體力, 智力, 運氣]
 _cc_stat_total  = [30]          # 本次可分配總點數
+_cc_stat_base   = [30]          # 其中基礎點數（不含負面特質加成）
 _cc_active_stat = [None]        # 鍵盤焦點在哪個 stat（0|1|2|None）
 _cc_stat_raw    = ["10","10","10"]  # 三個 stat 輸入框的原始字串
 _cc_reply_event = threading.Event()
@@ -891,9 +892,9 @@ def ask_cc_drawbacks(drawbacks: list, max_sel: int = 2) -> list:
     _cc_reply_event.wait()
     return _cc_reply_val[0]
 
-def ask_cc_stats(total_pts: int) -> tuple:
+def ask_cc_stats(total_pts: int, base_pts: int = 0) -> tuple:
     """顯示能力點分配畫面，回傳 (stamina, intel, luck)。"""
-    _cmd_q.put(("cc_stats", total_pts))
+    _cmd_q.put(("cc_stats", total_pts, base_pts))
     _cc_reply_event.clear()
     _cc_reply_event.wait()
     return _cc_reply_val[0]
@@ -2303,7 +2304,7 @@ def _draw_cc_drawbacks(surf, fm, fs, drawbacks, sel_indices, max_sel, mpos):
     return card_rects, ok
 
 
-def _draw_cc_stats(surf, fm, fs, total, vals, raw, active, mpos):
+def _draw_cc_stats(surf, fm, fs, total, base, vals, raw, active, mpos):
     """能力點分配畫面，回傳 (minus_rects, plus_rects, confirm_rect)。"""
     fb_lg = _font_bold_lg[0] or fm
     _draw_cc_bg(surf)
@@ -2330,7 +2331,9 @@ def _draw_cc_stats(surf, fm, fs, total, vals, raw, active, mpos):
     rem  = total - used
     _draw_float_label_card(surf, fm, "分配能力點", WIN_W // 2, top_y,
                            pad_x=26, pad_y=11, amp=7, speed=0.00170, phase=1.0)
-    info_text = f"可用點數：{total}   已用：{used}   剩餘：{rem}   初始金錢 +{rem * 10} 元"
+    bonus = total - base
+    pts_label = f"{base}(+{bonus})" if bonus > 0 else str(total)
+    info_text = f"可用點數：{pts_label}   已用：{used}   剩餘：{rem}   初始金錢 +{rem * 10} 元"
     _draw_float_label_card(surf, fs, info_text, WIN_W // 2, sub_y,
                            text_col=YELLOW, bg=(30, 15, 0), bg_alpha=128,
                            pad_x=16, pad_y=6, amp=7, speed=0.00170, phase=1.0)
@@ -4122,6 +4125,7 @@ def run_ui():
             elif tag == "cc_stats":
                 _cc_mode[0]          = "stats"
                 _cc_stat_total[0]    = cmd[1]
+                _cc_stat_base[0]     = cmd[2] if len(cmd) > 2 else cmd[1]
                 _cc_stat_vals[:]     = [10, 10, 10]
                 _cc_stat_raw[:]      = ["10", "10", "10"]
                 _cc_active_stat[0]   = None
@@ -4226,7 +4230,7 @@ def run_ui():
             elif cm == "stats":
                 mr, pr, ok = _draw_cc_stats(
                     screen, fm, fs,
-                    _cc_stat_total[0], _cc_stat_vals, _cc_stat_raw,
+                    _cc_stat_total[0], _cc_stat_base[0], _cc_stat_vals, _cc_stat_raw,
                     _cc_active_stat[0], mpos)
                 _cc_btn_cache["stats_minus"] = mr
                 _cc_btn_cache["stats_plus"]  = pr

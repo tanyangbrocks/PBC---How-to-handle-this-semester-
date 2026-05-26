@@ -82,12 +82,13 @@ class Character:
         department  = departments[dept_idx]
 
         # 3. 選擇負面特質（最多 2 個）
-        base_pts         = 50
+        base_pts         = random.randint(30, 70)
         chosen_drawbacks = ask_cc_drawbacks(DRAWBACKS, 2)
-        total_pts        = base_pts + sum(d["bonus_pts"] for d in chosen_drawbacks)
+        bonus_pts        = sum(d["bonus_pts"] for d in chosen_drawbacks)
+        total_pts        = base_pts + bonus_pts
 
         # 4. 分配能力點
-        stamina, intel, luck = ask_cc_stats(total_pts)
+        stamina, intel, luck = ask_cc_stats(total_pts, base_pts)
         remaining = total_pts - stamina - intel - luck
         money = 300 + remaining * 10
 
