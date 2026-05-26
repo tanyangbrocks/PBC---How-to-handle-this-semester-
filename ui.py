@@ -1949,12 +1949,18 @@ def _draw_status_v2(surf, fm, fs, player, rect, mpos):
     surf.blit(init_t, (av_cx - init_t.get_width() // 2,
                        av_cy - init_t.get_height() // 2))
 
-    # ── 名字 + 系級（純文字，無外框）────────────────────────
+    # ── 名字 + 系級 + 狀態效果（同一行，純文字，無外框）────
     info_x = pr.x + 106
     info_y = pr.y + 14
     _de_name = player.de_level.get("name", "") if hasattr(player, "de_level") else ""
-    name_t = fb_lg.render(f"{player.name}  {player.department}{' ' + _de_name if _de_name else ''}", True, WHITE)
+    _base_str = f"{player.name}  {player.department}{' ' + _de_name if _de_name else ''}"
+    name_t = fb_lg.render(_base_str, True, WHITE)
     surf.blit(name_t, (info_x, info_y))
+    # 狀態效果（接在年級後，紅色，無括號）
+    if player.status_effects:
+        _eff_str = "  " + "  ".join(f"{k} {v}週" for k, v in player.status_effects.items())
+        _eff_t   = fb_lg.render(_eff_str, True, RED)
+        surf.blit(_eff_t, (info_x + name_t.get_width(), info_y))
     # 名字下細線
     line_y = info_y + name_t.get_height() + 2
     pygame.draw.line(surf, (210, 190, 165),
@@ -2007,12 +2013,6 @@ def _draw_status_v2(surf, fm, fs, player, rect, mpos):
     surf.blit(_satv, (bar_x + (bar_w - _satv.get_width()) // 2,
                       sat_y + (bar_h - _satv.get_height()) // 2))
     sat_t = _lbl_sat   # 供下方 sat_right 計算使用（取標籤寬度作基準）
-
-    # ── 狀態效果（若有）───────────────────────────────────────
-    eff_y = sat_y + bar_h + 7
-    if player.status_effects:
-        eff_str = "  ".join(f"[{k} {v}週]" for k, v in player.status_effects.items())
-        surf.blit(fb.render(eff_str, True, RED), (info_x, eff_y))
 
     # ── 智力 / 運氣 小標籤 + 資訊一覽按鈕（頭像正下方）─────
     chip_y = pr.bottom - 42
