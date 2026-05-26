@@ -18,7 +18,11 @@ from shop_V03 import Shop
 from ui import notify, ask_yn, ask_choice, ask_text, set_player, \
                notify_timetable, notify_grade_report, set_time, show_action_result, \
                ask_subject_popup, trigger_time_overflow_warning, tell_story, \
-               show_extra_event_popup, ask_exam_start
+               show_extra_event_popup, ask_exam_start, set_roll_call, clear_roll_call
+
+
+# ── 點名事件觸發週次 ─────────────────────────────────────────────
+ROLL_CALL_WEEKS = {2, 5, 7, 10, 12, 15}
 
 
 # ── 每週可選擇的行動清單 ──────────────────────────────────
@@ -169,6 +173,15 @@ class TurnEngine:
         if week > 1:
             extra_cost = self._apply_extra_events()
 
+        # ── 點名事件（特定週次：額外事件後、滿意度判定前）────
+        roll_call_course = None
+        if week in ROLL_CALL_WEEKS:
+            _subjects = [k for k in player.subject_exp.keys() if k != "綜合"]
+            if _subjects:
+                roll_call_course = random.choice(_subjects)
+                set_roll_call(roll_call_course)
+                notify(f"📋 點名通知：【{roll_call_course}】本週教授將進行點名！")
+
         # ── 自我滿意度狀態判定（所有週初事件結束後、行動開始前）──
         for name, msg, color in player.apply_weekly_status():
             show_extra_event_popup([msg], f"【{name}】", color)
@@ -179,6 +192,7 @@ class TurnEngine:
 
         # ── 行動選擇迴圈 ──────────────────────────────────
         remaining_time = time_units
+        attended_class = False     # 本週是否有執行「正常上課」（點名結算用）
         set_time(remaining_time)   # 初始化底部標籤列
 
         while remaining_time >= 0:
@@ -220,6 +234,8 @@ class TurnEngine:
                     if not confirm2:
                         continue
                 self._execute_action(action)
+                if action["id"] == "attend_class":
+                    attended_class = True
                 self.event_sys.roll_event_after_action(week)   # 行動後突發事件
                 break
 
@@ -234,9 +250,20 @@ class TurnEngine:
                     continue
 
             self._execute_action(action)
+            if action["id"] == "attend_class":
+                attended_class = True
             self.event_sys.roll_event_after_action(week)   # 行動後突發事件
             remaining_time -= 1
             set_time(remaining_time)
+
+        # ── 點名結算（週末，所有行動結束後）────────────────────
+        if roll_call_course is not None:
+            if not attended_class:
+                player.grades["參與度"] = max(0, player.grades["參與度"] - 10)
+                notify(f"⚠️  【{roll_call_course}】點名缺席！課堂參與度 -10。")
+            else:
+                notify(f"✅ 本週有上課，【{roll_call_course}】點名順利通過。")
+            clear_roll_call()
 
     # ============================================================
     # 週前劇情（行動選單出現之前）

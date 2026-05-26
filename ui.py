@@ -110,6 +110,9 @@ _evt_shake_t0  = [0]      # 震動觸發時間戳（ms，0 = 未啟用）
 _EVT_SHAKE_MS  = 480      # 震動總時長（ms）
 _EVT_SHAKE_AMP = 14       # 最大震動幅度（px）
 
+# ── 點名警示便利貼 ──────────────────────────────────────────────
+_roll_call_course = [""]   # 當週點名科目（空字串 = 未啟用）
+
 # ── 行動成功白光閃爍 ────────────────────────────────────────────
 _action_flash_t0 = [0]    # 閃爍觸發時間戳（ms，0 = 未啟用）
 _ACTION_FLASH_MS = 300    # 整段閃爍時長（ms）
@@ -941,6 +944,14 @@ def trigger_time_overflow_warning():
 def trigger_screen_shake() -> None:
     """觸發全螢幕短暫劇烈晃動效果（突發事件出現時）。非阻塞。"""
     _cmd_q.put(("screen_shake",))
+
+def set_roll_call(course: str) -> None:
+    """設定本週點名科目，在成績面板左側顯示警示便利貼。非阻塞。"""
+    _cmd_q.put(("roll_call_set", course))
+
+def clear_roll_call() -> None:
+    """清除點名警示便利貼（週末結算後呼叫）。非阻塞。"""
+    _cmd_q.put(("roll_call_clear",))
 
 def _get_evt_shake_offset() -> tuple:
     """回傳突發事件全螢幕震動的 (dx, dy) 位移量（px）。震動結束後自動清除。"""
@@ -4388,6 +4399,70 @@ def _draw_grade_panel(surf: pygame.Surface, fm, fmic, player) -> None:
         row_y += row_h
 
 
+def _draw_roll_call_note(surf: pygame.Surface, fmic) -> None:
+    """
+    在成績記錄面板左側繪製點名警示便利貼。
+    _roll_call_course[0] 為空字串時不顯示。
+    """
+    course = _roll_call_course[0]
+    if not course:
+        return
+
+    fb = _font_bold[0] or fmic
+
+    # ── 便利貼 Surface（100×68 px）────────────────────────────
+    NW, NH = 100, 68
+    note = pygame.Surface((NW, NH), pygame.SRCALPHA)
+
+    # 主底色（亮黃便利貼）
+    pygame.draw.rect(note, (255, 228, 52, 242),
+                     pygame.Rect(0, 0, NW, NH), border_radius=4)
+
+    # 折角（右下角）
+    pygame.draw.polygon(note, (196, 162, 18, 230),
+                        [(NW - 14, NH), (NW, NH - 14), (NW, NH)])
+    pygame.draw.line(note, (155, 128, 8, 190),
+                     (NW - 14, NH - 1), (NW, NH - 14), 1)
+
+    # 頂部警示色帶（深橘紅）
+    pygame.draw.rect(note, (210, 52, 42, 225),
+                     pygame.Rect(0, 0, NW, 15), border_radius=4)
+
+    # 色帶文字
+    tape_s = fmic.render("點 名 通 知", True, (255, 240, 230))
+    note.blit(tape_s, ((NW - tape_s.get_width()) // 2,
+                        (15 - tape_s.get_height()) // 2))
+
+    # 課程短名（粗體，置中）
+    short = _SUBJ_SHORT_NAMES.get(course, course[:4])
+    sub_s = fb.render(short, True, (80, 42, 10))
+    note.blit(sub_s, ((NW - sub_s.get_width()) // 2, 20))
+
+    # 提示小字（兩行）
+    r1 = fmic.render("本週將點名", True, (120, 68, 18))
+    r2 = fmic.render("記得出席！", True, (160, 78, 18))
+    note.blit(r1, ((NW - r1.get_width()) // 2, 44))
+    note.blit(r2, ((NW - r2.get_width()) // 2, 56))
+
+    # ── 旋轉 -8°（便利貼略歪，增加手感）─────────────────────
+    rotated = pygame.transform.rotate(note, -8)
+    rw, rh  = rotated.get_size()
+
+    # ── 定位：成績面板左邊緣偏左 24 px 為便利貼中心 ──────────
+    PW = _SIDE_PANEL_W
+    cx = WIN_W - 8 - PW - 24   # 804 - 24 = 780
+    cy = STATUS_H + 8 + 130    # 175 + 8 + 130 = 313
+
+    # 陰影（偏移 +5, +6 的半透明矩形）
+    shad_sf = pygame.Surface((rw, rh), pygame.SRCALPHA)
+    pygame.draw.rect(shad_sf, (0, 0, 0, 55),
+                     pygame.Rect(0, 0, rw, rh), border_radius=6)
+    surf.blit(shad_sf, (cx - rw // 2 + 5, cy - rh // 2 + 6))
+
+    # 便利貼本體
+    surf.blit(rotated, (cx - rw // 2, cy - rh // 2))
+
+
 # ═══════════════════════════════════════════════════════════════
 #  人物立繪輔助函式
 # ═══════════════════════════════════════════════════════════════
@@ -5240,6 +5315,10 @@ def run_ui():
             elif tag == "screen_shake":
                 _evt_shake_t0[0] = pygame.time.get_ticks()
                 _play_sfx("damage6")
+            elif tag == "roll_call_set":
+                _roll_call_course[0] = cmd[1]
+            elif tag == "roll_call_clear":
+                _roll_call_course[0] = ""
             elif tag == "subj_popup":
                 _subj_popup_title[0] = cmd[1]
                 _subj_popup_opts.clear()
@@ -5382,6 +5461,8 @@ def run_ui():
             # 左側熟練度面板 / 右側成績記錄面板
             _draw_exp_panel(screen, fm, _font_micro[0], _player[0])
             _draw_grade_panel(screen, fm, _font_micro[0], _player[0])
+            # 點名警示便利貼（疊在成績面板左側邊緣）
+            _draw_roll_call_note(screen, _font_micro[0])
             # 非標準選項 / yn / event_ok → 需先計算，讓底部面板知道要不要留白
             _cp_active = (
                 (_mode[0] == "choices" and bool(_choices)
