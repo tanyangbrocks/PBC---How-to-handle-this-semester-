@@ -205,6 +205,7 @@ class TurnEngine:
                         f"體力剩餘 {player.stamina} 點，執行此行動可能會導致生病！",
                         yes_label="仍要執行",
                         no_label="還是算了",
+                        show_ctx=False,
                     )
                     if not confirm2:
                         continue
@@ -217,6 +218,7 @@ class TurnEngine:
                     f"體力剩餘 {player.stamina} 點，執行此行動可能會導致生病！",
                     yes_label="仍要執行",
                     no_label="還是算了",
+                    show_ctx=False,
                 )
                 if not confirm:
                     continue
