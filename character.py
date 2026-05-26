@@ -12,20 +12,62 @@
 import random
 from ui import (notify, ask_text, ask_choice, ask_yn,
                 begin_char_create, end_char_create,
-                ask_cc_name, ask_cc_dept,
-                ask_cc_drawbacks, ask_cc_stats, ask_cc_talent)
+                ask_cc_name, ask_cc_dept, ask_cc_de_level,
+                ask_cc_drawbacks, ask_cc_stats, ask_cc_talent,
+                ask_cc_extra_events, ask_cc_summary)
+
+# ── 年級資料庫 ────────────────────────────────────────────────
+DE_LEVELS = [
+    {"name": "大一", "base_time": 5,  "intel": 0,  "luck": 5},
+    {"name": "大二", "base_time": 0,  "intel": 5,  "luck": 10},
+    {"name": "大三", "base_time": 5,  "intel": 10, "luck": 5},
+    {"name": "大四", "base_time": 10, "intel": 5,  "luck": 5},
+]
 
 # ── 天賦資料庫 ────────────────────────────────────────────────
 TALENTS = [
-    {"id": 1, "name": "天選之人",   "desc": "運氣 +20",          "luck": 20,  "stamina": 0,  "intel": 0},
-    {"id": 2, "name": "勤奮學霸",   "desc": "智力 +15",          "luck": 0,   "stamina": 0,  "intel": 15},
-    {"id": 3, "name": "精力充沛",   "desc": "體力上限 +20",      "luck": 0,   "stamina": 20, "intel": 0},
-    {"id": 4, "name": "富二代",     "desc": "初始金錢 +500",     "luck": 5,   "stamina": 0,  "intel": 0,  "money": 500},
-    {"id": 5, "name": "社交達人",   "desc": "突發事件獎勵 +10%", "luck": 0,   "stamina": 5,  "intel": 0,  "social_bonus": 0.1},
-    {"id": 6, "name": "夜貓子",     "desc": "熬夜副作用減半",   "luck": 0,   "stamina": 0,  "intel": 5,  "night_owl": True},
+    {"id": 1, "name": "天選之人",   "prob": 1,  "desc": "智力+10，運氣+10",             "intel": 10, "luck": 10},
+    {"id": 2, "name": "勤奮學霸",   "prob": 5,  "desc": "時間+1，智力+10",              "base_time": 1,  "intel": 10},
+    {"id": 3, "name": "勤奮學渣",   "prob": 5,  "desc": "運氣+5，可用時間×0.9",         "luck": 5,   "base_time_mult": 0.9},
+    {"id": 4, "name": "富二代",     "prob": 5,  "desc": "初始金錢+500",                  "money": 500},
+    {"id": 5, "name": "社交達人",   "prob": 5,  "desc": "可用時間+4",                    "base_time": 4},
+    {"id": 6, "name": "夜貓子",     "prob": 5,  "desc": "熬夜行動時間×1.5",             "night_owl_mult": 1.5},
+    {"id": 7, "name": "路痴",       "prob": 5,  "desc": "時間-1，能力點+5",              "base_time": -1, "base_pts_bonus": 5},
+    {"id": 8, "name": "抵抗力低下", "prob": 5,  "desc": "滿足感<70時易生病，能力點+15", "sick_threshold": 70, "base_pts_bonus": 15},
+    {"id": 0, "name": "無天賦",     "prob": 64, "desc": ""},
 ]
 
 # ── 負面特質資料庫 ────────────────────────────────────────────
+EXTRA_EVENTS = [
+    {
+        "id":          "part_time",
+        "name":        "打工",
+        "time_cost":   3,
+        "money_delta": 500,
+        "intel_req":   0,
+        "exclusive":   ["tutoring"],
+        "popup_color": (235, 130, 30),
+    },
+    {
+        "id":          "tutoring",
+        "name":        "家教",
+        "time_cost":   2,
+        "money_delta": 350,
+        "intel_req":   75,
+        "exclusive":   ["part_time"],
+        "popup_color": (200, 50, 50),
+    },
+    {
+        "id":          "club",
+        "name":        "參加社團",
+        "time_cost":   0,
+        "money_delta": -260,
+        "intel_req":   0,
+        "exclusive":   [],
+        "popup_color": (110, 50, 185),
+    },
+]
+
 DRAWBACKS = [
     {"id": 1, "name": "路痴",       "desc": "遲到機率 +20%，換取 10 點",      "penalty": "late_chance",   "value": 0.2,  "bonus_pts": 10},
     {"id": 2, "name": "容易生病",   "desc": "生病機率 +15%，換取 15 點",      "penalty": "sick_chance",   "value": 0.15, "bonus_pts": 15},
@@ -37,7 +79,8 @@ class Character:
 
     def __init__(self, name: str, department: str,
                  stamina: int, intel: int, luck: int, money: int,
-                 talent: dict, drawbacks: list):
+                 talent: dict, drawbacks: list, de_level: dict = None,
+                 extra_events: list = None, slot_results: list = None):
         self.name       = name
         self.department = department
         self.stamina_max = stamina
@@ -47,6 +90,13 @@ class Character:
         self.money       = money
         self.talent      = talent
         self.drawbacks   = drawbacks
+        self.extra_events = list(extra_events or [])
+        self.slot_results = list(slot_results or [])
+        self.de_level    = de_level or {"name": "大一", "base_time": 5, "intel": 0, "luck": 5}
+        self.base_time_bonus = self.de_level.get("base_time", 0)
+        self.base_time_mult  = 1.0
+        self.night_owl_mult  = 1.0
+        self.sick_threshold  = 0
         self.satisfaction = 80
         self.status_effects: dict[str, int] = {}
         self.subject_exp: dict[str, int] = {
@@ -64,6 +114,7 @@ class Character:
             "期末":   0.0,
         }
         self._apply_talent()
+        self._apply_de_level()
 
     # ────────────────────────────────────────────────────────
     #  工廠方法：角色創建精靈
@@ -73,38 +124,75 @@ class Character:
         # ── 切換到角色創建專屬畫面 ──────────────────────────────
         begin_char_create()
 
-        # 1. 輸入名字
-        name = ask_cc_name("請輸入角色名字").strip() or "無名大學生"
+        while True:
+            # 1. 輸入名字
+            name = ask_cc_name("請輸入角色名字").strip() or "無名大學生"
 
-        # 2. 選擇系級
-        departments = [
-            "文學院", "理學院", "社會科學院", "醫學院",
-            "工學院", "生物資源暨農學院", "管理學院", "公共衛生學院",
-            "電機資訊學院", "法律學院", "生命科學院",
-        ]
-        dept_idx    = ask_cc_dept(departments) - 1
-        department  = departments[dept_idx]
+            # 2. 選擇系級
+            departments = [
+                "文學院", "理學院", "社會科學院", "醫學院",
+                "工學院", "生物資源暨農學院", "管理學院", "公共衛生學院",
+                "電機資訊學院", "法律學院", "生命科學院",
+            ]
+            dept_idx    = ask_cc_dept(departments) - 1
+            department  = departments[dept_idx]
 
-        # 3. 選擇負面特質（最多 2 個）
-        base_pts         = random.randint(30, 70)
-        chosen_drawbacks = ask_cc_drawbacks(DRAWBACKS, 2)
-        bonus_pts        = sum(d["bonus_pts"] for d in chosen_drawbacks)
-        total_pts        = base_pts + bonus_pts
+            # 2.5. 選擇年級
+            de_level = ask_cc_de_level(DE_LEVELS)
 
-        # 4. 選擇天賦（從 TALENTS 隨機抽 3 張）
-        candidates = random.sample(TALENTS, k=3)
-        talent = ask_cc_talent(candidates)
+            # 3. 選擇負面特質（最多 2 個）
+            base_pts         = random.randint(30, 70)
+            chosen_drawbacks = ask_cc_drawbacks(DRAWBACKS, 2)
+            bonus_pts        = sum(d["bonus_pts"] for d in chosen_drawbacks)
+            total_pts        = base_pts + bonus_pts
 
-        # 5. 分配能力點（天賦加成顯示在面板上）
-        stamina, intel, luck = ask_cc_stats(total_pts, base_pts, talent)
-        remaining = total_pts - stamina - intel - luck
-        money = 300 + remaining * 10 + talent.get("money", 0)
+            # 4. 拉霸機抽天賦（3 槽，玩家觀看動畫）
+            slot_results    = cls._draw_slots()
+            ask_cc_talent(slot_results)                           # 觸發動畫，不需回傳值
+            combined_talent = cls._combine_talents(slot_results)
+            talent_base_pts = sum(t.get("base_pts_bonus", 0)
+                                  for t in slot_results if t["name"] != "無天賦")
+            total_pts += talent_base_pts
+
+            # 5. 分配能力點（天賦 + 年級加成顯示在面板上）
+            stamina, intel, luck = ask_cc_stats(total_pts, base_pts, combined_talent, de_level)
+            remaining = total_pts - stamina - intel - luck
+            money = 300 + remaining * 10 + combined_talent.get("money", 0)
+
+            # 6. 選擇額外事件（依最終智力判斷可選項目）
+            final_intel = (intel
+                           + combined_talent.get("intel", 0)
+                           + de_level.get("intel", 0))
+            extra_evs = ask_cc_extra_events(EXTRA_EVENTS, final_intel)
+
+            # 7. 玩家資訊一覽（確認或重新創建）
+            summary = {
+                "name":            name,
+                "department":      department,
+                "de_level":        de_level,
+                "base_pts":        base_pts,
+                "total_pts":       total_pts,
+                "stamina":         stamina,
+                "intel":           intel,
+                "luck":            luck,
+                "money":           money,
+                "combined_talent": combined_talent,
+                "slot_results":    slot_results,
+                "drawbacks":       chosen_drawbacks,
+                "extra_ev_ids":    extra_evs,
+                "extra_ev_data":   EXTRA_EVENTS,
+            }
+            result = ask_cc_summary(summary)
+            if result == "start":
+                break
+            # result == "restart"：清除資料，重新從姓名輸入
 
         # ── 切回一般遊戲畫面 ─────────────────────────────────────
         end_char_create()
 
-        notify(f"\n角色創建完成！{name}（{department}）準備迎接這學期的挑戰。")
-        return cls(name, department, stamina, intel, luck, money, talent, chosen_drawbacks)
+        notify(f"\n角色創建完成！{name}（{department} {de_level['name']}）準備迎接這學期的挑戰。")
+        return cls(name, department, stamina, intel, luck, money, combined_talent,
+                   chosen_drawbacks, de_level, extra_evs, slot_results)
 
     # ────────────────────────────────────────────────────────
     #  角色行為方法
@@ -134,6 +222,9 @@ class Character:
         notify(f"  ➕ 獲得狀態：【{name}】（持續 {duration} 週）")
 
     def tick_status_effects(self):
+        if self.sick_threshold > 0 and self.satisfaction < self.sick_threshold \
+                and "生病" not in self.status_effects:
+            self.add_status("生病", duration=1)
         expired = [name for name, weeks in self.status_effects.items() if weeks <= 1]
         for name in expired:
             del self.status_effects[name]
@@ -143,16 +234,16 @@ class Character:
             self.status_effects[name] -= 1
 
     def get_effective_time(self) -> int:
-        base_time = 10
+        base_time = 10 + self.base_time_bonus
         if self.satisfaction < 60:
-            base_time = 5
+            base_time = 5 + self.base_time_bonus
         if "生病" in self.status_effects:
             base_time -= 3
         if "疲勞" in self.status_effects:
             base_time -= 2
         if "激勵" in self.status_effects:
             base_time += 2
-        return max(1, base_time)
+        return max(1, int(base_time * self.base_time_mult))
 
     def is_game_over(self) -> bool:
         if self.stamina <= 0 and "生病" in self.status_effects:
@@ -177,10 +268,56 @@ class Character:
     # ────────────────────────────────────────────────────────
     def _apply_talent(self):
         t = self.talent
-        self.luck        += t.get("luck",    0)
-        self.stamina_max += t.get("stamina", 0)
-        self.stamina      = self.stamina_max
-        self.intel       += t.get("intel",   0)
+        self.luck            += t.get("luck",           0)
+        self.stamina_max     += t.get("stamina",        0)
+        self.stamina          = self.stamina_max
+        self.intel           += t.get("intel",          0)
+        self.base_time_bonus += t.get("base_time",      0)
+        self.base_time_mult   = t.get("base_time_mult", 1.0)
+        self.night_owl_mult   = t.get("night_owl_mult", 1.0)
+        self.sick_threshold   = t.get("sick_threshold", 0)
+
+    def _apply_de_level(self):
+        d = self.de_level
+        self.intel += d.get("intel", 0)
+        self.luck  += d.get("luck",  0)
+
+    @classmethod
+    def _draw_slots(cls) -> list:
+        """拉霸機抽 3 槽；若前兩槽均為無天賦，第三槽保底抽到天賦。"""
+        pool        = TALENTS
+        weights     = [t["prob"] for t in pool]
+        non_null    = [t for t in pool if t["name"] != "無天賦"]
+        nn_weights  = [t["prob"] for t in non_null]
+        results = []
+        for i in range(3):
+            if i == 2 and all(r["name"] == "無天賦" for r in results):
+                drawn = random.choices(non_null, weights=nn_weights, k=1)[0]
+            else:
+                drawn = random.choices(pool, weights=weights, k=1)[0]
+            results.append(drawn)
+        return results
+
+    @staticmethod
+    def _combine_talents(drawn: list) -> dict:
+        """合併所有非無天賦天賦的數值（加法；乘數型 key 用乘法；門檻取最大值）。"""
+        combined = {}
+        _ADDITIVE = ("luck", "intel", "stamina", "base_time", "money")
+        for t in drawn:
+            if t["name"] == "無天賦":
+                continue
+            for k, v in t.items():
+                if k in ("id", "name", "prob", "desc", "base_pts_bonus"):
+                    continue
+                if k in ("base_time_mult", "night_owl_mult"):
+                    combined[k] = combined.get(k, 1.0) * v
+                elif k == "sick_threshold":
+                    combined[k] = max(combined.get(k, 0), v)
+                elif k in _ADDITIVE:
+                    combined[k] = combined.get(k, 0) + v
+                else:
+                    combined[k] = v
+        return combined
 
     @staticmethod
     def _pick_talent() -> dict:

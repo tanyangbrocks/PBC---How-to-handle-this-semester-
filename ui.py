@@ -74,6 +74,8 @@ _yn_labels       = ["是", "否"]   # yn 模式的按鈕文字（可自定義）
 _yn_show_ctx     = [True]         # yn 模式是否附帶 log 背景（預設 True）
 _event_ok_text   = [""]           # event_ok 模式：彈窗全文（title\nbody）
 _event_ok_popup_rects: list = []  # event_ok 模式：確認按鈕 rect 清單
+_story_lines: list = []           # tell_story() 待顯示的劇情行
+_story_index = [0]                # 當前顯示到第幾行
 _tvalue  = [""]     # text 模式的目前輸入內容
 _scroll    = [0]      # 訊息區往上捲動的行數（保留供 end 畫面使用）
 _composing = [""]   # IME 組字預覽（輸入法尚未確認的字）
@@ -147,9 +149,44 @@ _cc_composing   = [""]          # name 輸入法組字預覽
 _cc_stat_vals   = [10, 10, 10]  # [體力, 智力, 運氣]
 _cc_stat_total  = [30]          # 本次可分配總點數
 _cc_stat_base   = [30]          # 其中基礎點數（不含負面特質加成）
-_cc_stat_talent = [{}]          # 已選天賦字典（供能力點面板顯示加成用）
+_cc_stat_talent   = [{}]        # 已選天賦字典（供能力點面板顯示加成用）
+_cc_stat_de_level = [{}]        # 已選年級字典（供能力點面板顯示加成用）
 _cc_active_stat = [None]        # 鍵盤焦點在哪個 stat（0|1|2|None）
 _cc_stat_raw    = ["10","10","10"]  # 三個 stat 輸入框的原始字串
+
+# ── 拉霸機天賦動畫狀態 ───────────────────────────────────────────
+_SLOT_SPIN_MS    = 1500          # 每槽旋轉時長（ms）
+_SLOT_DELAY_MS   = 300           # 上一槽停止到下一槽啟動的延遲（ms）
+_SLOT_SPIN_NAMES = [             # 旋轉時快速輪播的名稱池
+    "天選之人", "勤奮學霸", "勤奮學渣", "富二代",
+    "社交達人", "夜貓子", "路痴", "抵抗力低下", "無天賦",
+]
+_CONFETTI_COLORS = [
+    (255, 80, 80), (255, 160, 50), (255, 215, 0),
+    (80, 200, 80), (80, 150, 255), (220, 80, 220),
+]
+_slot_results : list = [None, None, None]   # 各槽預定結果 talent dict
+_slot_phase   : list = ["idle","idle","idle"]  # "idle"|"spinning"|"done"
+_slot_stop_t  : list = [0, 0, 0]           # 各槽停止旋轉的 ticks
+_slot_start_t : list = [0, 0, 0]           # 各槽開始旋轉的 ticks
+_cc_confetti  : list = []                  # 彩帶粒子列表
+_cc_shake_end  = [0]                       # 震動結束時刻（ticks）
+
+# ── 額外事件選擇狀態 ─────────────────────────────────────────────
+_cc_extra_data  : list = []   # EXTRA_EVENTS 完整資料
+_cc_extra_sel   : list = []   # 已選的 event id 列表
+_cc_extra_intel  = [0]        # 玩家當前智力（判斷家教資格用）
+_cc_extra_warn   = [0]        # 互斥衝突警告觸發時間 ticks（0=無）
+
+# ── event_ok 彩色邊框擴充 ─────────────────────────────────────────
+_event_ok_border_color = [None]   # None = 預設棕色；或 (r,g,b) tuple
+
+# ── 玩家資訊一覽（CC 最終確認 + 遊戲中查閱）─────────────────────
+_cc_summary_data   = [{}]    # 傳給 _draw_cc_summary() 的 dict
+_info_modal_active = [False] # 遊戲中「資訊一覽」modal 是否開啟
+_info_btn_rect     = [None]  # 遊戲中「資訊一覽」按鈕 Rect（click handler 用）
+_info_modal_close  = [None]  # modal 內「關閉」按鈕 Rect（每幀更新）
+
 _cc_reply_event = threading.Event()
 _cc_reply_val   = [None]
 
@@ -827,6 +864,24 @@ def ask_ok(text: str) -> None:
     _reply_event.clear()
     _reply_event.wait()
 
+def tell_story(lines: list) -> None:
+    """顯示劇情對話框，每次點擊推進一行，全部結束後解除阻塞。
+    lines: list of str 或 {"speaker": str, "text": str}。
+    傳入 str 時自動偵測說話者：「開頭→我；X：開頭→X；其他→旁白。"""
+    def _normalize(entry):
+        if isinstance(entry, dict):
+            return entry
+        t = str(entry)
+        if t.startswith("「") or t.startswith('"'):
+            return {"speaker": "我", "text": t}
+        colon_pos = t.find("：")
+        if 0 < colon_pos <= 5:
+            return {"speaker": t[:colon_pos], "text": t}
+        return {"speaker": "旁白", "text": t}
+    _cmd_q.put(("story", [_normalize(e) for e in lines]))
+    _reply_event.clear()
+    _reply_event.wait()
+
 def wait_start():
     """遊戲執行緒呼叫：阻塞直到玩家點擊「開始遊戲」。"""
     _start_event.clear()
@@ -893,19 +948,47 @@ def ask_cc_drawbacks(drawbacks: list, max_sel: int = 2) -> list:
     _cc_reply_event.wait()
     return _cc_reply_val[0]
 
-def ask_cc_stats(total_pts: int, base_pts: int = 0, talent: dict = None) -> tuple:
+def ask_cc_stats(total_pts: int, base_pts: int = 0, talent: dict = None, de_level: dict = None) -> tuple:
     """顯示能力點分配畫面，回傳 (stamina, intel, luck)。"""
-    _cmd_q.put(("cc_stats", total_pts, base_pts, talent or {}))
+    _cmd_q.put(("cc_stats", total_pts, base_pts, talent or {}, de_level or {}))
     _cc_reply_event.clear()
     _cc_reply_event.wait()
     return _cc_reply_val[0]
 
-def ask_cc_talent(candidates: list) -> dict:
-    """顯示天賦卡片（單選），回傳選中的天賦字典。"""
-    _cmd_q.put(("cc_talent", candidates))
+def ask_cc_de_level(levels: list) -> dict:
+    """顯示年級卡片（單選），回傳選中的年級字典。"""
+    _cmd_q.put(("cc_de_level", levels))
     _cc_reply_event.clear()
     _cc_reply_event.wait()
     return _cc_reply_val[0]
+
+def ask_cc_talent(slot_results: list) -> None:
+    """觸發拉霸機天賦動畫，3 個結果由呼叫方預先決定。阻塞直到玩家點繼續。"""
+    _cmd_q.put(("cc_slot", list(slot_results)))
+    _cc_reply_event.clear()
+    _cc_reply_event.wait()
+
+def ask_cc_extra_events(events_data: list, intel: int) -> list:
+    """顯示額外事件選擇畫面，回傳選中的事件 ID 列表。"""
+    _cmd_q.put(("cc_extra", list(events_data), intel))
+    _cc_reply_event.clear()
+    _cc_reply_event.wait()
+    return _cc_reply_val[0]
+
+def ask_cc_summary(data: dict) -> str:
+    """顯示玩家資訊一覽卡片，回傳 'start' 或 'restart'。"""
+    _cmd_q.put(("cc_summary", dict(data)))
+    _cc_reply_event.clear()
+    _cc_reply_event.wait()
+    return _cc_reply_val[0]
+
+def show_extra_event_popup(lines: list, title: str, border_color: tuple) -> None:
+    """顯示帶彩色邊框的事件通知彈窗，阻塞直到玩家點確認。"""
+    body = "\n".join(str(l) for l in lines if l)
+    text = f"{title}\n{body}" if body else title
+    _cmd_q.put(("event_ok_col", text, border_color))
+    _reply_event.clear()
+    _reply_event.wait()
 
 def notify_timetable(courses: list):
     """
@@ -1540,7 +1623,8 @@ def _draw_status(surf, fs, fm, player, rect):
         surf.blit(fm.render("等待角色資料…", True, GRAY), (x, y))
         return
 
-    surf.blit(fm.render(f"【{player.name}】 {player.department}", True, TITLE), (x, y))
+    _dn = player.de_level.get("name", "") if hasattr(player, "de_level") else ""
+    surf.blit(fm.render(f"【{player.name}】 {player.department}{' ' + _dn if _dn else ''}", True, TITLE), (x, y))
     y += fm.get_height() + gap
 
     bw, bh = 220, 14
@@ -1852,7 +1936,7 @@ def _draw_status_v2(surf, fm, fs, player, rect, mpos):
         surf.blit(t, (pr.x + 20, pr.y + pr.height // 2 - t.get_height() // 2))
         shop_r = pygame.Rect(pr.right - 122, pr.y + (pr.height - 40) // 2, 118, 40)
         pygame.draw.rect(surf, DARK_GRAY, shop_r, border_radius=14)
-        return shop_r
+        return shop_r, None
 
     # ── 圓形頭像 ──────────────────────────────────────────────
     av_cx = pr.x + 52
@@ -1868,7 +1952,8 @@ def _draw_status_v2(surf, fm, fs, player, rect, mpos):
     # ── 名字 + 系級（純文字，無外框）────────────────────────
     info_x = pr.x + 106
     info_y = pr.y + 14
-    name_t = fb_lg.render(f"{player.name}  {player.department}", True, WHITE)
+    _de_name = player.de_level.get("name", "") if hasattr(player, "de_level") else ""
+    name_t = fb_lg.render(f"{player.name}  {player.department}{' ' + _de_name if _de_name else ''}", True, WHITE)
     surf.blit(name_t, (info_x, info_y))
     # 名字下細線
     line_y = info_y + name_t.get_height() + 2
@@ -1929,20 +2014,31 @@ def _draw_status_v2(surf, fm, fs, player, rect, mpos):
         eff_str = "  ".join(f"[{k} {v}週]" for k, v in player.status_effects.items())
         surf.blit(fb.render(eff_str, True, RED), (info_x, eff_y))
 
-    # ── 智力 / 運氣 小標籤（頭像正下方）─────────────────────
+    # ── 智力 / 運氣 小標籤 + 資訊一覽按鈕（頭像正下方）─────
     chip_y = pr.bottom - 42
 
-    # 智力 chip（含彩色等階名稱，寬度較大）
+    # 「資訊一覽」按鈕（最左）
+    info_btn_w = 78
+    info_btn_r = pygame.Rect(pr.x + 6, chip_y, info_btn_w, 30)
+    _ib_hover  = info_btn_r.collidepoint(mpos)
+    _ib_bg     = (100, 68, 38) if _ib_hover else (78, 52, 28)
+    pygame.draw.rect(surf, _ib_bg, info_btn_r, border_radius=8)
+    pygame.draw.rect(surf, GRAY,   info_btn_r, 1, border_radius=8)
+    _ib_t = fb.render("資訊一覽", True, PANEL)
+    surf.blit(_ib_t, (info_btn_r.x + (info_btn_r.width  - _ib_t.get_width())  // 2,
+                      info_btn_r.y + (info_btn_r.height - _ib_t.get_height()) // 2))
+
+    # 智力 chip（接在按鈕右側）
     intel_lvl  = _get_intel_level_ui(player.intel)
     lvl_name   = _INTEL_NAMES_UI[intel_lvl]
     lvl_col    = _INTEL_ANNOT_COLS_UI[intel_lvl]
     base_s     = fb.render(f"智力: {player.intel}", True, WHITE)
     lvl_s      = fb.render(f"（{lvl_name}）", True, lvl_col)
-    _CR = 8                                              # chip 圖示半徑
-    _ISPACE = _CR * 2 + 5                               # 圖示佔寬（直徑 + 右間距）
+    _CR = 8
+    _ISPACE = _CR * 2 + 5
     intel_chip_w = _ISPACE + base_s.get_width() + lvl_s.get_width() + 18
-    intel_chip_r = pygame.Rect(pr.x + 10, chip_y, intel_chip_w, 30)
-    # 大腦圖示（智力）
+    intel_chip_x = info_btn_r.right + 8
+    intel_chip_r = pygame.Rect(intel_chip_x, chip_y, intel_chip_w, 30)
     _draw_icon_brain(surf,
                      intel_chip_r.x + 9 + _CR,
                      intel_chip_r.centery, _CR)
@@ -1956,7 +2052,6 @@ def _draw_status_v2(surf, fm, fs, player, rect, mpos):
     lt = fb.render(f"運氣: {player.luck}", True, WHITE)
     luck_chip_w = _ISPACE + lt.get_width() + 18
     luck_chip_r = pygame.Rect(luck_chip_x, chip_y, luck_chip_w, 30)
-    # 幸運草圖示（運氣）
     _draw_icon_clover(surf,
                       luck_chip_r.x + 9 + _CR,
                       luck_chip_r.centery, _CR)
@@ -2033,7 +2128,7 @@ def _draw_status_v2(surf, fm, fs, player, rect, mpos):
     if money_left - sat_right >= CAL_W + 8:
         _draw_week_calendar(surf, fm, ticker_cx, ticker_cy, _week[0])
 
-    return shop_r
+    return shop_r, info_btn_r
 
 
 def _draw_log(surf, fs, log, scroll, rect):
@@ -2329,7 +2424,7 @@ def _draw_cc_drawbacks(surf, fm, fs, drawbacks, sel_indices, max_sel, mpos):
     return card_rects, ok
 
 
-def _draw_cc_stats(surf, fm, fs, total, base, talent, vals, raw, active, mpos):
+def _draw_cc_stats(surf, fm, fs, total, base, talent, vals, raw, active, mpos, de_level=None):
     """能力點分配畫面，回傳 (minus_rects, plus_rects, confirm_rect)。"""
     fb_lg = _font_bold_lg[0] or fm
     _draw_cc_bg(surf)
@@ -2402,15 +2497,33 @@ def _draw_cc_stats(surf, fm, fs, total, base, talent, vals, raw, active, mpos):
         surf.blit(pt, (pr_dr.x + (pr_dr.width  - pt.get_width())  // 2,
                        pr_dr.y + (pr_dr.height - pt.get_height()) // 2))
         plus_rects.append(pr)
-        # 天賦加成標注（若有）
-        t_bonus = (talent or {}).get(talent_keys[i], 0)
-        if t_bonus:
-            final_val = vals[i] + t_bonus
-            ann_txt   = f"+{t_bonus} 天賦  →  最終 {final_val}"
+        # 天賦 + 年級加成標注
+        t_bonus  = (talent   or {}).get(talent_keys[i], 0)
+        dl_bonus = (de_level or {}).get(talent_keys[i], 0)
+        total_bonus = t_bonus + dl_bonus
+        if total_bonus:
+            parts = []
+            if t_bonus:  parts.append(f"+{t_bonus} 天賦")
+            if dl_bonus: parts.append(f"+{dl_bonus} 年級")
+            final_val = vals[i] + total_bonus
+            ann_txt   = "  ".join(parts) + f"  →  最終 {final_val}"
             ann_s     = fs.render(ann_txt, True, YELLOW)
             ann_x     = pr.right + 14
             ann_y     = ry + (box_h - ann_s.get_height()) // 2
             surf.blit(ann_s, (ann_x, ann_y))
+
+    # 可用時間加成提示（天賦 + 年級合計）
+    bt_talent = (talent   or {}).get("base_time", 0)
+    bt_de     = (de_level or {}).get("base_time", 0)
+    bt_parts  = []
+    if bt_talent: bt_parts.append(f"天賦 {'+' if bt_talent > 0 else ''}{bt_talent}")
+    if bt_de:     bt_parts.append(f"年級 +{bt_de}")
+    if bt_parts:
+        bt_total = bt_talent + bt_de
+        bt_note  = f"可用時間：基礎 10 {'+' if bt_total >= 0 else ''}{bt_total}  （{'，'.join(bt_parts)}）"
+        bt_txt   = fs.render(bt_note, True, GRAY)
+        surf.blit(bt_txt, ((WIN_W - bt_txt.get_width()) // 2,
+                            row_y[-1] + box_h + 8))
 
     # 確認
     ok          = pygame.Rect((WIN_W - 160) // 2, ok_y, 160, btn_h)
@@ -2470,6 +2583,490 @@ def _draw_cc_talent(surf, fm, fs, candidates, sel_idx, mpos):
     surf.blit(t, (ok_dr.x + (ok_dr.width  - t.get_width())  // 2,
                   ok_dr.y + (ok_dr.height - t.get_height()) // 2))
     return card_rects, ok
+
+
+def _draw_cc_de_level(surf, fm, fs, levels, sel_idx, mpos):
+    """年級卡片（單選），回傳 (card_rects, confirm_rect)。"""
+    fb_lg = _font_bold_lg[0] or fm
+    _draw_cc_bg(surf)
+    # ── 垂直置中計算 ──────────────────────────────────────────
+    cw, ch    = 180, 200
+    gap       = 20
+    title_h   = fm.get_height() + 22
+    TITLE_GAP = 28
+    CARD_BTN  = 30
+    btn_h     = 48
+    total_h   = title_h + TITLE_GAP + ch + CARD_BTN + btn_h
+    top_y     = (WIN_H - total_h) // 2
+    sy        = top_y + title_h + TITLE_GAP
+
+    _draw_float_label_card(surf, fm, "選擇年級", WIN_W // 2, top_y,
+                           pad_x=26, pad_y=11, amp=7, speed=0.00170, phase=2.0)
+
+    total_w = len(levels) * cw + (len(levels) - 1) * gap
+    sx = (WIN_W - total_w) // 2
+    card_rects = []
+    buff_labels = [
+        ("可用時間加成", "base_time"),
+        ("智力",         "intel"),
+        ("運氣",         "luck"),
+    ]
+    for i, lv in enumerate(levels):
+        selected = (i == sel_idx)
+        r        = pygame.Rect(sx + i * (cw + gap), sy, cw, ch)
+        hover    = r.collidepoint(mpos) and not selected
+        bg_col   = (110, 72, 36) if selected else BTN_N
+        dr       = _premium_btn(surf, r, bg_col, hover, radius=16)
+        if selected:
+            pygame.draw.rect(surf, YELLOW, dr, 2, border_radius=16)
+        # 年級名稱
+        nt = fb_lg.render(lv["name"], True, YELLOW if selected else WHITE)
+        surf.blit(nt, (dr.x + (dr.width - nt.get_width()) // 2, dr.y + 18))
+        # buff 列表
+        by = dr.y + 60
+        for bl, bk in buff_labels:
+            val = lv.get(bk, 0)
+            sign = "+" if val >= 0 else ""
+            color = GREEN if val > 0 else (GRAY if val == 0 else (200, 80, 80))
+            bt = fs.render(f"{bl} {sign}{val}", True, color)
+            surf.blit(bt, (dr.x + (dr.width - bt.get_width()) // 2, by))
+            by += fs.get_height() + 5
+        card_rects.append((r, i))
+
+    ok          = pygame.Rect((WIN_W - 160) // 2, sy + ch + CARD_BTN, 160, btn_h)
+    hover       = ok.collidepoint(mpos)
+    can_confirm = sel_idx is not None
+    ok_col      = BTN_N if can_confirm else DARK_GRAY
+    ok_dr       = _premium_btn(surf, ok, ok_col, hover and can_confirm, radius=14)
+    t           = fb_lg.render("確認選擇", True, WHITE)
+    surf.blit(t, (ok_dr.x + (ok_dr.width  - t.get_width())  // 2,
+                  ok_dr.y + (ok_dr.height - t.get_height()) // 2))
+    return card_rects, ok
+
+
+def _draw_cc_extra_events(surf, fm, fs, mpos):
+    """額外事件選擇卡片，回傳 (card_rects, confirm_rect)。"""
+    fb_lg = _font_bold_lg[0] or fm
+    _draw_cc_bg(surf)
+    now = pygame.time.get_ticks()
+
+    cw, ch         = 220, 200
+    gap            = 22
+    title_h        = fm.get_height() + 22
+    TITLE_SUB_GAP  = 12
+    sub_h          = fs.get_height() + 12
+    SUB_CARD_GAP   = 18
+    CARD_BTN_GAP   = 30
+    btn_h          = 48
+    total_h = title_h + TITLE_SUB_GAP + sub_h + SUB_CARD_GAP + ch + CARD_BTN_GAP + btn_h
+    top_y = (WIN_H - total_h) // 2
+    sub_y = top_y + title_h + TITLE_SUB_GAP
+    sy    = sub_y + sub_h + SUB_CARD_GAP
+
+    _draw_float_label_card(surf, fm, "選擇額外事件", WIN_W // 2, top_y,
+                           pad_x=26, pad_y=11, amp=7, speed=0.00170, phase=4.0)
+    _draw_float_label_card(surf, fs, "（可複選社團；打工與家教只能擇一；不選可直接確認）",
+                           WIN_W // 2, sub_y, text_col=GRAY,
+                           bg=(30, 20, 8), bg_alpha=115,
+                           pad_x=16, pad_y=6, amp=7, speed=0.00170, phase=4.0)
+
+    events = _cc_extra_data or []
+    intel  = _cc_extra_intel[0]
+    total_w = len(events) * cw + (len(events) - 1) * gap
+    sx      = (WIN_W - total_w) // 2
+    card_rects = []
+
+    for i, ev in enumerate(events):
+        ev_id    = ev["id"]
+        selected = ev_id in _cc_extra_sel
+        disabled = ev.get("intel_req", 0) > intel
+        r        = pygame.Rect(sx + i * (cw + gap), sy, cw, ch)
+        hover    = r.collidepoint(mpos) and not selected and not disabled
+        bg_col   = (50, 35, 20) if disabled else ((230, 108, 58) if selected else BTN_N)
+        dr       = _premium_btn(surf, r, bg_col, hover, radius=16)
+        if selected:
+            pygame.draw.rect(surf, YELLOW, dr, 2, border_radius=16)
+        name_col = GRAY if disabled else (YELLOW if selected else WHITE)
+        nt = fb_lg.render(ev["name"], True, name_col)
+        surf.blit(nt, (dr.x + (dr.width - nt.get_width()) // 2, dr.y + 14))
+        tc = ev.get("time_cost", 0)
+        tc_col = GRAY if disabled else (RED if tc > 0 else GREEN)
+        tc_t = fs.render(f"每週時間 -{tc}" if tc > 0 else "不佔時間", True, tc_col)
+        surf.blit(tc_t, (dr.x + (dr.width - tc_t.get_width()) // 2, dr.y + 60))
+        md = ev.get("money_delta", 0)
+        md_col = GRAY if disabled else (GREEN if md > 0 else RED)
+        sign = "+" if md >= 0 else ""
+        md_t = fs.render(f"每週金錢 {sign}{md}", True, md_col)
+        surf.blit(md_t, (dr.x + (dr.width - md_t.get_width()) // 2, dr.y + 90))
+        ir = ev.get("intel_req", 0)
+        if ir > 0:
+            req_col = GRAY if disabled else (GREEN if intel >= ir else RED)
+            req_t = fs.render(f"需要智力 ≥ {ir}", True, req_col)
+            surf.blit(req_t, (dr.x + (dr.width - req_t.get_width()) // 2, dr.y + 126))
+        if not disabled:
+            card_rects.append((r, ev_id))
+
+    # ── 互斥警告（右側浮動提示）──────────────────────────────
+    warn_elapsed = now - _cc_extra_warn[0]
+    if _cc_extra_warn[0] > 0 and warn_elapsed < 2200:
+        if warn_elapsed < 280:
+            w_alpha = int(255 * warn_elapsed / 280)
+        elif warn_elapsed > 1700:
+            w_alpha = int(255 * (2200 - warn_elapsed) / 500)
+        else:
+            w_alpha = 255
+        w_alpha = max(0, min(255, w_alpha))
+        wt    = fs.render("打工和家教只能二擇一", True, (255, 215, 60))
+        ww    = wt.get_width() + 24
+        wh    = wt.get_height() + 14
+        wx    = WIN_W - ww - 18
+        wy    = WIN_H // 2 - wh // 2
+        ws    = pygame.Surface((ww, wh), pygame.SRCALPHA)
+        pygame.draw.rect(ws, (40, 18, 8, min(220, w_alpha)), (0, 0, ww, wh), border_radius=8)
+        pygame.draw.rect(ws, (*[min(255, int(c * w_alpha / 255)) for c in (235, 130, 30)], w_alpha),
+                         (0, 0, ww, wh), 2, border_radius=8)
+        surf.blit(ws, (wx, wy))
+        wt_s = pygame.Surface(wt.get_size(), pygame.SRCALPHA)
+        wt_s.blit(wt, (0, 0))
+        wt_s.set_alpha(w_alpha)
+        surf.blit(wt_s, (wx + 12, wy + 7))
+
+    ok    = pygame.Rect((WIN_W - 160) // 2, sy + ch + CARD_BTN_GAP, 160, btn_h)
+    hover = ok.collidepoint(mpos)
+    dr    = _premium_btn(surf, ok, BTN_N, hover, radius=14)
+    t     = fb_lg.render("確認選擇", True, WHITE)
+    surf.blit(t, (dr.x + (dr.width - t.get_width()) // 2,
+                  dr.y + (dr.height - t.get_height()) // 2))
+    return card_rects, ok
+
+
+def _draw_cc_summary(surf, fm, fs, mpos, game_mode=False):
+    """
+    玩家資訊一覽卡片。
+    game_mode=False: CC 結束確認，有「進入本學期」「重新創建角色」兩按鈕，
+                     回傳 (start_btn_rect, restart_btn_rect)。
+    game_mode=True : 遊戲中查閱，有「關閉」按鈕，回傳 (close_btn_rect, None)。
+    """
+    fb    = _font_bold[0]    or fs
+    fb_lg = _font_bold_lg[0] or fm
+    data  = _cc_summary_data[0]
+
+    if game_mode:
+        ov = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
+        ov.fill((0, 0, 0, 160))
+        surf.blit(ov, (0, 0))
+    else:
+        _draw_cc_bg(surf)
+
+    # ── 卡片外框 ─────────────────────────────────────────────────
+    cw = 700; ch = 500
+    cx = (WIN_W - cw) // 2; cy = (WIN_H - ch) // 2
+
+    # 陰影
+    sh = pygame.Surface((cw + 8, ch + 8), pygame.SRCALPHA)
+    pygame.draw.rect(sh, (0, 0, 0, 55), (0, 0, cw + 8, ch + 8), border_radius=20)
+    surf.blit(sh, (cx + 4, cy + 4))
+
+    card_s = pygame.Surface((cw, ch), pygame.SRCALPHA)
+    pygame.draw.rect(card_s, (255, 245, 228, 248), (0, 0, cw, ch), border_radius=18)
+    surf.blit(card_s, (cx, cy))
+    pygame.draw.rect(surf, CYAN, pygame.Rect(cx, cy, cw, ch), 2, border_radius=18)
+
+    # ── 內容 ────────────────────────────────────────────────────
+    pad = 28
+    px = cx + pad; pw = cw - pad * 2
+    py = cy + 16
+
+    # 標題
+    title_s = fb_lg.render("玩家資訊一覽", True, TITLE)
+    surf.blit(title_s, (cx + (cw - title_s.get_width()) // 2, py))
+    py += title_s.get_height() + 8
+    pygame.draw.line(surf, (210, 185, 155), (px, py), (px + pw, py), 1)
+    py += 10
+
+    # 基本資料
+    de_name  = data.get("de_level", {}).get("name", "")
+    info_str = f"姓名：{data.get('name', '')}　　學院：{data.get('department', '')}　　年級：{de_name}"
+    surf.blit(fm.render(info_str, True, WHITE), (px, py))
+    py += fm.get_height() + 12
+
+    # 能力值
+    surf.blit(fb.render("【能力值】", True, TITLE), (px, py))
+    py += fb.get_height() + 5
+
+    raw_sta = data.get("stamina", 0)
+    raw_int = data.get("intel", 0)
+    raw_lck = data.get("luck", 0)
+    money   = data.get("money", 0)
+    ct      = data.get("combined_talent", {})
+    dl      = data.get("de_level", {})
+
+    if not game_mode:
+        t_sta = ct.get("stamina", 0)
+        t_int = ct.get("intel", 0)
+        t_lck = ct.get("luck", 0)
+        d_int = dl.get("intel", 0)
+        d_lck = dl.get("luck", 0)
+        sta_f = raw_sta + t_sta
+        int_f = raw_int + t_int + d_int
+        lck_f = raw_lck + t_lck + d_lck
+
+        def _bstr(raw, tb, db=0):
+            parts = [f"分配 {raw}"]
+            if tb: parts.append(f"天賦 {'+' if tb > 0 else ''}{tb}")
+            if db: parts.append(f"年級 +{db}")
+            return "（" + "，".join(parts) + "）" if len(parts) > 1 else ""
+
+        sta_str = f"體力：{sta_f}{_bstr(raw_sta, t_sta)}"
+        int_str = f"智力：{int_f}{_bstr(raw_int, t_int, d_int)}"
+        lck_str = f"運氣：{lck_f}{_bstr(raw_lck, t_lck, d_lck)}"
+    else:
+        sta_str = f"體力：{raw_sta}"
+        int_str = f"智力：{raw_int}"
+        lck_str = f"運氣：{raw_lck}"
+
+    half = pw // 2
+    surf.blit(fs.render(sta_str, True, WHITE), (px, py))
+    surf.blit(fs.render(int_str, True, WHITE), (px + half, py))
+    py += fs.get_height() + 4
+    surf.blit(fs.render(lck_str, True, WHITE), (px, py))
+    surf.blit(fs.render(f"金錢：{money}", True, YELLOW), (px + half, py))
+    py += fs.get_height() + 12
+
+    # 天賦
+    surf.blit(fb.render("【天賦】", True, TITLE), (px, py))
+    py += fb.get_height() + 5
+
+    slots = data.get("slot_results", [])
+    for i, t in enumerate(slots):
+        is_null = t.get("name") == "無天賦"
+        col = GRAY if is_null else WHITE
+        desc = t.get("desc", "")
+        line = f"槽 {i + 1}：{t.get('name', '')}"
+        if desc:
+            line += f"  —  {desc}"
+        surf.blit(fs.render(line, True, col), (px + 10, py))
+        py += fs.get_height() + 3
+    if not slots:
+        surf.blit(fs.render("（無）", True, GRAY), (px + 10, py))
+        py += fs.get_height() + 3
+    py += 8
+
+    # 負面特質
+    surf.blit(fb.render("【負面特質】", True, TITLE), (px, py))
+    py += fb.get_height() + 5
+
+    drawbacks = data.get("drawbacks", [])
+    if drawbacks:
+        for db in drawbacks:
+            surf.blit(fs.render(f"{db['name']}  —  {db['desc']}", True, RED),
+                      (px + 10, py))
+            py += fs.get_height() + 3
+    else:
+        surf.blit(fs.render("（無）", True, GRAY), (px + 10, py))
+        py += fs.get_height() + 3
+    py += 8
+
+    # 額外事件
+    surf.blit(fb.render("【額外事件】", True, TITLE), (px, py))
+    py += fb.get_height() + 5
+
+    ev_ids  = data.get("extra_ev_ids", [])
+    ev_map  = {e["id"]: e for e in data.get("extra_ev_data", [])}
+    if ev_ids:
+        for eid in ev_ids:
+            ev = ev_map.get(eid)
+            if not ev:
+                continue
+            tc = ev.get("time_cost", 0)
+            md = ev.get("money_delta", 0)
+            parts = []
+            if tc > 0: parts.append(f"每週時間 -{tc}")
+            if md != 0: parts.append(f"每週金錢 {'+' if md >= 0 else ''}{md}")
+            line = ev["name"]
+            if parts:
+                line += "  —  " + "，".join(parts)
+            surf.blit(fs.render(line, True, WHITE), (px + 10, py))
+            py += fs.get_height() + 3
+    else:
+        surf.blit(fs.render("（無）", True, GRAY), (px + 10, py))
+        py += fs.get_height() + 3
+
+    # ── 按鈕區 ────────────────────────────────────────────────
+    btn_y = cy + ch - 68
+    pygame.draw.line(surf, (210, 185, 155), (px, btn_y), (px + pw, btn_y), 1)
+    btn_y += 14
+
+    if game_mode:
+        close_r = pygame.Rect(cx + cw - pad - 130, btn_y, 130, 40)
+        hover   = close_r.collidepoint(mpos)
+        dr      = _premium_btn(surf, close_r, BTN_N, hover, radius=12)
+        ct_s    = fb_lg.render("關閉", True, PANEL)
+        surf.blit(ct_s, (dr.x + (dr.width - ct_s.get_width()) // 2,
+                         dr.y + (dr.height - ct_s.get_height()) // 2))
+        return close_r, None
+    else:
+        start_r   = pygame.Rect(cx + cw - pad - 140, btn_y, 140, 40)
+        restart_r = pygame.Rect(start_r.x - 18 - 160, btn_y, 160, 40)
+
+        h_s = start_r.collidepoint(mpos)
+        dr_s = _premium_btn(surf, start_r, BTN_N, h_s, radius=12)
+        t_s  = fb_lg.render("進入本學期", True, PANEL)
+        surf.blit(t_s, (dr_s.x + (dr_s.width - t_s.get_width()) // 2,
+                        dr_s.y + (dr_s.height - t_s.get_height()) // 2))
+
+        h_r = restart_r.collidepoint(mpos)
+        dr_r = _premium_btn(surf, restart_r, (115, 75, 40), h_r, radius=12)
+        t_r  = fb_lg.render("重新創建角色", True, PANEL)
+        surf.blit(t_r, (dr_r.x + (dr_r.width - t_r.get_width()) // 2,
+                        dr_r.y + (dr_r.height - t_r.get_height()) // 2))
+
+        return start_r, restart_r
+
+
+def _spawn_confetti():
+    """在畫面上方噴射 80 顆彩帶粒子。"""
+    for _ in range(80):
+        _cc_confetti.append({
+            "x":  random.uniform(0, WIN_W),
+            "y":  random.uniform(-60, -5),
+            "vx": random.uniform(-3.5, 3.5),
+            "vy": random.uniform(-9, -3),
+            "color": random.choice(_CONFETTI_COLORS),
+            "life": random.randint(55, 110),
+            "max_life": 110,
+            "w": random.randint(6, 13),
+            "h": random.randint(4, 8),
+        })
+
+
+def _update_confetti(surf):
+    """更新並繪製所有彩帶粒子；自動清除已結束的粒子。"""
+    keep = []
+    for p in _cc_confetti:
+        p["vy"] += 0.35
+        p["x"]  += p["vx"]
+        p["y"]  += p["vy"]
+        p["life"] -= 1
+        if p["life"] > 0 and p["y"] < WIN_H + 20:
+            alpha = min(255, int(255 * p["life"] / p["max_life"]))
+            ps = pygame.Surface((p["w"], p["h"]), pygame.SRCALPHA)
+            ps.fill((*p["color"], alpha))
+            surf.blit(ps, (int(p["x"]), int(p["y"])))
+            keep.append(p)
+    _cc_confetti[:] = keep
+
+
+def _update_slot_state(now):
+    """每幀推進拉霸機動畫狀態。"""
+    for i in range(3):
+        phase = _slot_phase[i]
+        if phase == "idle":
+            if i > 0 and _slot_phase[i - 1] == "done" \
+                    and now - _slot_stop_t[i - 1] >= _SLOT_DELAY_MS:
+                _slot_phase[i]   = "spinning"
+                _slot_start_t[i] = now
+        elif phase == "spinning":
+            if now - _slot_start_t[i] >= _SLOT_SPIN_MS:
+                _slot_phase[i]  = "done"
+                _slot_stop_t[i] = now
+                result = _slot_results[i]
+                if result and result.get("name") != "無天賦":
+                    _spawn_confetti()
+                    _cc_shake_end[0] = now + 400
+
+
+def _draw_cc_slot_machine(surf, fm, fs, mpos):
+    """拉霸機天賦動畫畫面，回傳「繼續」按鈕 Rect 或 None（尚未完成時）。"""
+    fb_lg = _font_bold_lg[0] or fm
+    now   = pygame.time.get_ticks()
+    _update_slot_state(now)
+    _draw_cc_bg(surf)
+
+    # ── 彩帶 ─────────────────────────────────────────────────
+    _update_confetti(surf)
+
+    # ── 震動偏移 ──────────────────────────────────────────────
+    if now < _cc_shake_end[0]:
+        t_rem    = _cc_shake_end[0] - now
+        amp      = max(0, int(7 * t_rem / 400))
+        shake_dx = random.randint(-amp, amp)
+        shake_dy = random.randint(-amp // 2, amp // 2)
+    else:
+        shake_dx = shake_dy = 0
+
+    # ── 佈局 ──────────────────────────────────────────────────
+    cw, ch     = 210, 230
+    gap        = 22
+    title_h    = fm.get_height() + 22
+    TITLE_GAP  = 28
+    SLOT_BTN   = 32
+    btn_h      = 48
+    total_h    = title_h + TITLE_GAP + ch + SLOT_BTN + btn_h
+    top_y      = (WIN_H - total_h) // 2
+    sy         = top_y + title_h + TITLE_GAP
+    total_w    = 3 * cw + 2 * gap
+    sx         = (WIN_W - total_w) // 2
+
+    _draw_float_label_card(surf, fm, "抽取天賦", WIN_W // 2 + shake_dx, top_y + shake_dy,
+                           pad_x=26, pad_y=11, amp=7, speed=0.00170, phase=3.0)
+
+    all_done = all(p == "done" for p in _slot_phase)
+
+    for i in range(3):
+        r     = pygame.Rect(sx + i * (cw + gap) + shake_dx, sy + shake_dy, cw, ch)
+        phase = _slot_phase[i]
+
+        if phase == "idle":
+            dr = _premium_btn(surf, r, (60, 40, 20), False, radius=16)
+            q  = fb_lg.render("?", True, GRAY)
+            surf.blit(q, (dr.x + (dr.width - q.get_width()) // 2,
+                          dr.y + (dr.height - q.get_height()) // 2))
+
+        elif phase == "spinning":
+            dr = _premium_btn(surf, r, (82, 52, 22), False, radius=16)
+            pygame.draw.rect(surf, YELLOW, dr, 2, border_radius=16)
+            elapsed = now - _slot_start_t[i]
+            t_frac  = min(1.0, elapsed / _SLOT_SPIN_MS)
+            # 後段減速：interval 從 70ms 拉長到 260ms
+            interval = int(70 + t_frac ** 2 * 190) if t_frac < 0.75 else int(70 + 0.75 ** 2 * 190)
+            name_idx = (elapsed // max(1, interval)) % len(_SLOT_SPIN_NAMES)
+            nt = fb_lg.render(_SLOT_SPIN_NAMES[name_idx], True, WHITE)
+            ny = dr.y + (dr.height - nt.get_height()) // 2
+            surf.blit(nt, (dr.x + (dr.width - nt.get_width()) // 2, ny))
+            # 速度感模糊條
+            for off, alpha in ((-32, 30), (-16, 55), (16, 55), (32, 30)):
+                ghost = pygame.Surface((cw - 16, fb_lg.get_height()), pygame.SRCALPHA)
+                ghost.fill((255, 200, 100, alpha))
+                surf.blit(ghost, (dr.x + 8, ny + off))
+
+        elif phase == "done":
+            result     = _slot_results[i]
+            is_talent  = result and result.get("name") != "無天賦"
+            bg_col     = (110, 72, 36) if is_talent else (48, 33, 18)
+            dr         = _premium_btn(surf, r, bg_col, False, radius=16)
+            if is_talent:
+                pygame.draw.rect(surf, YELLOW, dr, 2, border_radius=16)
+            name     = result.get("name", "無天賦") if result else "無天賦"
+            name_col = YELLOW if is_talent else GRAY
+            nt = fb_lg.render(name, True, name_col)
+            surf.blit(nt, (dr.x + (dr.width - nt.get_width()) // 2, dr.y + 20))
+            if is_talent:
+                desc_lines = _wrap(result.get("desc", ""), fs, cw - 20)
+                for li, dl in enumerate(desc_lines):
+                    dt = fs.render(dl, True, WHITE)
+                    surf.blit(dt, (dr.x + 10, dr.y + 62 + li * (fs.get_height() + 4)))
+
+    # ── 繼續按鈕（全部完成後才出現）──────────────────────────────
+    ok = pygame.Rect((WIN_W - 160) // 2, sy + ch + SLOT_BTN, 160, btn_h)
+    if all_done:
+        hover = ok.collidepoint(mpos)
+        ok_dr = _premium_btn(surf, ok, BTN_N, hover, radius=14)
+        t     = fb_lg.render("繼續", True, WHITE)
+        surf.blit(t, (ok_dr.x + (ok_dr.width - t.get_width()) // 2,
+                      ok_dr.y + (ok_dr.height - t.get_height()) // 2))
+        return ok
+    return None
 
 
 def _handle_cc_action(ev_pos):
@@ -2543,6 +3140,61 @@ def _handle_cc_action(ev_pos):
                 _cc_reply_val[0] = tuple(_cc_stat_vals)
                 _cc_mode[0] = ""
                 _cc_active_stat[0] = None
+                _cc_reply_event.set()
+
+    elif mode == "extra":
+        for (r, ev_id) in (_cc_btn_cache.get("extra_cards") or []):
+            if r.collidepoint(ev_pos):
+                ev_map = {e["id"]: e for e in _cc_extra_data}
+                ev     = ev_map.get(ev_id)
+                if not ev:
+                    return
+                if ev_id in _cc_extra_sel:
+                    _cc_extra_sel.remove(ev_id)
+                else:
+                    excl = ev.get("exclusive", [])
+                    if any(x in _cc_extra_sel for x in excl):
+                        _cc_extra_warn[0] = pygame.time.get_ticks()
+                        return
+                    _cc_extra_sel.append(ev_id)
+                return
+        ok = _cc_btn_cache.get("extra_ok")
+        if ok and ok.collidepoint(ev_pos):
+            _cc_reply_val[0] = list(_cc_extra_sel)
+            _cc_mode[0]      = ""
+            _cc_extra_sel.clear()
+            _cc_reply_event.set()
+
+    elif mode == "slot":
+        ok = _cc_btn_cache.get("slot_ok")
+        if ok and ok.collidepoint(ev_pos) and all(p == "done" for p in _slot_phase):
+            _cc_mode[0] = ""
+            _cc_confetti.clear()
+            _cc_reply_event.set()
+
+    elif mode == "summary":
+        start_r   = _cc_btn_cache.get("summary_start")
+        restart_r = _cc_btn_cache.get("summary_restart")
+        if start_r and start_r.collidepoint(ev_pos):
+            _cc_reply_val[0] = "start"
+            _cc_mode[0] = ""
+            _cc_reply_event.set()
+        elif restart_r and restart_r.collidepoint(ev_pos):
+            _cc_reply_val[0] = "restart"
+            _cc_mode[0] = ""
+            _cc_reply_event.set()
+
+    elif mode == "de_level":
+        for (r, idx) in (_cc_btn_cache.get("de_level_cards") or []):
+            if r.collidepoint(ev_pos):
+                _cc_sel.clear()
+                _cc_sel.append(idx)
+                return
+        ok = _cc_btn_cache.get("de_level_ok")
+        if ok and ok.collidepoint(ev_pos):
+            if _cc_sel:
+                _cc_reply_val[0] = data[_cc_sel[0]]
+                _cc_mode[0] = ""
                 _cc_reply_event.set()
 
     elif mode == "talent":
@@ -2791,9 +3443,10 @@ def _draw_event_ok_popup(surf: pygame.Surface, fm, fs, mpos) -> list:
         surf.blit(ts, (px + (popup_w - ts.get_width()) // 2, hdr_ty))
         hdr_ty += q_lh_lg
 
-    # ── 邊框 ──────────────────────────────────────────────────
-    pygame.draw.rect(surf, (155, 100, 50),
-                     pygame.Rect(px, py, popup_w, total_h), 2, border_radius=18)
+    # ── 邊框（可自定義顏色，用於額外事件彈窗）────────────────────
+    _bdr = _event_ok_border_color[0] or (155, 100, 50)
+    pygame.draw.rect(surf, _bdr,
+                     pygame.Rect(px, py, popup_w, total_h), 3, border_radius=18)
 
     # ── clip ─────────────────────────────────────────────────
     old_clip = surf.get_clip()
@@ -3002,6 +3655,44 @@ def _draw_action_popup(surf, fs):
     surf.set_clip(_old_clip)
 
 
+# ── 行動按鈕 Icon ──────────────────────────────────────────────
+_ACTION_ICON_FILES = {
+    "認真讀書": "study_icon.webp",
+    "正常上課": "class_icon.webp",
+    "社團活動": "club_icon.webp",
+    "打工賺錢": "work_icon.webp",
+    "好好休息": "rest_icon.webp",
+    "幫助朋友": "friend_icon.webp",
+}
+_action_icon_srcs: dict = {}   # label -> pygame.Surface（懶載入原始圖）
+
+
+def _draw_action_icon(surf: pygame.Surface, cx: int, cy: int, ar: int, label: str) -> None:
+    """在圓形按鈕表面貼上滿版 icon（圓形裁切）。"""
+    if label not in _ACTION_ICON_FILES:
+        return
+    # 懶載入原始圖（每個 label 只 load 一次）
+    if label not in _action_icon_srcs:
+        _icon_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                 "asset", "picture", "icon")
+        path = os.path.join(_icon_dir, _ACTION_ICON_FILES[label])
+        try:
+            _action_icon_srcs[label] = pygame.image.load(path).convert_alpha()
+        except Exception:
+            _action_icon_srcs[label] = None
+    src = _action_icon_srcs.get(label)
+    if src is None:
+        return
+    d = ar * 2
+    scaled = pygame.transform.smoothscale(src, (d, d))
+    # 圓形遮罩：圓外 alpha→0
+    mask = pygame.Surface((d, d), pygame.SRCALPHA)
+    mask.fill((0, 0, 0, 0))
+    pygame.draw.circle(mask, (255, 255, 255, 255), (ar, ar), ar)
+    scaled.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MIN)
+    surf.blit(scaled, (cx - ar, cy - ar))
+
+
 def _draw_action_panel(surf, fm, fs, mode, choices, log, prompt, tvalue, rect, time_left, mpos):
     """
     新版底部面板（浮動卡片）。
@@ -3145,6 +3836,10 @@ def _draw_action_panel(surf, fm, fs, mode, choices, log, prompt, tvalue, rect, t
 
             ar    = _premium_circle(surf, cx_btn, cy_btn, r_pulse,
                                     BTN_N, hover, key=(cx_btn, cy_btn))
+            _draw_action_icon(surf, cx_btn, cy_btn, ar, label)
+            # icon 蓋住 _premium_circle 的邊框，補畫一圈
+            _bdr = tuple(min(255, int(c * 1.20 + 30)) for c in BTN_N)
+            pygame.draw.circle(surf, _bdr, (cx_btn, cy_btn), ar, 2)
             brect = pygame.Rect(cx_btn - r - 8, cy_btn - r - 8,
                                 (r + 8) * 2, (r + 8) * 2)   # 點擊判定用原始 r
 
@@ -3248,6 +3943,46 @@ def _draw_action_panel(surf, fm, fs, mode, choices, log, prompt, tvalue, rect, t
                        ok_dr.y + (ok_dr.height - ot.get_height()) // 2))
         content_rects.append((ok, "__ok__"))
 
+    elif mode == "story":
+        # ── 劇情對話框（VN 風格）────────────────────────────
+        idx = _story_index[0]
+        if 0 <= idx < len(_story_lines):
+            entry   = _story_lines[idx]
+            speaker = entry.get("speaker", "")
+            text    = entry.get("text", "")
+        else:
+            speaker = ""
+            text    = ""
+
+        PAD      = 16
+        text_top = content_rect.y + PAD
+
+        # 說話者名稱框（左上角）
+        if speaker:
+            spk_surf = fb_lg.render(speaker, True, PANEL)
+            spk_w    = spk_surf.get_width() + 20
+            spk_h    = fb_lg.get_height() + 6
+            spk_rect = pygame.Rect(content_rect.x + PAD,
+                                   content_rect.y + 6, spk_w, spk_h)
+            pygame.draw.rect(surf, BTN_N, spk_rect, border_radius=6)
+            pygame.draw.rect(surf, CYAN,  spk_rect, 1, border_radius=6)
+            surf.blit(spk_surf, (spk_rect.x + 10,
+                                 spk_rect.y + (spk_h - spk_surf.get_height()) // 2))
+            text_top = spk_rect.bottom + 8
+
+        # 劇情文字（自動換行）
+        wrapped = _wrap(text, fm, content_rect.width - PAD * 2)
+        for ln in wrapped:
+            surf.blit(fm.render(ln, True, WHITE),
+                      (content_rect.x + PAD, text_top))
+            text_top += fm.get_height() + 4
+
+        # ▼ 點擊繼續（右下角，0.5 Hz 閃爍）
+        if (pygame.time.get_ticks() // 500) % 2 == 0:
+            arr = fs.render("▼ 點擊繼續", True, BTN_N)
+            surf.blit(arr, (content_rect.right - arr.get_width() - PAD,
+                            content_rect.bottom - arr.get_height() - 6))
+
     else:
         # ── 敘述模式（mode == None）：顯示最新 log ────────────
         _draw_panel_log(surf, fs, log, content_rect, lines=6)
@@ -3274,13 +4009,16 @@ def _draw_panel_log(surf, fs, log, rect, lines=5):
 
 # ── 側邊資訊面板常數 ──────────────────────────────────────────
 _SIDE_PANEL_W = 148   # 左右面板各佔 148px
-_SUBJ_DISPLAY = [     # (顯示短名, subject_exp 鍵值)
-    ("商管程", "商管程式設計"),
-    ("統計", "統計學"),
-    ("經濟", "經濟學"),
-    ("管理", "管理學"),
-    ("會計", "會計學"),
-]
+_SUBJ_SHORT_NAMES = {   # subject_exp 鍵值 → 面板顯示短名（最多 3 字）
+    "商管程式設計": "商管程",
+    "統計學":       "統計學",
+    "經濟學":       "經濟學",
+    "管理學":       "管理學",
+    "會計學":       "會計學",
+    "普通心理學":   "心理學",
+    "總經原":       "總經原",
+    "普通化學丙":   "普化丙",
+}
 _GRADE_ROWS = [       # (顯示名, grades 鍵值, 佔比)
     ("參與度", "參與度", "10%"),
     ("作  業", "作業",   "20%"),
@@ -3313,11 +4051,11 @@ def _side_panel_bg(surf: pygame.Surface, x: int, y: int, w: int, h: int) -> None
 
 
 def _draw_exp_panel(surf: pygame.Surface, fm, fmic, player) -> None:
-    """左側：各科課業熟練度面板（進度條 + 等級）。"""
+    """左側：各科課業熟練度面板（動態，含加簽科目）。"""
     if player is None:
         return
-    fb    = _font_bold[0]    or fmic  # 粗體 size-17（等級徽章）
-    fb_lg = _font_bold_lg[0] or fm   # 粗體 size-22（標題 / 科目名）
+    fb    = _font_bold[0]    or fmic   # size-17 bold（科目名 / 徽章）
+    fb_lg = _font_bold_lg[0] or fm    # size-22 bold（標題）
     PW  = _SIDE_PANEL_W
     PAD = 9
     sx, sy = 8, STATUS_H + 8
@@ -3332,14 +4070,17 @@ def _draw_exp_panel(surf: pygame.Surface, fm, fmic, player) -> None:
     pygame.draw.line(surf, (205, 188, 168),
                      (sx + PAD, div_y), (sx + PW - PAD, div_y))
 
-    # 每科行高（平分剩餘高度）
+    # 動態科目列表（排除輔助鍵 "綜合"）
+    subjects = [(k, v) for k, v in player.subject_exp.items() if k != "綜合"]
+    n     = max(len(subjects), 1)
     content_h = sy + sh - 6 - (div_y + 8)
-    row_h     = content_h // len(_SUBJ_DISPLAY)
-    bar_w     = PW - PAD * 2
-    row_y     = div_y + 8
+    row_h = content_h // n
+    bar_h = max(8, min(13, row_h - fb.get_height() - 5))
+    bar_w = PW - PAD * 2
+    row_y = div_y + 8
 
-    for short, full in _SUBJ_DISPLAY:
-        exp = player.subject_exp.get(full, 0)
+    for full, exp in subjects:
+        short = _SUBJ_SHORT_NAMES.get(full, full[:3])
         # 計算等級
         lvl = 0
         for i, thr in enumerate(_EXP_LVL_THR):
@@ -3348,26 +4089,24 @@ def _draw_exp_panel(surf: pygame.Surface, fm, fmic, player) -> None:
         col      = _EXP_LVL_COLORS[lvl]
         lvl_name = _EXP_LVL_NAMES[lvl]
 
-        # 科目短名（左）+ 等級名（右）
-        lbl  = fb_lg.render(short, True, WHITE)      # 粗體科目名
-        badge = fb.render(lvl_name, True, col)       # 粗體等級徽章
+        # 科目短名（左）+ 等級徽章（右）
+        lbl   = fb.render(short, True, WHITE)
+        badge = fmic.render(lvl_name, True, col)
         surf.blit(lbl,   (sx + PAD, row_y))
         surf.blit(badge, (sx + PW - PAD - badge.get_width(),
-                          row_y + (fb_lg.get_height() - badge.get_height()) // 2))
+                          row_y + (fb.get_height() - badge.get_height()) // 2))
 
-        # 進度條底色（改為淺灰）
-        bar_h = 18                                              # 加粗
-        by = row_y + fb_lg.get_height() + 3
+        # 進度條
+        by = row_y + fb.get_height() + 2
         pygame.draw.rect(surf, (215, 204, 192),
                          pygame.Rect(sx + PAD, by, bar_w, bar_h), border_radius=4)
-        # 進度條填色
         fw = int(bar_w * exp / 100)
         if fw > 0:
             pygame.draw.rect(surf, col,
                              pygame.Rect(sx + PAD, by, fw, bar_h), border_radius=4)
 
         # exp 數字（置中於條內）
-        val_lbl = fmic.render(f"{exp} / 100", True, PANEL)
+        val_lbl = fmic.render(f"{exp}/100", True, PANEL)
         surf.blit(val_lbl, (sx + PAD + (bar_w - val_lbl.get_width()) // 2,
                             by + (bar_h - val_lbl.get_height()) // 2))
 
@@ -4108,8 +4847,13 @@ def run_ui():
                 _yn_show_ctx[0] = cmd[4] if len(cmd) > 4 else True
                 _mode[0] = "yn"
             elif tag == "event_ok":
-                _event_ok_text[0] = cmd[1]
-                _mode[0] = "event_ok"
+                _event_ok_text[0]         = cmd[1]
+                _event_ok_border_color[0] = None
+                _mode[0]                  = "event_ok"
+            elif tag == "event_ok_col":
+                _event_ok_text[0]         = cmd[1]
+                _event_ok_border_color[0] = cmd[2]
+                _mode[0]                  = "event_ok"
             elif tag == "text":
                 _prompt[0] = cmd[1]
                 _tvalue[0] = cmd[2] if len(cmd) > 2 else ""
@@ -4162,9 +4906,35 @@ def run_ui():
                 _cc_stat_total[0]    = cmd[1]
                 _cc_stat_base[0]     = cmd[2] if len(cmd) > 2 else cmd[1]
                 _cc_stat_talent[0]   = cmd[3] if len(cmd) > 3 else {}
+                _cc_stat_de_level[0] = cmd[4] if len(cmd) > 4 else {}
                 _cc_stat_vals[:]     = [10, 10, 10]
                 _cc_stat_raw[:]      = ["10", "10", "10"]
                 _cc_active_stat[0]   = None
+            elif tag == "cc_extra":
+                _cc_extra_data[:]  = cmd[1]
+                _cc_extra_intel[0] = cmd[2]
+                _cc_extra_sel.clear()
+                _cc_extra_warn[0]  = 0
+                _cc_mode[0]        = "extra"
+            elif tag == "cc_slot":
+                results = cmd[1]
+                _slot_results[:] = results
+                _slot_phase[:]   = ["idle", "idle", "idle"]
+                _slot_stop_t[:]  = [0, 0, 0]
+                _slot_start_t[:] = [0, 0, 0]
+                _cc_confetti.clear()
+                _cc_shake_end[0] = 0
+                _cc_mode[0]      = "slot"
+                # 第一槽立刻開始旋轉
+                _slot_phase[0]    = "spinning"
+                _slot_start_t[0]  = pygame.time.get_ticks()
+            elif tag == "cc_summary":
+                _cc_summary_data[0] = cmd[1]
+                _cc_mode[0]         = "summary"
+            elif tag == "cc_de_level":
+                _cc_mode[0] = "de_level"
+                _cc_data[0] = cmd[1]   # levels list
+                _cc_sel.clear()
             elif tag == "cc_talent":
                 _cc_mode[0] = "talent"
                 _cc_data[0] = cmd[1]   # candidates list
@@ -4191,6 +4961,11 @@ def run_ui():
             elif tag == "grade_report":
                 _modal[0]      = "grade_report"
                 _modal_data[0] = cmd[1]   # items list
+            elif tag == "story":
+                _story_lines.clear()
+                _story_lines.extend(cmd[1])
+                _story_index[0] = 0
+                _mode[0] = "story"
 
         # ── 繪製（依畫面階段切換內容）────────────────────────
         # 全螢幕 fallback（無 SCALED）時 Surface 可能大於 WIN_W×WIN_H；
@@ -4206,6 +4981,7 @@ def run_ui():
         end_btn        = None
         end_week_btn   = None
         shop_btn_rect  = None
+        info_btn_rect  = None
         shop_buy_rects = []
         shop_exit_btn  = None
 
@@ -4268,10 +5044,27 @@ def run_ui():
                     screen, fm, fs,
                     _cc_stat_total[0], _cc_stat_base[0], _cc_stat_talent[0],
                     _cc_stat_vals, _cc_stat_raw,
-                    _cc_active_stat[0], mpos)
+                    _cc_active_stat[0], mpos, _cc_stat_de_level[0])
                 _cc_btn_cache["stats_minus"] = mr
                 _cc_btn_cache["stats_plus"]  = pr
                 _cc_btn_cache["stats_ok"]    = ok
+            elif cm == "extra":
+                crects, ok = _draw_cc_extra_events(screen, fm, fs, mpos)
+                _cc_btn_cache["extra_cards"] = crects
+                _cc_btn_cache["extra_ok"]    = ok
+            elif cm == "slot":
+                ok = _draw_cc_slot_machine(screen, fm, fs, mpos)
+                _cc_btn_cache["slot_ok"] = ok
+            elif cm == "summary":
+                s_r, r_r = _draw_cc_summary(screen, fm, fs, mpos, game_mode=False)
+                _cc_btn_cache["summary_start"]   = s_r
+                _cc_btn_cache["summary_restart"] = r_r
+            elif cm == "de_level":
+                drects, ok = _draw_cc_de_level(
+                    screen, fm, fs,
+                    _cc_data[0] or [], _cc_sel[0] if _cc_sel else None, mpos)
+                _cc_btn_cache["de_level_cards"] = drects
+                _cc_btn_cache["de_level_ok"]    = ok
             elif cm == "talent":
                 trects, ok = _draw_cc_talent(
                     screen, fm, fs,
@@ -4285,8 +5078,8 @@ def run_ui():
             _draw_game_bg(screen)
             # ── 動態天氣特效（背景圖與 UI 之間）────────────────────
             _draw_weather(screen, pygame.time.get_ticks())
-            # 狀態欄（新版，含頭像 + 道具店按鈕，回傳 shop_btn_rect）
-            shop_btn_rect = _draw_status_v2(screen, fm, fs, _player[0], sr, mpos)
+            # 狀態欄（新版，含頭像 + 道具店 + 資訊一覽按鈕）
+            shop_btn_rect, info_btn_rect = _draw_status_v2(screen, fm, fs, _player[0], sr, mpos)
             # 人物立繪區
             _draw_character_art(screen, cr)
             # 左側熟練度面板 / 右側成績記錄面板
@@ -4331,6 +5124,11 @@ def run_ui():
                 _subj_popup_rects.clear()
                 _subj_popup_rects.extend(
                     _draw_subj_popup(screen, fm, fs, mpos))
+
+        # ── 玩家資訊一覽 modal（遊戲中查閱，浮在所有畫面之上）─────
+        if _phase[0] == "game" and _info_modal_active[0]:
+            _close_r, _ = _draw_cc_summary(screen, fm, fs, mpos, game_mode=True)
+            _info_modal_close[0] = _close_r
 
         # ── Modal 疊加（課表 / 成績公告，浮在所有畫面之上）────────
         _modal_ok_btn = None
@@ -4416,6 +5214,38 @@ def run_ui():
                         _modal_event.set()
                     continue   # modal 開著時不處理底層按鈕
 
+                # ── 遊戲中資訊一覽 modal 攔截 ────────────────────
+                if _phase[0] == "game" and _info_modal_active[0]:
+                    close_r = _info_modal_close[0]
+                    if close_r and close_r.collidepoint(ev.pos):
+                        _play_sfx("back")
+                        _info_modal_active[0] = False
+                    continue   # modal 開著時攔截所有點擊
+
+                # ── 遊戲中「資訊一覽」按鈕開啟 modal ────────────
+                if _phase[0] == "game" and info_btn_rect is not None \
+                        and info_btn_rect.collidepoint(ev.pos):
+                    _play_sfx("ui_click")
+                    player = _player[0]
+                    if player is not None:
+                        from character import EXTRA_EVENTS as _EXTRA_EVTS
+                        _cc_summary_data[0] = {
+                            "name":            player.name,
+                            "department":      player.department,
+                            "de_level":        player.de_level,
+                            "stamina":         player.stamina_max,
+                            "intel":           player.intel,
+                            "luck":            player.luck,
+                            "money":           player.money,
+                            "combined_talent": player.talent,
+                            "slot_results":    getattr(player, "slot_results", []),
+                            "drawbacks":       player.drawbacks,
+                            "extra_ev_ids":    player.extra_events,
+                            "extra_ev_data":   list(_EXTRA_EVTS),
+                        }
+                        _info_modal_active[0] = True
+                    continue
+
                 if _phase[0] == "start":
                     if start_btn and start_btn.collidepoint(ev.pos):
                         _play_sfx("start_click")
@@ -4464,6 +5294,15 @@ def run_ui():
                 else:
                     # ── 遊戲中 ────────────────────────────────
 
+                    # 劇情對話框：任意點擊推進（優先級次於突發事件彈窗）
+                    if _mode[0] == "story":
+                        _play_sfx("ui_click")
+                        _story_index[0] += 1
+                        if _story_index[0] >= len(_story_lines):
+                            _mode[0] = None
+                            _reply_event.set()
+                        continue
+
                     # 突發事件彈窗優先攔截（最高優先）
                     if _mode[0] == "event_ok":
                         for (br, _) in _event_ok_popup_rects:
@@ -4473,6 +5312,7 @@ def run_ui():
                                 _reply_val[0] = True
                                 _mode[0] = None
                                 _event_ok_popup_rects.clear()
+                                _event_ok_border_color[0] = None
                                 _reply_event.set()
                                 break
                         continue   # 彈窗開啟時阻擋所有點擊
