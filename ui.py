@@ -563,6 +563,14 @@ def run_ui():
         _in_ov.fill((255, 238, 212, 215))
         _grads["input"] = _in_ov
 
+    # ── 全螢幕黑邊背景圖（原始尺寸，進入全螢幕時再縮放至螢幕大小）──
+    _outside_bg_raw = None
+    try:
+        _outside_bg_raw = pygame.image.load(
+            os.path.join(_bg_dir, "outside_background.webp")).convert()
+    except Exception:
+        pass
+
     # ── BGM 初始化（設定資料夾，播放標題音樂）──────────────────
     _bgm_dir[0] = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                "asset", "audio", "bgm")
@@ -585,9 +593,18 @@ def run_ui():
     # 全螢幕切換按鈕固定 Rect（右下角，各畫面常駐）
     fs_btn = pygame.Rect(WIN_W - 46, WIN_H - 46, 40, 40)
 
+    # ── 全螢幕支援：真實 Surface、偏移量、縮放背景 ──────────────
+    real_screen  = screen   # 指向實際 display surface
+    fs_bg_scaled = None     # 縮放後的全螢幕黑邊背景（進入全螢幕時產生）
+    _fs_off = [0, 0]        # [off_x, off_y]：遊戲畫布在螢幕上的偏移
+
+    def _tpos(pos):
+        """將原生螢幕座標轉換為遊戲畫布座標（全螢幕有偏移時使用）。"""
+        return (pos[0] - _fs_off[0], pos[1] - _fs_off[1])
+
     running = True
     while running:
-        mpos = pygame.mouse.get_pos()
+        mpos = _tpos(pygame.mouse.get_pos())
         # 道具店按鈕是否可點擊：只有在行動選單中且選項包含道具店時才亮起
         shop_active = (_mode[0] == "choices" and "🏪 前往道具店" in _choices)
 
@@ -777,13 +794,10 @@ def run_ui():
                 _mode[0] = "exam_ready"
 
         # ── 繪製（依畫面階段切換內容）────────────────────────
-        # 全螢幕 fallback（無 SCALED）時 Surface 可能大於 WIN_W×WIN_H；
-        # 先把遊戲邊界外的區域填黑，防止上幀殘留像素堆疊成視覺垃圾。
-        _sw, _sh = screen.get_size()
-        if _sw > WIN_W:
-            screen.fill((0, 0, 0), pygame.Rect(WIN_W, 0, _sw - WIN_W, _sh))
-        if _sh > WIN_H:
-            screen.fill((0, 0, 0), pygame.Rect(0, WIN_H, _sw, _sh - WIN_H))
+        # 全螢幕：先把黑邊區域鋪上背景圖（screen 是 real_screen 的子 Surface，
+        # 遊戲內容隨後會正確疊在中央遊戲區域上）。
+        if _is_fullscreen[0] and fs_bg_scaled is not None:
+            real_screen.blit(fs_bg_scaled, (0, 0))
 
         btn_rects      = []
         start_btn      = None
@@ -1036,13 +1050,6 @@ def run_ui():
             screen.fill((0, 0, 0))
             screen.blit(_shk_copy, (_sdx, _sdy))
 
-        # ── 全螢幕 fallback：遊戲邊界外再補黑（覆蓋任何滑出畫外的面板）──
-        _sw2, _sh2 = screen.get_size()
-        if _sw2 > WIN_W:
-            screen.fill((0, 0, 0), pygame.Rect(WIN_W, 0, _sw2 - WIN_W, _sh2))
-        if _sh2 > WIN_H:
-            screen.fill((0, 0, 0), pygame.Rect(0, WIN_H, _sw2, _sh2 - WIN_H))
-
         pygame.display.flip()
 
         # ── pygame 事件 ───────────────────────────────────────
@@ -1052,25 +1059,37 @@ def run_ui():
 
             elif ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1:
                 # 點擊波紋特效（任何畫面均觸發，無條件生成）
-                _click_spawn(ev.pos[0], ev.pos[1], pygame.time.get_ticks())
+                _click_spawn(_tpos(ev.pos)[0], _tpos(ev.pos)[1], pygame.time.get_ticks())
 
                 # 全螢幕切換按鈕（最高優先，任何畫面均有效）
-                if fs_btn.collidepoint(ev.pos):
+                if fs_btn.collidepoint(_tpos(ev.pos)):
                     if _is_fullscreen[0]:
+                        # ── 退出全螢幕 ──────────────────────────────
                         screen = pygame.display.set_mode((WIN_W, WIN_H))
+                        real_screen  = screen
+                        fs_bg_scaled = None
+                        _fs_off[0] = _fs_off[1] = 0
                         _is_fullscreen[0] = False
                     else:
-                        try:
-                            _fs_flags = pygame.FULLSCREEN | getattr(pygame, "SCALED", 0)
-                            screen = pygame.display.set_mode((WIN_W, WIN_H), _fs_flags)
-                        except Exception:
-                            screen = pygame.display.set_mode((WIN_W, WIN_H), pygame.FULLSCREEN)
+                        # ── 進入全螢幕（原生解析度 + 子 Surface）──
+                        real_screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
+                        _rw, _rh = real_screen.get_size()
+                        _gx = max(0, (_rw - WIN_W) // 2)
+                        _gy = max(0, (_rh - WIN_H) // 2)
+                        _fs_off[0], _fs_off[1] = _gx, _gy
+                        screen = real_screen.subsurface(
+                            pygame.Rect(_gx, _gy, WIN_W, WIN_H))
+                        if _outside_bg_raw is not None:
+                            fs_bg_scaled = pygame.transform.scale(
+                                _outside_bg_raw, (_rw, _rh))
+                        else:
+                            fs_bg_scaled = None
                         _is_fullscreen[0] = True
                     continue
 
                 # ── Modal 優先攔截（課表 / 成績公告）────────────
                 if _modal[0] is not None:
-                    if _modal_ok_btn and _modal_ok_btn.collidepoint(ev.pos):
+                    if _modal_ok_btn and _modal_ok_btn.collidepoint(_tpos(ev.pos)):
                         _modal[0]      = None
                         _modal_data[0] = None
                         _modal_event.set()
@@ -1079,14 +1098,14 @@ def run_ui():
                 # ── 遊戲中資訊一覽 modal 攔截 ────────────────────
                 if _phase[0] == "game" and _info_modal_active[0]:
                     close_r = _info_modal_close[0]
-                    if close_r and close_r.collidepoint(ev.pos):
+                    if close_r and close_r.collidepoint(_tpos(ev.pos)):
                         _play_sfx("back")
                         _info_modal_active[0] = False
                     continue   # modal 開著時攔截所有點擊
 
                 # ── 遊戲中「資訊一覽」按鈕開啟 modal ────────────
                 if _phase[0] == "game" and info_btn_rect is not None \
-                        and info_btn_rect.collidepoint(ev.pos):
+                        and info_btn_rect.collidepoint(_tpos(ev.pos)):
                     _play_sfx("ui_click")
                     player = _player[0]
                     if player is not None:
@@ -1109,14 +1128,14 @@ def run_ui():
                     continue
 
                 if _phase[0] == "start":
-                    if start_btn and start_btn.collidepoint(ev.pos):
+                    if start_btn and start_btn.collidepoint(_tpos(ev.pos)):
                         _play_sfx("start_click")
                         _click_reg[(start_btn.centerx, start_btn.centery)] = pygame.time.get_ticks()
                         _phase[0] = "game"
                         _start_event.set()
                 elif _phase[0] == "shop":
                     # 離開按鈕：僅在靜止狀態（非動畫中）才響應
-                    if (shop_exit_btn and shop_exit_btn.collidepoint(ev.pos)
+                    if (shop_exit_btn and shop_exit_btn.collidepoint(_tpos(ev.pos))
                             and _shop_slide_dir[0] == "none"):
                         _play_sfx("back")
                         _click_reg[(shop_exit_btn.centerx, shop_exit_btn.centery)] = pygame.time.get_ticks()
@@ -1126,7 +1145,7 @@ def run_ui():
                     else:
                         # 購買按鈕
                         for (br, idx) in shop_buy_rects:
-                            if br.collidepoint(ev.pos):
+                            if br.collidepoint(_tpos(ev.pos)):
                                 _play_sfx("ui_click")
                                 _click_reg[(br.centerx, br.centery)] = pygame.time.get_ticks()
                                 _apply_shop_purchase(idx)
@@ -1136,18 +1155,18 @@ def run_ui():
                     if _cc_mode[0] == "stats":
                         _is_stat_btn = False
                         for _sr in (_cc_btn_cache.get("stats_minus") or []):
-                            if _sr.collidepoint(ev.pos):
+                            if _sr.collidepoint(_tpos(ev.pos)):
                                 _is_stat_btn = True; break
                         if not _is_stat_btn:
                             for _sr in (_cc_btn_cache.get("stats_plus") or []):
-                                if _sr.collidepoint(ev.pos):
+                                if _sr.collidepoint(_tpos(ev.pos)):
                                     _is_stat_btn = True; break
                         _play_sfx("ui_click" if _is_stat_btn else "cc_click")
                     else:
                         _play_sfx("cc_click")
-                    _handle_cc_action(ev.pos)
+                    _handle_cc_action(_tpos(ev.pos))
                 elif _phase[0] == "end":
-                    if end_btn and end_btn.collidepoint(ev.pos):
+                    if end_btn and end_btn.collidepoint(_tpos(ev.pos)):
                         _play_sfx("ui_click")
                         _click_reg[(end_btn.centerx, end_btn.centery)] = pygame.time.get_ticks()
                         _phase[0] = "start"
@@ -1171,7 +1190,7 @@ def run_ui():
                     # 突發事件彈窗優先攔截（最高優先）
                     if _mode[0] == "event_ok":
                         for (br, _) in _event_ok_popup_rects:
-                            if br.collidepoint(ev.pos):
+                            if br.collidepoint(_tpos(ev.pos)):
                                 _play_sfx("ui_click")
                                 _click_reg[(br.centerx, br.centery)] = pygame.time.get_ticks()
                                 _reply_val[0] = True
@@ -1190,7 +1209,7 @@ def run_ui():
                     )
                     if _cp_now:
                         for (br, val) in _choice_popup_rects:
-                            if br.collidepoint(ev.pos):
+                            if br.collidepoint(_tpos(ev.pos)):
                                 _click_reg[(br.centerx, br.centery)] = pygame.time.get_ticks()
                                 if _mode[0] == "choices":
                                     _play_sfx("ui_click")
@@ -1209,7 +1228,7 @@ def run_ui():
                     # 翹課選課 popup 優先攔截所有點擊
                     if _skip_popup_active[0]:
                         for (br, val) in _skip_popup_rects:
-                            if br.collidepoint(ev.pos):
+                            if br.collidepoint(_tpos(ev.pos)):
                                 _play_sfx("ui_click" if val is not None else "back")
                                 _click_reg[(br.centerx, br.centery)] = pygame.time.get_ticks()
                                 _skip_popup_result[0] = val
@@ -1222,7 +1241,7 @@ def run_ui():
                     # 科目選擇 popup 優先攔截所有點擊
                     if _subj_popup_active[0]:
                         for (br, val) in _subj_popup_rects:
-                            if br.collidepoint(ev.pos):
+                            if br.collidepoint(_tpos(ev.pos)):
                                 _play_sfx("ui_click")
                                 _click_reg[(br.centerx, br.centery)] = pygame.time.get_ticks()
                                 _reply_val[0] = val
@@ -1236,7 +1255,7 @@ def run_ui():
                     # 停修選課 popup 優先攔截所有點擊
                     if _withdrawal_popup_active[0]:
                         for (br, val) in _withdrawal_popup_rects:
-                            if br.collidepoint(ev.pos):
+                            if br.collidepoint(_tpos(ev.pos)):
                                 _play_sfx("ui_click")
                                 _click_reg[(br.centerx, br.centery)] = pygame.time.get_ticks()
                                 _reply_val[0] = val
@@ -1250,7 +1269,7 @@ def run_ui():
                     # 狀態欄道具店按鈕（僅在行動選單時有效）
                     if (shop_active
                             and shop_btn_rect is not None
-                            and shop_btn_rect.collidepoint(ev.pos)):
+                            and shop_btn_rect.collidepoint(_tpos(ev.pos))):
                         _play_sfx("ui_click")
                         _click_reg[(shop_btn_rect.centerx, shop_btn_rect.centery)] = pygame.time.get_ticks()
                         shop_idx = next(
@@ -1266,7 +1285,7 @@ def run_ui():
                     # 結束本週按鈕（回傳 0）
                     if (_mode[0] == "choices"
                             and end_week_btn is not None
-                            and end_week_btn.collidepoint(ev.pos)):
+                            and end_week_btn.collidepoint(_tpos(ev.pos))):
                         _play_sfx("back")
                         _click_reg[(end_week_btn.centerx, end_week_btn.centery)] = pygame.time.get_ticks()
                         _reply_val[0] = 0
@@ -1278,7 +1297,7 @@ def run_ui():
 
                     # 行動按鈕 / yn / text 確認
                     for (br, val) in btn_rects:
-                        if br.collidepoint(ev.pos):
+                        if br.collidepoint(_tpos(ev.pos)):
                             _click_reg[(br.centerx, br.centery)] = pygame.time.get_ticks()
                             if _mode[0] == "text" and val == "__ok__":
                                 _play_sfx("ui_click")
@@ -1338,6 +1357,9 @@ def run_ui():
                 # ESC：全螢幕模式下退出全螢幕
                 if ev.key == pygame.K_ESCAPE and _is_fullscreen[0]:
                     screen = pygame.display.set_mode((WIN_W, WIN_H))
+                    real_screen  = screen
+                    fs_bg_scaled = None
+                    _fs_off[0] = _fs_off[1] = 0
                     _is_fullscreen[0] = False
                 elif _phase[0] == "char_create":
                     if _cc_mode[0] == "name":
