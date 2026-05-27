@@ -1,0 +1,32 @@
+
+[ split ]  splitting ui.py ...
+
+  [OK]  ui_const.py                 11 KB  (68 defs)
+  [OK]  ui_state.py                 13 KB  (129 defs)
+  [OK]  ui_draw_base.py             21 KB  (31 defs)
+  [OK]  ui_draw_fx.py               34 KB  (22 defs)
+  [OK]  ui_draw_hud.py              28 KB  (12 defs)
+  [OK]  ui_draw_cc.py               48 KB  (16 defs)
+  [OK]  ui_draw_pop.py              39 KB  (9 defs)
+  [OK]  ui_draw_ap.py               40 KB  (9 defs)
+  [OK]  ui_new.py                   62 KB  (45 defs)
+
+-- next steps ------------------------------------------------------------
+  1. syntax check:
+       python -m py_compile ui_const.py
+       python -m py_compile ui_state.py
+       python -m py_compile ui_draw_base.py
+       python -m py_compile ui_draw_fx.py
+       python -m py_compile ui_draw_hud.py
+       python -m py_compile ui_draw_cc.py
+       python -m py_compile ui_draw_pop.py
+       python -m py_compile ui_draw_ap.py
+       python -m py_compile ui_new.py
+
+  2. rename main module (Windows):
+       rename ui_new.py ui.py
+
+  3. turn_engine.py: no import changes needed
+     (ui_new.py re-exports everything via from ... import *)
+
+[ done ]
