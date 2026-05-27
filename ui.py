@@ -2750,57 +2750,73 @@ def _draw_cc_stats(surf, fm, fs, total, base, talent, vals, raw, active, mpos, d
 
     labels      = ["體力", "智力", "運氣"]
     talent_keys = ["stamina", "intel", "luck"]
-    cx          = WIN_W // 2
     minus_rects = []
     plus_rects  = []
 
+    # ── 水平置中：計算整排（標籤＋[-]＋輸入框＋[+]）的起始 x ──
+    GAP_LC   = 16   # 標籤右緣 → [-] 左緣
+    GAP_BX   = 10   # [-] 右緣 → 輸入框左緣
+    GAP_XP   = 12   # 輸入框右緣 → [+] 左緣
+    GAP_PA   = 12   # [+] 右緣 → 加成標注左緣
+    label_w  = max(fb_lg.size(l)[0] for l in labels)
+    group_w  = label_w + GAP_LC + btn_sz + GAP_BX + box_w + GAP_XP + btn_sz
+    row_left = (WIN_W - group_w) // 2
+    minus_x  = row_left + label_w + GAP_LC
+    input_x  = minus_x + btn_sz + GAP_BX
+    plus_x   = input_x + box_w + GAP_XP
+    ann_x    = plus_x  + btn_sz + GAP_PA
+
     # 更新輸入框 Rect 快取（與事件處理對齊）
-    _cc_btn_cache["stats_boxes"] = [pygame.Rect(cx - 82, ry, box_w, box_h) for ry in row_y]
+    _cc_btn_cache["stats_boxes"] = [pygame.Rect(input_x, ry, box_w, box_h) for ry in row_y]
 
     for i, (label, ry) in enumerate(zip(labels, row_y)):
-        # label
-        lt = fb_lg.render(label, True, WHITE)
-        surf.blit(lt, (cx - 230, ry + (box_h - lt.get_height()) // 2))
+        # 標籤（右對齊至 [-] 左緣，讓三行整齊）
+        lt   = fb_lg.render(label, True, WHITE)
+        lt_x = row_left + label_w - lt.get_width()
+        surf.blit(lt, (lt_x, ry + (box_h - lt.get_height()) // 2))
         # [-]
-        mr    = pygame.Rect(cx - 130, ry, btn_sz, btn_sz)
+        mr    = pygame.Rect(minus_x, ry, btn_sz, btn_sz)
         hover = mr.collidepoint(mpos)
         mr_dr = _premium_btn(surf, mr, BTN_N, hover, radius=10)
         mt    = fb_lg.render("－", True, WHITE)
         surf.blit(mt, (mr_dr.x + (mr_dr.width  - mt.get_width())  // 2,
                        mr_dr.y + (mr_dr.height - mt.get_height()) // 2))
         minus_rects.append(mr)
-        # input box（帶焦點高光陰影）
+        # 輸入框（帶焦點高光陰影）
         bdr_col = YELLOW if active == i else CYAN
-        ir      = pygame.Rect(cx - 82, ry, box_w, box_h)
+        ir      = pygame.Rect(input_x, ry, box_w, box_h)
         if active == i:
             _soft_shadow(surf, ir, radius=10, alpha=35, offset=(1, 2), spread=3)
         pygame.draw.rect(surf, MILK, ir, border_radius=10)
         pygame.draw.rect(surf, bdr_col, ir, 2, border_radius=10)
         display = raw[i] if active == i else str(vals[i])
         vt = fm.render(display, True, BLACK)
-        surf.blit(vt, (ir.x + (box_w - vt.get_width()) // 2, ir.y + (box_h - vt.get_height()) // 2))
+        surf.blit(vt, (ir.x + (box_w - vt.get_width()) // 2,
+                       ir.y + (box_h - vt.get_height()) // 2))
         # [+]
-        pr    = pygame.Rect(cx + 20, ry, btn_sz, btn_sz)
+        pr    = pygame.Rect(plus_x, ry, btn_sz, btn_sz)
         hover = pr.collidepoint(mpos)
         pr_dr = _premium_btn(surf, pr, BTN_N, hover, radius=10)
         pt    = fb_lg.render("＋", True, WHITE)
         surf.blit(pt, (pr_dr.x + (pr_dr.width  - pt.get_width())  // 2,
                        pr_dr.y + (pr_dr.height - pt.get_height()) // 2))
         plus_rects.append(pr)
-        # 天賦 + 年級加成標注
-        t_bonus  = (talent   or {}).get(talent_keys[i], 0)
-        dl_bonus = (de_level or {}).get(talent_keys[i], 0)
+        # 加成標注：（+N）與按鈕等高（btn_sz），綠色
+        t_bonus     = (talent   or {}).get(talent_keys[i], 0)
+        dl_bonus    = (de_level or {}).get(talent_keys[i], 0)
         total_bonus = t_bonus + dl_bonus
         if total_bonus:
-            parts = []
-            if t_bonus:  parts.append(f"+{t_bonus} 天賦")
-            if dl_bonus: parts.append(f"+{dl_bonus} 年級")
-            final_val = vals[i] + total_bonus
-            ann_txt   = "  ".join(parts) + f"  →  最終 {final_val}"
-            ann_s     = fs.render(ann_txt, True, YELLOW)
-            ann_x     = pr.right + 14
-            ann_y     = ry + (box_h - ann_s.get_height()) // 2
-            surf.blit(ann_s, (ann_x, ann_y))
+            sign    = "+" if total_bonus > 0 else ""
+            ann_txt = f"（{sign}{total_bonus}）"
+            ann_col = GREEN if total_bonus > 0 else (200, 80, 80)
+            ann_raw = fm.render(ann_txt, True, ann_col)
+            # 等比縮放至 btn_sz 高度，使字體高度與增減按鈕一致
+            if ann_raw.get_height() > 0:
+                scale_w = max(1, int(ann_raw.get_width() * btn_sz / ann_raw.get_height()))
+                ann_s   = pygame.transform.smoothscale(ann_raw, (scale_w, btn_sz))
+            else:
+                ann_s = ann_raw
+            surf.blit(ann_s, (ann_x, ry))
 
     # 可用時間加成提示（天賦 + 年級合計）
     bt_talent = (talent   or {}).get("base_time", 0)
