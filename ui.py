@@ -2828,11 +2828,11 @@ def _draw_cc_stats(surf, fm, fs, total, base, talent, vals, raw, active, mpos, d
     bt_lt = fb_lg.render("可用時間", True, WHITE)
     surf.blit(bt_lt, (row_left + label_w - bt_lt.get_width(),
                       bt_y + (box_h - bt_lt.get_height()) // 2))
-    # 數值「10」（從 minus_x 起，與能力值輸入區同水平）
+    # 數值「10」：水平置中於輸入框欄（對齊上方三列的數字）
     bt_num = fb_lg.render("10", True, WHITE)
-    surf.blit(bt_num, (minus_x,
+    surf.blit(bt_num, (input_x + (box_w - bt_num.get_width()) // 2,
                        bt_y + (box_h - bt_num.get_height()) // 2))
-    # 加成括弧（+N），綠色，縮放至與增減按鈕等高（btn_sz）
+    # 加成括弧（+N）：從 ann_x 起，對齊上方加成標注欄
     if bt_total:
         sign   = "+" if bt_total > 0 else ""
         bt_ann = f"（{sign}{bt_total}）"
@@ -2843,7 +2843,7 @@ def _draw_cc_stats(surf, fm, fs, total, base, talent, vals, raw, active, mpos, d
             bt_s = pygame.transform.smoothscale(bt_raw, (bt_w, btn_sz))
         else:
             bt_s = bt_raw
-        surf.blit(bt_s, (minus_x + bt_num.get_width() + 4, bt_y))
+        surf.blit(bt_s, (ann_x, bt_y))
 
     # 確認
     ok          = pygame.Rect((WIN_W - 160) // 2, ok_y, 160, btn_h)
