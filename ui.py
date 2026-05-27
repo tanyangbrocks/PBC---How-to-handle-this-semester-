@@ -227,6 +227,24 @@ _shop_msg        = [""]   # 購買結果訊息
 _shop_msg_time   = [0]    # 訊息顯示的時間戳（ms）
 _shop_exit_event = threading.Event()
 
+# ── 道具店小圖示 ──────────────────────────────────────────────
+_SHOP_ICON_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               "asset", "picture", "small_object")
+_SHOP_ITEM_ICON_MAP: dict = {
+    "coffee":               "i_coffee",
+    "snack":                "i_cake",
+    "energy_drink_monster": "i_mdrink",
+    "energy_drink_bplus":   "i_bdrink",
+    "textbook_ref":         "i_note",
+    "memory_toast":         "i_toast",
+    "game_console":         "i_game",
+    "idol_photo":           "i_photo",
+    "exam_pencil":          "i_pencil",
+    "temple_amulet":        "i_peace",
+    "lucky_omamori":        "i_yuso",
+}
+_shop_icon_cache: dict = {}   # (item_id, diameter) → SRCALPHA Surface（圓形裁切）
+
 # ── 科目選擇彈出視窗狀態 ─────────────────────────────────────────
 _subj_popup_active = [False]
 _subj_popup_title:  list = [""]
@@ -4965,6 +4983,36 @@ def _item_icon_color(item: dict) -> tuple:
     return BTN_N
 
 
+def _get_shop_icon(item_id: str, diameter: int):
+    """
+    回傳指定 item_id 的圓形裁切小圖示 Surface（SRCALPHA）。
+    未找到對應圖或載入失敗時回傳 None（呼叫端可退回顯示文字）。
+    快取於 _shop_icon_cache[(item_id, diameter)]。
+    """
+    key = (item_id, diameter)
+    if key in _shop_icon_cache:
+        return _shop_icon_cache[key]
+    fname = _SHOP_ITEM_ICON_MAP.get(item_id)
+    if not fname:
+        _shop_icon_cache[key] = None
+        return None
+    path = os.path.join(_SHOP_ICON_DIR, fname + ".webp")
+    try:
+        raw = pygame.image.load(path).convert_alpha()
+    except Exception:
+        _shop_icon_cache[key] = None
+        return None
+    scaled = pygame.transform.smoothscale(raw, (diameter, diameter))
+    # 圓形遮罩：圓外透明
+    mask = pygame.Surface((diameter, diameter), pygame.SRCALPHA)
+    mask.fill((0, 0, 0, 0))
+    pygame.draw.circle(mask, (255, 255, 255, 255),
+                       (diameter // 2, diameter // 2), diameter // 2)
+    scaled.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MIN)
+    _shop_icon_cache[key] = scaled
+    return scaled
+
+
 def _apply_shop_purchase(idx: int) -> None:
     """
     pygame 主執行緒直接套用購買效果。
@@ -5093,10 +5141,16 @@ def _draw_shop(surf: pygame.Surface,
         _gloss_circle(surf, icon_cx, icon_cy, icon_r)
         bdr_ic = tuple(min(255, int(c * 1.20 + 28)) for c in ic_col)
         pygame.draw.circle(surf, bdr_ic, (icon_cx, icon_cy), icon_r, 2)
-        # 圖示首字
-        il = fs.render(item["name"][0], True, PANEL)
-        surf.blit(il, (icon_cx - il.get_width()  // 2,
-                       icon_cy - il.get_height() // 2))
+        # 圖示：優先使用小圖（圓形裁切），無對應圖則退回首字
+        _icon_d  = max(4, int(icon_r * 2 - 4))   # 直徑略小於圓，留 2px 邊距
+        _icon_sf = _get_shop_icon(item.get("id", ""), _icon_d)
+        if _icon_sf is not None:
+            surf.blit(_icon_sf, (icon_cx - _icon_d // 2,
+                                 icon_cy - _icon_d // 2))
+        else:
+            il = fs.render(item["name"][0], True, PANEL)
+            surf.blit(il, (icon_cx - il.get_width()  // 2,
+                           icon_cy - il.get_height() // 2))
 
         # ── 文字區 ───────────────────────────────────────────────
         info_x = dr.x + int(90 * scale)
