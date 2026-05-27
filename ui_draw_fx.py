@@ -10,6 +10,7 @@ import os
 from ui_const import *
 from ui_state  import *
 from ui_draw_base import *
+from ui_draw_hud import _draw_log
 
 def _wx_leaf_new(wt: str, full_screen: bool = False) -> dict:
     """生成一片葉子 / 花瓣粒子。full_screen=True 時 y 散布全螢幕（初始化用）。"""
