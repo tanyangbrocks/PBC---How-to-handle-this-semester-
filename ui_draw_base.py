@@ -574,3 +574,6 @@ def _apply_shop_purchase(idx: int) -> None:
     _shop_msg[0]      = f"✅ 購買了【{item['name']}】！剩餘 ${player.money} 元"
     _shop_msg_time[0] = pygame.time.get_ticks()
 
+
+# 明確宣告所有名稱可被 import * 匯出（含 _ 前綴）
+__all__ = [_n for _n in vars() if not _n.startswith('__')]

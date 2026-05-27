@@ -1066,3 +1066,6 @@ def _draw_cc_slot_machine(surf, fm, fs, mpos):
         return ok
     return None
 
+
+# 明確宣告所有名稱可被 import * 匯出（含 _ 前綴）
+__all__ = [_n for _n in vars() if not _n.startswith('__')]

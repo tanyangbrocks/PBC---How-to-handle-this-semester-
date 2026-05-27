@@ -611,3 +611,6 @@ def _draw_panel(surf, rect, border=CYAN):
     pygame.draw.rect(surf, PANEL, rect, border_radius=18)
     pygame.draw.rect(surf, border, rect, 2, border_radius=18)
 
+
+# 明確宣告所有名稱可被 import * 匯出（含 _ 前綴）
+__all__ = [_n for _n in vars() if not _n.startswith('__')]

@@ -893,3 +893,6 @@ def _draw_end(surf, fm, fs, lr, mpos):
                   dr.y + (dr.height - t.get_height()) // 2))
     return btn
 
+
+# 明確宣告所有名稱可被 import * 匯出（含 _ 前綴）
+__all__ = [_n for _n in vars() if not _n.startswith('__')]

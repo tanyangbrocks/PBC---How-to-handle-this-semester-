@@ -849,3 +849,6 @@ def _draw_roll_call_note(surf: pygame.Surface, fmic, x_offset: int = 0) -> None:
     # 便利貼本體
     surf.blit(rotated, (cx - rw // 2, cy - rh // 2))
 
+
+# 明確宣告所有名稱可被 import * 匯出（含 _ 前綴）
+__all__ = [_n for _n in vars() if not _n.startswith('__')]

@@ -457,7 +457,12 @@ def cmd_split() -> None:
     for dest in DEST_ORDER:
         fname    = _DEST_FILE[dest]
         out_path = base / fname
-        content  = _HEADER[dest] + "".join(buckets[dest])
+        # __all__ 宣告：讓 import * 也能匯出 _ 前綴的私有名稱
+        _ALL_FOOTER = (
+            "\n# 明確宣告所有名稱可被 import * 匯出（含 _ 前綴）\n"
+            "__all__ = [_n for _n in vars() if not _n.startswith('__')]\n"
+        )
+        content  = _HEADER[dest] + "".join(buckets[dest]) + _ALL_FOOTER
         out_path.write_text(content, encoding="utf-8")
         kb = out_path.stat().st_size // 1024
         written.append(out_path)
