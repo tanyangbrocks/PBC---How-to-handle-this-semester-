@@ -10,6 +10,7 @@ import os
 from ui_const import *
 from ui_state  import *
 from ui_draw_base import *
+from ui_draw_hud import _draw_icon_coin
 
 def _draw_choice_popup(surf, fm, fs, mode, choices, log, prompt_text,
                        yn_labels, mpos):
