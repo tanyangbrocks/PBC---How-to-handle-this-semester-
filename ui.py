@@ -111,7 +111,18 @@ _EVT_SHAKE_MS  = 480      # 震動總時長（ms）
 _EVT_SHAKE_AMP = 14       # 最大震動幅度（px）
 
 # ── 點名警示便利貼 ──────────────────────────────────────────────
-_roll_call_course = [""]   # 當週點名科目（空字串 = 未啟用）
+_roll_call_course    = [""]     # 當週點名科目（空字串 = 未啟用）
+_roll_call_attended  = [False]  # 本週點名週次是否已執行「正常上課」
+_roll_call_xed       = [False]  # 點名課被翹掉（顯示紅色大叉）
+
+# ── 翹課選課彈出視窗 ──────────────────────────────────────────
+_skip_popup_active   = [False]
+_skip_popup_courses: list = []   # 全部課名清單
+_skip_popup_skipped: set  = set()  # 本週已翹的課
+_skip_popup_attended: set = set()  # 本週已上的課（正常上課選的科目）
+_skip_popup_rects:   list = []
+_skip_popup_event         = threading.Event()
+_skip_popup_result        = [None]   # str (選定課名) 或 None (取消)
 
 # ── 特殊行動停用狀態 ──────────────────────────────────────────
 _special_disabled: dict = {}   # {行動名: 倒數格數} 停用中的特殊行動
@@ -336,6 +347,12 @@ _WEEK_BG: dict = {
 _shop_slide_dir = ["none"]   # "in" | "out" | "out_done" | "none"
 _shop_slide_t0  = [0]        # 動畫開始時間（ms）
 SHOP_SLIDE_MS   = 370        # 單向滑動時長（ms）
+
+# ── 面板滑動轉場（劇情模式收起 / 行動模式展開）──────────────────
+_panel_slide_dir = ["none"]   # "out" | "in" | "none"
+_panel_slide_t0  = [0]        # 動畫開始時間（ms）
+_panel_slide_val = [0.0]      # 0.0=完全展開, 1.0=完全收起
+PANEL_SLIDE_MS   = 280        # 單向滑動時長（ms）
 
 # ============================================================
 #  動態天氣特效系統
@@ -977,6 +994,34 @@ def set_roll_call(course: str) -> None:
 def clear_roll_call() -> None:
     """清除點名警示便利貼（週末結算後呼叫）。非阻塞。"""
     _cmd_q.put(("roll_call_clear",))
+
+def set_roll_call_attended(attended: bool) -> None:
+    """設定本週點名週次是否已執行「正常上課」（動態更新綠勾顯示）。非阻塞。"""
+    _cmd_q.put(("roll_call_attended", attended))
+
+def set_roll_call_xed(xed: bool) -> None:
+    """設定點名課是否被翹掉（動態更新紅叉顯示）。非阻塞。"""
+    _cmd_q.put(("roll_call_xed", xed))
+
+def ask_skip_class_popup(courses: list, skipped: set, attended: set) -> "str | None":
+    """
+    顯示翹課選課彈出視窗。阻塞直到玩家選取課名或取消。
+    courses: 所有課名清單
+    skipped: 本週已翹的課（顯示紅色印章）
+    attended: 本週已上的課（顯示綠色印章）
+    回傳選定的課名字串，或 None（取消）。
+    """
+    _skip_popup_courses.clear()
+    _skip_popup_courses.extend(courses)
+    _skip_popup_skipped.clear()
+    _skip_popup_skipped.update(skipped)
+    _skip_popup_attended.clear()
+    _skip_popup_attended.update(attended)
+    _skip_popup_result[0] = None
+    _skip_popup_event.clear()
+    _cmd_q.put(("skip_popup_open",))
+    _skip_popup_event.wait()
+    return _skip_popup_result[0]
 
 def set_special_disabled(names: dict) -> None:
     """更新特殊行動的停用狀態。names = {行動名: 倒數格數}（空 dict 表示清除全部）。"""
@@ -3572,11 +3617,12 @@ _cc_btn_cache: dict = {}
 _STANDARD_ACTIONS = {"認真讀書", "正常上課", "社團活動", "打工賺錢",
                      "好好休息", "幫助朋友", "🏪 前往道具店"}
 
-# ── 特殊行動（凸起面板）常數 ──────────────────────────────────
-_BUMP_H  = 88    # 凸起高度（向上突出面板頂邊）
-_BUMP_W  = 310   # 凸起寬度
-_BUMP_R  = 30    # 特殊按鈕半徑
-_BUMP_SP = 105   # 特殊按鈕間距
+# ── 特殊行動（面板右側）常數 ──────────────────────────────────
+_BUMP_H  = 68    # 凸起從面板頂邊往上延伸的高度（px）
+_BUMP_W  = 240   # 凸起寬度（px）
+_BUMP_R  = 26    # 特殊行動按鈕半徑
+_BUMP_SP = 74    # 凸起內三顆按鈕水平間距
+_BUMP_IR = 12    # 凸起與面板交接處的內凹弧半徑
 _SPECIAL_ACTION_NAMES = ["熬夜", "翹課", "進食"]
 _SPECIAL_ICONS = {"熬夜": "月", "翹課": "逃", "進食": "食"}
 
@@ -3904,6 +3950,124 @@ def _draw_subj_popup(surf, fm, fs, mpos):
     return btn_list
 
 
+def _draw_skip_class_popup(surf, fm, fs, mpos):
+    """
+    在畫面中央繪製「翹課選課」彈出視窗。
+    已翹 / 已上的課顯示斜蓋印章且不可點擊。
+    回傳 [(rect, value), ...] 其中 value = 課名字串 或 None（取消）。
+    """
+    fb    = _font_bold[0]    or fs
+    fb_lg = _font_bold_lg[0] or fm
+
+    # ── 半透明暗色遮罩 ──────────────────────────────────────────
+    ov = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
+    ov.fill((0, 0, 0, 160))
+    surf.blit(ov, (0, 0))
+
+    n    = len(_skip_popup_courses)
+    COLS = 2
+    CW   = 200   # 卡片寬
+    CH   = 52    # 卡片高
+    HGAP = 14    # 水平間距
+    VGAP = 10    # 垂直間距
+    rows = max(1, (n + COLS - 1) // COLS)
+
+    pad_x    = 36
+    pad_top  = 22
+    pad_mid  = 14
+    pad_bot  = 20
+    cancel_h = 40
+    title_h  = fm.get_height()
+
+    grid_w  = COLS * CW + (COLS - 1) * HGAP
+    total_w = grid_w + pad_x * 2
+    grid_h  = rows * CH + max(rows - 1, 0) * VGAP
+    total_h = (pad_top + title_h + 6 + 1 + pad_mid
+               + grid_h + pad_mid + cancel_h + pad_bot)
+
+    px = (WIN_W - total_w) // 2
+    py = (WIN_H - total_h) // 2
+
+    # ── 視窗背景 ──────────────────────────────────────────────
+    box = pygame.Rect(px, py, total_w, total_h)
+    pygame.draw.rect(surf, (38, 24, 14), box, border_radius=18)
+    pygame.draw.rect(surf, CYAN,         box, 2, border_radius=18)
+
+    # ── 標題 ──────────────────────────────────────────────────
+    ttx = fb_lg.render("選擇要翹的課", True, PANEL)
+    surf.blit(ttx, (px + (total_w - ttx.get_width()) // 2, py + pad_top))
+
+    line_y = py + pad_top + title_h + 6
+    pygame.draw.line(surf, CYAN, (px + 18, line_y), (px + total_w - 18, line_y), 1)
+
+    # ── 卡片網格 ──────────────────────────────────────────────
+    gx0 = px + pad_x
+    gy0 = line_y + 1 + pad_mid
+
+    btn_list = []
+    for i, course in enumerate(_skip_popup_courses):
+        col = i % COLS
+        row = i // COLS
+        cx  = gx0 + col * (CW + HGAP)
+        cy  = gy0 + row * (CH + VGAP)
+        cr  = pygame.Rect(cx, cy, CW, CH)
+
+        is_skipped  = course in _skip_popup_skipped
+        is_attended = course in _skip_popup_attended
+        is_disabled = is_skipped or is_attended
+
+        if is_disabled:
+            # ── 灰色底 ────────────────────────────────────────
+            pygame.draw.rect(surf, (72, 58, 48), cr, border_radius=10)
+            pygame.draw.rect(surf, (100, 82, 65), cr, 1, border_radius=10)
+            # 課名（灰暗色）
+            ct = fb.render(course, True, (105, 88, 72))
+            surf.blit(ct, (cr.x + (cr.width  - ct.get_width())  // 2,
+                           cr.y + (cr.height - ct.get_height()) // 2))
+            # ── 斜蓋印章 ──────────────────────────────────────
+            if is_skipped:
+                stamp_col  = (220,  40,  40)
+                stamp_text = "已翹課"
+            else:
+                stamp_col  = ( 40, 185,  75)
+                stamp_text = "已上課"
+            stamp_surf = pygame.Surface((CW, CH), pygame.SRCALPHA)
+            # 半透明底色渲染在 SRCALPHA 面
+            tint = pygame.Surface((CW, CH), pygame.SRCALPHA)
+            pygame.draw.rect(tint, (*stamp_col, 30),
+                             pygame.Rect(0, 0, CW, CH), border_radius=10)
+            stamp_surf.blit(tint, (0, 0))
+            # 旋轉文字（set_alpha 模擬半透明）
+            stx     = fb_lg.render(stamp_text, True, stamp_col)
+            stx.set_alpha(220)
+            str_rot = pygame.transform.rotate(stx, 18)
+            stamp_surf.blit(str_rot,
+                            ((CW - str_rot.get_width())  // 2,
+                             (CH - str_rot.get_height()) // 2))
+            surf.blit(stamp_surf, cr.topleft)
+            # 彩色邊框
+            pygame.draw.rect(surf, stamp_col, cr, 2, border_radius=10)
+        else:
+            # ── 正常可點擊卡片 ────────────────────────────────
+            hover = cr.collidepoint(mpos)
+            _premium_btn(surf, cr, BTN_N, hover, radius=10)
+            ct = fb.render(course, True, PANEL)
+            surf.blit(ct, (cr.x + (cr.width  - ct.get_width())  // 2,
+                           cr.y + (cr.height - ct.get_height()) // 2))
+            btn_list.append((cr, course))
+
+    # ── 取消按鈕 ──────────────────────────────────────────────
+    cancel_r = pygame.Rect(gx0, gy0 + grid_h + pad_mid, grid_w, cancel_h)
+    hover_c  = cancel_r.collidepoint(mpos)
+    _premium_btn(surf, cancel_r, (80, 65, 55), hover_c, radius=10)
+    ct2 = fb.render("取消", True, PANEL)
+    surf.blit(ct2, (cancel_r.x + (cancel_r.width  - ct2.get_width())  // 2,
+                    cancel_r.y + (cancel_r.height - ct2.get_height()) // 2))
+    btn_list.append((cancel_r, None))
+
+    return btn_list
+
+
 def _draw_action_popup(surf, fs):
     """
     在遊戲畫面右側繪製由右而左滑入的行動結果視窗。
@@ -4097,22 +4261,80 @@ def _draw_action_panel(surf, fm, fs, mode, choices, log, prompt, tvalue, rect, t
     is_std_action = (mode == "choices" and
                      all(c in _STANDARD_ACTIONS for c in choices))
 
-    # ── 特殊行動凸起（標準行動模式才顯示，畫在面板投影之前）────────
+    # ── 凸起幾何（絕對座標，僅標準行動模式使用）────────────────
     if is_std_action:
-        _draw_bump_bg(surf, pr)
+        _brx     = WIN_W - _SIDE_PANEL_W - 16   # 凸起右邊界
+        _blx     = _brx - _BUMP_W               # 凸起左邊界
+        _btop    = pr.y  - _BUMP_H              # 凸起頂邊
+        _bump_cx = (_blx + _brx) // 2           # 凸起水平中心
+        _bump_cy = (_btop + pr.y) // 2          # 凸起垂直中心
 
-    # ── 投影 ──────────────────────────────────────────────────
+        # 凸起投影（在主面板投影之前先畫，層次正確）
+        _bsh = pygame.Surface((_BUMP_W + 4, _BUMP_H + 4), pygame.SRCALPHA)
+        pygame.draw.rect(_bsh, (0, 0, 0, 40),
+                         pygame.Rect(0, 0, _BUMP_W, _BUMP_H),
+                         border_top_left_radius=12,
+                         border_top_right_radius=12,
+                         border_bottom_left_radius=0,
+                         border_bottom_right_radius=0)
+        surf.blit(_bsh, (_blx + 4, _btop + 4))
+
+    # ── 主面板投影 ──────────────────────────────────────────────
     sh = pygame.Surface((pr.width, pr.height), pygame.SRCALPHA)
     pygame.draw.rect(sh, (0, 0, 0, 52),
                      pygame.Rect(0, 0, pr.width, pr.height), border_radius=14)
     surf.blit(sh, (pr.x + 4, pr.y + 4))
 
-    # ── 卡片底色 ──────────────────────────────────────────────
+    # ── 主面板卡片底色 ──────────────────────────────────────────
     card = pygame.Surface((pr.width, pr.height), pygame.SRCALPHA)
     pygame.draw.rect(card, (255, 244, 228, 238),
                      pygame.Rect(0, 0, pr.width, pr.height), border_radius=14)
     surf.blit(card, pr.topleft)
     pygame.draw.rect(surf, CYAN, pr, 2, border_radius=14)
+
+    # ── 凸起底色 ＋ 邊框 ＋ 內凹弧 ────────────────────────────────
+    if is_std_action:
+        _PF = (255, 244, 228)   # 面板填色（不含 alpha，供直接畫線使用）
+
+        # 凸起填色（頂部圓角、底部直角，向下多 3px 與主面板無縫銜接）
+        _bcard = pygame.Surface((_BUMP_W, _BUMP_H + 3), pygame.SRCALPHA)
+        pygame.draw.rect(_bcard, (255, 244, 228, 238),
+                         pygame.Rect(0, 0, _BUMP_W, _BUMP_H + 3),
+                         border_top_left_radius=12,
+                         border_top_right_radius=12,
+                         border_bottom_left_radius=0,
+                         border_bottom_right_radius=0)
+        surf.blit(_bcard, (_blx, _btop))
+
+        # 內凹弧：用遊戲背景色填圓，「咬掉」交接直角
+        pygame.draw.circle(surf, BG,
+                           (_blx + _BUMP_IR, pr.y - _BUMP_IR), _BUMP_IR)
+
+        # 頂部左圓角弧
+        pygame.draw.arc(surf, CYAN,
+                        pygame.Rect(_blx, _btop, 24, 24),
+                        math.pi / 2, math.pi, 2)
+        # 頂部右圓角弧
+        pygame.draw.arc(surf, CYAN,
+                        pygame.Rect(_brx - 24, _btop, 24, 24),
+                        0, math.pi / 2, 2)
+        # 頂邊直線
+        pygame.draw.line(surf, CYAN,
+                         (_blx + 12, _btop + 1), (_brx - 12, _btop + 1), 2)
+        # 左側邊線（圓角底 → 內凹弧上方）
+        pygame.draw.line(surf, CYAN,
+                         (_blx + 1, _btop + 12), (_blx + 1, pr.y - _BUMP_IR), 2)
+        # 右側邊線（圓角底 → 主面板頂邊）
+        pygame.draw.line(surf, CYAN,
+                         (_brx - 1, _btop + 12), (_brx - 1, pr.y + 1), 2)
+        # 內凹弧外框線（CYAN，從 180° 逆時針到 270°）
+        pygame.draw.arc(surf, CYAN,
+                        pygame.Rect(_blx, pr.y - _BUMP_IR * 2,
+                                    _BUMP_IR * 2, _BUMP_IR * 2),
+                        math.pi, 3 * math.pi / 2, 2)
+        # 遮蓋主面板頂邊框線（凸起覆蓋的那一段）
+        pygame.draw.line(surf, _PF,
+                         (_blx, pr.y), (_brx, pr.y), 3)
 
     # ── 標籤列 ───────────────────────────────────────────────
     tab_rect    = pygame.Rect(pr.x, pr.y, pr.width, TAB_H)
@@ -4122,11 +4344,12 @@ def _draw_action_panel(surf, fm, fs, mode, choices, log, prompt, tvalue, rect, t
     hovered_action = None
     if is_std_action:
         action_choices_pre = [c for c in choices if c != "🏪 前往道具店"]
-        n_pre    = len(action_choices_pre)
-        r_pre    = 36
-        sp_pre   = min(140, (pr.width - 40) // max(n_pre, 1))
-        sx_pre   = pr.x + (pr.width - n_pre * sp_pre) // 2 + sp_pre // 2
-        cy_pre   = content_top + r_pre + ((pr.height - TAB_H - r_pre * 2 - fs.get_height() - 8) // 2)
+        n_pre       = len(action_choices_pre)
+        r_pre       = 36
+        main_aw_pre = pr.width                            # 主按鈕使用全寬
+        sp_pre      = min(140, (main_aw_pre - 40) // max(n_pre, 1))
+        sx_pre      = pr.x + (main_aw_pre - n_pre * sp_pre) // 2 + sp_pre // 2
+        cy_pre      = content_top + r_pre + ((pr.height - TAB_H - r_pre * 2 - fs.get_height() - 8) // 2)
         for i, lbl in enumerate(action_choices_pre):
             cx_i = sx_pre + i * sp_pre
             if pygame.Rect(cx_i - r_pre - 8, cy_pre - r_pre - 8,
@@ -4135,11 +4358,14 @@ def _draw_action_panel(surf, fm, fs, mode, choices, log, prompt, tvalue, rect, t
                 break
         # ── 特殊按鈕 hover 偵測（主按鈕沒中才繼續）──────────────
         if hovered_action is None:
-            _sp_cy_pre = pr.y - _BUMP_H // 2
+            _brx_pre    = WIN_W - _SIDE_PANEL_W - 16
+            _blx_pre    = _brx_pre - _BUMP_W
+            _bump_cy_pre = pr.y - _BUMP_H // 2           # 凸起垂直中心
+            _sp_cx0_pre = (_blx_pre + _brx_pre) // 2     # 凸起水平中心（翹課）
             for _si_p, _sn_p in enumerate(_SPECIAL_ACTION_NAMES):
-                _sp_cx_p = pr.x + pr.width // 2 + (_si_p - 1) * _BUMP_SP
+                _sp_cx_p = _sp_cx0_pre + (_si_p - 1) * _BUMP_SP
                 if (_sn_p not in _special_disabled and
-                        pygame.Rect(_sp_cx_p - _BUMP_R - 8, _sp_cy_pre - _BUMP_R - 8,
+                        pygame.Rect(_sp_cx_p - _BUMP_R - 8, _bump_cy_pre - _BUMP_R - 8,
                                     (_BUMP_R + 8) * 2, (_BUMP_R + 8) * 2).collidepoint(mpos)):
                     hovered_action = _sn_p
                     break
@@ -4200,22 +4426,20 @@ def _draw_action_panel(surf, fm, fs, mode, choices, log, prompt, tvalue, rect, t
     else:
         ew_btn = None
 
-    # 分隔線
-    pygame.draw.line(surf, GRAY, (pr.x, content_top), (pr.right, content_top), 1)
-
     content_rect = pygame.Rect(pr.x, content_top, pr.width, pr.height - TAB_H)
     content_rects = []
 
     # ── 內容區：依模式切換 ────────────────────────────────────
 
     if mode == "choices" and is_std_action:
-        # ── 圓形行動按鈕（縮小 + 標籤移至按鈕下方）─────────
+        # ── 圓形行動按鈕（左側區域；右側保留給特殊行動）─────────
         action_choices = [c for c in choices if c != "🏪 前往道具店"]
-        n       = len(action_choices)
-        r       = 36
-        spacing = min(140, (pr.width - 40) // max(n, 1))
-        total_w = n * spacing
-        sx      = pr.x + (pr.width - total_w) // 2 + spacing // 2
+        n        = len(action_choices)
+        r        = 36
+        main_aw  = pr.width                 # 主按鈕使用全寬
+        spacing  = min(140, (main_aw - 40) // max(n, 1))
+        total_w  = n * spacing
+        sx       = pr.x + (main_aw - total_w) // 2 + spacing // 2
         # 垂直：圓心上移，留空間給下方標籤
         fb      = _font_bold[0] or fs      # 粗體字型（行動標籤）
         lh      = fb.get_height()
@@ -4296,9 +4520,9 @@ def _draw_action_panel(surf, fm, fs, mode, choices, log, prompt, tvalue, rect, t
 
             content_rects.append((brect, orig_idx))
 
-        # ── 特殊行動按鈕（凸起區，畫在主按鈕之後）────────────────
-        _sp_cy  = pr.y - _BUMP_H // 2
-        _sp_cx0 = pr.x + pr.width // 2
+        # ── 特殊行動按鈕（凸起區，已在面板繪製時計算幾何）──────────
+        _sp_cy  = _bump_cy                        # 凸起垂直中心
+        _sp_cx0 = _bump_cx                        # 凸起水平中心（翹課居中）
         for _si, _sn in enumerate(_SPECIAL_ACTION_NAMES):
             _sp_cx    = _sp_cx0 + (_si - 1) * _BUMP_SP
             _disabled = _sn in _special_disabled
@@ -4639,7 +4863,7 @@ def _side_panel_bg(surf: pygame.Surface, x: int, y: int, w: int, h: int) -> None
     pygame.draw.rect(surf, (185, 163, 138), pygame.Rect(x, y, w, h), 1, border_radius=13)
 
 
-def _draw_exp_panel(surf: pygame.Surface, fm, fmic, player) -> None:
+def _draw_exp_panel(surf: pygame.Surface, fm, fmic, player, x_offset: int = 0) -> None:
     """左側：各科課業熟練度面板（動態，含加簽科目）。"""
     if player is None:
         return
@@ -4647,7 +4871,7 @@ def _draw_exp_panel(surf: pygame.Surface, fm, fmic, player) -> None:
     fb_lg = _font_bold_lg[0] or fm    # size-22 bold（標題）
     PW  = _SIDE_PANEL_W
     PAD = 9
-    sx, sy = 8, STATUS_H + 8
+    sx, sy = 8 + x_offset, STATUS_H + 8
     sh  = CHAR_H - 16
 
     _side_panel_bg(surf, sx, sy, PW, sh)
@@ -4702,14 +4926,14 @@ def _draw_exp_panel(surf: pygame.Surface, fm, fmic, player) -> None:
         row_y += row_h
 
 
-def _draw_grade_panel(surf: pygame.Surface, fm, fmic, player) -> None:
+def _draw_grade_panel(surf: pygame.Surface, fm, fmic, player, x_offset: int = 0) -> None:
     """右側：已發生成績記錄面板（未公布項目顯示 ──）。"""
     if player is None:
         return
     fb_lg = _font_bold_lg[0] or fm   # 粗體 size-22（標題 / 科目名 / 分數）
     PW  = _SIDE_PANEL_W
     PAD = 9
-    sx  = WIN_W - 8 - PW
+    sx  = WIN_W - 8 - PW + x_offset
     sy  = STATUS_H + 8
     sh  = CHAR_H - 16
 
@@ -4722,11 +4946,12 @@ def _draw_grade_panel(surf: pygame.Surface, fm, fmic, player) -> None:
     pygame.draw.line(surf, (205, 188, 168),
                      (sx + PAD, div_y), (sx + PW - PAD, div_y))
 
-    # 只顯示已公布且有分數的欄位
+    # 參與度始終顯示（實時更新）；其餘欄位須公布後且有分數才顯示
     _revealed = getattr(player, "revealed_grades", set())
     active_rows = [(label, key, weight)
                    for label, key, weight in _GRADE_ROWS
-                   if key in _revealed and player.grades.get(key, 0.0) > 0.0]
+                   if key == "參與度"
+                   or (key in _revealed and player.grades.get(key, 0.0) > 0.0)]
 
     if not active_rows:
         hint = fmic.render("尚無成績記錄", True, GRAY)
@@ -4758,10 +4983,11 @@ def _draw_grade_panel(surf: pygame.Surface, fm, fmic, player) -> None:
         row_y += row_h
 
 
-def _draw_roll_call_note(surf: pygame.Surface, fmic) -> None:
+def _draw_roll_call_note(surf: pygame.Surface, fmic, x_offset: int = 0) -> None:
     """
     在成績記錄面板左側繪製點名警示便利貼。
     _roll_call_course[0] 為空字串時不顯示。
+    x_offset：水平位移（供面板收起動畫使用）。
     """
     course = _roll_call_course[0]
     if not course:
@@ -4797,11 +5023,34 @@ def _draw_roll_call_note(surf: pygame.Surface, fmic) -> None:
     sub_s = fb.render(short, True, (80, 42, 10))
     note.blit(sub_s, ((NW - sub_s.get_width()) // 2, 20))
 
-    # 提示小字（兩行）
-    r1 = fmic.render("本週將點名", True, (120, 68, 18))
-    r2 = fmic.render("記得出席！", True, (160, 78, 18))
-    note.blit(r1, ((NW - r1.get_width()) // 2, 44))
-    note.blit(r2, ((NW - r2.get_width()) // 2, 56))
+    if _roll_call_xed[0]:
+        # ── 點名課已被翹掉：紅色大叉 ─────────────────────────────
+        tint = pygame.Surface((NW, NH - 15), pygame.SRCALPHA)
+        pygame.draw.rect(tint, (220, 40, 40, 55),
+                         pygame.Rect(0, 0, NW, NH - 15), border_radius=4)
+        note.blit(tint, (0, 15))
+        xc = (185, 32, 32)
+        pygame.draw.line(note, xc, (18, 28), (82, 64), 6)   # 左上→右下
+        pygame.draw.line(note, xc, (82, 28), (18, 64), 6)   # 右上→左下
+        # 抗鋸齒端點補圓
+        for pt in [(18, 28), (82, 64), (82, 28), (18, 64)]:
+            pygame.draw.circle(note, xc, pt, 3)
+    elif _roll_call_attended[0]:
+        # ── 已出席：綠色大勾 ─────────────────────────────────────
+        tint = pygame.Surface((NW, NH - 15), pygame.SRCALPHA)
+        pygame.draw.rect(tint, (60, 200, 90, 48),
+                         pygame.Rect(0, 0, NW, NH - 15), border_radius=4)
+        note.blit(tint, (0, 15))
+        chk = (30, 185, 65)
+        pygame.draw.line(note, chk, (22, 52), (36, 62), 5)
+        pygame.draw.line(note, chk, (36, 62), (78, 28), 5)
+        pygame.draw.circle(note, chk, (36, 62), 3)
+    else:
+        # 提示小字（兩行）
+        r1 = fmic.render("本週將點名", True, (120, 68, 18))
+        r2 = fmic.render("記得出席！", True, (160, 78, 18))
+        note.blit(r1, ((NW - r1.get_width()) // 2, 44))
+        note.blit(r2, ((NW - r2.get_width()) // 2, 56))
 
     # ── 旋轉 -8°（便利貼略歪，增加手感）─────────────────────
     rotated = pygame.transform.rotate(note, -8)
@@ -4809,8 +5058,8 @@ def _draw_roll_call_note(surf: pygame.Surface, fmic) -> None:
 
     # ── 定位：成績面板左邊緣偏左 24 px 為便利貼中心 ──────────
     PW = _SIDE_PANEL_W
-    cx = WIN_W - 8 - PW - 24   # 804 - 24 = 780
-    cy = STATUS_H + 8 + 130    # 175 + 8 + 130 = 313
+    cx = WIN_W - 8 - PW - 24 + x_offset   # 隨成績面板同步平移
+    cy = STATUS_H + 8 + 130               # 175 + 8 + 130 = 313
 
     # 陰影（偏移 +5, +6 的半透明矩形）
     shad_sf = pygame.Surface((rw, rh), pygame.SRCALPHA)
@@ -5825,9 +6074,19 @@ def run_ui():
                 _evt_shake_t0[0] = pygame.time.get_ticks()
                 _play_sfx("damage6")
             elif tag == "roll_call_set":
-                _roll_call_course[0] = cmd[1]
+                _roll_call_course[0]   = cmd[1]
+                _roll_call_attended[0] = False   # 新的點名週次，重置出席狀態
+                _roll_call_xed[0]      = False
+            elif tag == "roll_call_attended":
+                _roll_call_attended[0] = cmd[1]
+            elif tag == "roll_call_xed":
+                _roll_call_xed[0] = cmd[1]
             elif tag == "roll_call_clear":
-                _roll_call_course[0] = ""
+                _roll_call_course[0]   = ""
+                _roll_call_attended[0] = False
+                _roll_call_xed[0]      = False
+            elif tag == "skip_popup_open":
+                _skip_popup_active[0] = True
             elif tag == "special_disabled":
                 _special_disabled.clear()
                 _special_disabled.update(cmd[1])
@@ -5848,6 +6107,9 @@ def run_ui():
                 _story_lines.extend(cmd[1])
                 _story_index[0] = 0
                 _mode[0] = "story"
+                # ── 觸發三側面板收起動畫 ─────────────────────────────
+                _panel_slide_dir[0] = "out"
+                _panel_slide_t0[0]  = pygame.time.get_ticks()
             elif tag == "exam_ready":
                 _exam_ready_label[0] = cmd[1]
                 _mode[0] = "exam_ready"
@@ -5966,15 +6228,46 @@ def run_ui():
             _draw_game_bg(screen)
             # ── 動態天氣特效（背景圖與 UI 之間）────────────────────
             _draw_weather(screen, pygame.time.get_ticks())
-            # 狀態欄（新版，含頭像 + 道具店 + 資訊一覽按鈕）
-            shop_btn_rect, info_btn_rect = _draw_status_v2(screen, fm, fs, _player[0], sr, mpos)
+
+            # ── 面板滑動動畫計算（story 模式收起 / 解除後展開）──────
+            _pdir = _panel_slide_dir[0]
+            if _pdir != "none":
+                _pel = max(pygame.time.get_ticks() - _panel_slide_t0[0], 0)
+                _pt  = min(_pel / PANEL_SLIDE_MS, 1.0)
+                if _pdir == "out":
+                    _panel_slide_val[0] = _ease_in_cubic(_pt)
+                    if _pt >= 1.0:
+                        _panel_slide_dir[0] = "none"
+                        _panel_slide_val[0] = 1.0
+                elif _pdir == "in":
+                    _panel_slide_val[0] = 1.0 - _ease_out_quart(_pt)
+                    if _pt >= 1.0:
+                        _panel_slide_dir[0] = "none"
+                        _panel_slide_val[0] = 0.0
+            pst = _panel_slide_val[0]   # 0.0 = 全展開, 1.0 = 全收起
+
+            # 依 pst 計算各面板偏移量
+            _SL_M    = _SIDE_PANEL_W + 20          # 足以完全移出畫面的距離
+            _st_yoff = int(-STATUS_H * pst)        # 狀態欄：向上移出
+            _ep_xoff = int(-_SL_M * pst)           # 左側面板：向左移出
+            _gp_xoff = int( _SL_M * pst)           # 右側面板：向右移出
+
+            # 狀態欄（依 y 偏移繪製）
+            sr_shifted = pygame.Rect(0, _st_yoff, WIN_W, STATUS_H)
+            shop_btn_rect, info_btn_rect = _draw_status_v2(
+                screen, fm, fs, _player[0], sr_shifted, mpos)
+            # 面板收起中禁止互動
+            if pst > 0.0:
+                shop_btn_rect = None
+                info_btn_rect = None
+
             # 人物立繪區
             _draw_character_art(screen, cr)
-            # 左側熟練度面板 / 右側成績記錄面板
-            _draw_exp_panel(screen, fm, _font_micro[0], _player[0])
-            _draw_grade_panel(screen, fm, _font_micro[0], _player[0])
-            # 點名警示便利貼（疊在成績面板左側邊緣）
-            _draw_roll_call_note(screen, _font_micro[0])
+            # 左側熟練度面板 / 右側成績記錄面板（依 x 偏移繪製）
+            _draw_exp_panel(screen, fm, _font_micro[0], _player[0], x_offset=_ep_xoff)
+            _draw_grade_panel(screen, fm, _font_micro[0], _player[0], x_offset=_gp_xoff)
+            # 點名警示便利貼（隨成績面板同步右移）
+            _draw_roll_call_note(screen, _font_micro[0], x_offset=_gp_xoff)
             # 非標準選項 / yn / event_ok → 需先計算，讓底部面板知道要不要留白
             _cp_active = (
                 (_mode[0] == "choices" and bool(_choices)
@@ -6011,6 +6304,11 @@ def run_ui():
                     _draw_event_ok_popup(screen, fm, fs, mpos))
             else:
                 _event_ok_popup_rects.clear()
+            # 翹課選課彈出視窗（蓋在所有遊戲 UI 之上）
+            if _skip_popup_active[0]:
+                _skip_popup_rects.clear()
+                _skip_popup_rects.extend(
+                    _draw_skip_class_popup(screen, fm, fs, mpos))
             # 科目選擇彈出視窗（中央 modal，蓋在所有遊戲 UI 之上）
             if _subj_popup_active[0]:
                 _subj_popup_rects.clear()
@@ -6191,6 +6489,9 @@ def run_ui():
                         if _story_index[0] >= len(_story_lines):
                             _mode[0] = None
                             _reply_event.set()
+                            # ── 觸發三側面板展開動畫 ────────────────────────
+                            _panel_slide_dir[0] = "in"
+                            _panel_slide_t0[0]  = pygame.time.get_ticks()
                         continue
 
                     # 突發事件彈窗優先攔截（最高優先）
@@ -6230,6 +6531,19 @@ def run_ui():
                                     _reply_event.set()
                                 break
                         continue   # 彈窗開啟時所有點擊都不透傳
+
+                    # 翹課選課 popup 優先攔截所有點擊
+                    if _skip_popup_active[0]:
+                        for (br, val) in _skip_popup_rects:
+                            if br.collidepoint(ev.pos):
+                                _play_sfx("ui_click" if val is not None else "back")
+                                _click_reg[(br.centerx, br.centery)] = pygame.time.get_ticks()
+                                _skip_popup_result[0] = val
+                                _skip_popup_active[0] = False
+                                _skip_popup_rects.clear()
+                                _skip_popup_event.set()
+                                break
+                        continue   # 無論有沒有點中按鈕，都不透傳到下方邏輯
 
                     # 科目選擇 popup 優先攔截所有點擊
                     if _subj_popup_active[0]:
@@ -6288,12 +6602,16 @@ def run_ui():
                             elif _mode[0] in ("choices", "yn"):
                                 # 決定音效
                                 if _mode[0] == "choices":
-                                    _cname = (_choices[val - 1]
-                                              if isinstance(val, int) and 1 <= val <= len(_choices)
-                                              else "")
-                                    _play_sfx("action" if _cname in _STANDARD_ACTIONS
-                                                          and _cname != "🏪 前往道具店"
-                                              else "ui_click")
+                                    if isinstance(val, int) and val < 0:
+                                        # 特殊行動按鈕（負值索引）一律播 action 音效
+                                        _play_sfx("action")
+                                    else:
+                                        _cname = (_choices[val - 1]
+                                                  if isinstance(val, int) and 1 <= val <= len(_choices)
+                                                  else "")
+                                        _play_sfx("action" if _cname in _STANDARD_ACTIONS
+                                                              and _cname != "🏪 前往道具店"
+                                                  else "ui_click")
                                 else:  # yn
                                     _play_sfx("ui_click" if val else "back")
                                 _reply_val[0] = val

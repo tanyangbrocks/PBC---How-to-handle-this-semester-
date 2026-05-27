@@ -19,7 +19,8 @@ from ui import notify, ask_yn, ask_choice, ask_text, set_player, \
                notify_timetable, notify_grade_report, set_time, show_action_result, \
                ask_subject_popup, trigger_time_overflow_warning, tell_story, \
                show_extra_event_popup, ask_exam_start, set_roll_call, clear_roll_call, \
-               set_special_disabled
+               set_roll_call_attended, set_roll_call_xed, set_special_disabled, \
+               ask_skip_class_popup
 
 
 # ── 點名事件觸發週次 ─────────────────────────────────────────────
@@ -224,8 +225,12 @@ class TurnEngine:
         notify(f"\n本週可支配時間：{time_units} 單位")
 
         # ── 行動選擇迴圈 ──────────────────────────────────
-        remaining_time = time_units
-        attended_class = False     # 本週是否有執行「正常上課」（點名結算用）
+        remaining_time    = time_units
+        attended_class    = False   # 本週是否有執行「正常上課」（點名結算用）
+        skipped_this_week:  set = set()   # 本週已翹的科目（翹課 popup 用）
+        attended_this_week: set = set()   # 本週已上的科目（翹課 popup 用）
+        roll_call_skipped = False   # 是否明確翹掉點名課
+        all_courses = [k for k in player.subject_exp.keys() if k != "綜合"]
         full_timer = 0             # 飽腹倒數格數（>0 表示飽腹中）
         set_time(remaining_time)   # 初始化底部標籤列
 
@@ -253,7 +258,33 @@ class TurnEngine:
                                f"目前只有 ${player.money}。")
                         continue
 
-                self._execute_special_action(sa, roll_call_course)
+                # ── 翹課：先跳出選課彈窗 ──────────────────────────
+                if sa["id"] == "skip_class":
+                    _all_done = all(
+                        c in skipped_this_week or c in attended_this_week
+                        for c in all_courses
+                    )
+                    if _all_done:
+                        show_extra_event_popup(
+                            ["你已經沒有課可以翹啦！"],
+                            "翹課",
+                            (200, 80, 80),
+                        )
+                        continue
+                    chosen_course = ask_skip_class_popup(
+                        all_courses, skipped_this_week, attended_this_week
+                    )
+                    if chosen_course is None:
+                        continue   # 玩家取消
+                    skipped_this_week.add(chosen_course)
+                    notify(f"  🚪 翹掉了【{chosen_course}】。")
+                    # 翹掉點名課 → 直接標記失敗
+                    if roll_call_course and chosen_course == roll_call_course:
+                        roll_call_skipped = True
+                        set_roll_call_xed(True)
+                        set_roll_call_attended(False)
+
+                self._execute_special_action(sa)
                 remaining_time += sa.get("time_gain", 0)
                 set_time(remaining_time)
 
@@ -291,9 +322,15 @@ class TurnEngine:
                     )
                     if not confirm2:
                         continue
-                self._execute_action(action)
+                _chosen_subj = self._execute_action(action)
                 if action["id"] == "attend_class":
                     attended_class = True
+                    if _chosen_subj:
+                        attended_this_week.add(_chosen_subj)
+                    # 點名週：若本週點名課已上 → 綠勾（且未被翹掉）
+                    if roll_call_course and not roll_call_skipped:
+                        if roll_call_course in attended_this_week:
+                            set_roll_call_attended(True)
                 self.event_sys.roll_event_after_action(week)   # 行動後突發事件
                 # 普通行動消耗一格時間 → 飽腹倒數
                 if full_timer > 0:
@@ -314,9 +351,15 @@ class TurnEngine:
                 if not confirm:
                     continue
 
-            self._execute_action(action)
+            _chosen_subj = self._execute_action(action)
             if action["id"] == "attend_class":
                 attended_class = True
+                if _chosen_subj:
+                    attended_this_week.add(_chosen_subj)
+                # 點名週：若本週點名課已上 → 綠勾（且未被翹掉）
+                if roll_call_course and not roll_call_skipped:
+                    if roll_call_course in attended_this_week:
+                        set_roll_call_attended(True)
             self.event_sys.roll_event_after_action(week)   # 行動後突發事件
             remaining_time -= 1
             set_time(remaining_time)
@@ -335,11 +378,14 @@ class TurnEngine:
 
         # ── 點名結算（週末，所有行動結束後）────────────────────
         if roll_call_course is not None:
-            if not attended_class:
-                player.grades["參與度"] = max(0, player.grades["參與度"] - 10)
-                notify(f"⚠️  【{roll_call_course}】點名缺席！課堂參與度 -10。")
+            if roll_call_course in attended_this_week and not roll_call_skipped:
+                notify(f"✅ 本週有上【{roll_call_course}】，點名順利通過。")
             else:
-                notify(f"✅ 本週有上課，【{roll_call_course}】點名順利通過。")
+                player.grades["參與度"] = max(0, player.grades["參與度"] - 10)
+                if roll_call_skipped:
+                    notify(f"⚠️  【{roll_call_course}】翹課缺席！課堂參與度 -10。")
+                else:
+                    notify(f"⚠️  【{roll_call_course}】點名缺席！課堂參與度 -10。")
             clear_roll_call()
 
     # ============================================================
@@ -596,10 +642,15 @@ class TurnEngine:
             # 其餘週（無特定劇情）
             tell_story(["🍃 本週校園風平浪靜，照著自己的步調前進吧。"])
 
-    def _execute_action(self, action: dict):
+    def _execute_action(self, action: dict) -> "str | None":
+        """
+        執行普通行動並回傳選定的科目名稱（若無科目選擇則回傳 None）。
+        回傳值供 _normal_week 追蹤 attended_this_week。
+        """
         player  = self.player
         cost    = action["stamina_cost"]
         results = []   # 供彈出視窗顯示的結果列表
+        _chosen_subject = None   # 本次選定的科目（有 exp_gain 時設定）
 
         # ── 體力 ──────────────────────────────────────────────
         if cost > 0:
@@ -620,6 +671,7 @@ class TurnEngine:
                 _chosen = _subj_opts[(_idx - 1) if _idx > 0 else 0]
             else:
                 _chosen = "綜合"
+            _chosen_subject = _chosen
             _actual, _segs = self.skill_sys.gain_exp(_chosen, exp)
             results.append(f"【{_chosen}】熟練度 +{_actual}")
             results.append(("multi", _segs))   # 多色標注行
@@ -652,8 +704,9 @@ class TurnEngine:
 
         # ── 觸發彈出結果視窗 ──────────────────────────────────
         show_action_result(results, title=action["name"])
+        return _chosen_subject
 
-    def _execute_special_action(self, sa: dict, roll_call_course) -> None:
+    def _execute_special_action(self, sa: dict) -> None:
         """執行特殊行動（熬夜 / 翹課 / 進食）。不消耗時間單位，不觸發突發事件。"""
         player  = self.player
         results = []
@@ -689,9 +742,9 @@ class TurnEngine:
             self.event_sys.set_allnighter_risk(0.10)
             results.append("睡過頭機率 ↑10%")
 
-        # ── 翹課風險 ──────────────────────────────────────────
+        # ── 翹課隨機小考風險（roll_call 已由呼叫端明確處理）──────
         if sa.get("quiz_miss_chance"):
-            self._roll_skip_effects(player, roll_call_course)
+            self._roll_skip_effects(player)
 
         # ── 飽腹狀態 ──────────────────────────────────────────
         if sa.get("gives_full_status"):
@@ -700,16 +753,13 @@ class TurnEngine:
         notify(f"  ✔ 執行【{sa['name']}】完成。")
         show_action_result(results, title=sa["name"])
 
-    def _roll_skip_effects(self, player, roll_call_course) -> None:
-        """翹課的隨機後果：可能錯過小考 / 點名。"""
+    def _roll_skip_effects(self, player) -> None:
+        """翹課的隨機後果：可能錯過小考。（點名由呼叫端明確處理，不在此隨機判定）"""
         skip_prob = max(0.0, (100 - player.luck)) / 100
         if random.random() < skip_prob:
             player.grades["參與度"] = max(0, player.grades["參與度"] - 3)
             player.change_satisfaction(-5)
             notify("  📕 翹課結果：錯過了一次小考考核！參與度 -3，滿足感 -5。")
-        if roll_call_course and random.random() < skip_prob:
-            player.grades["參與度"] = max(0, player.grades["參與度"] - 2)
-            notify(f"  📋 翹課時剛好是【{roll_call_course}】的點名日！參與度 -2。")
 
     # ============================================================
     # 期中 / 期末考
