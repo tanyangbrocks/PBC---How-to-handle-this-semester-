@@ -18,6 +18,13 @@ def _cc_ptcl_new(full_screen: bool = False) -> dict:
         y0 = random.uniform(-20, WIN_H + 20)
     else:
         y0 = random.uniform(WIN_H + 10, WIN_H + 80)
+    # wisp 獨有：初始角度 + 每幀角速度（±0.08–0.28 deg/frame，方向隨機）
+    if kind == "wisp":
+        w_angle = random.uniform(0.0, 360.0)
+        w_va    = random.uniform(0.08, 0.28) * random.choice((-1, 1))
+    else:
+        w_angle = 0.0
+        w_va    = 0.0
     return {
         "kind":     kind,
         "x":        random.uniform(-30, WIN_W + 30),
@@ -33,6 +40,8 @@ def _cc_ptcl_new(full_screen: bool = False) -> dict:
         "wb_ph":    random.uniform(0, math.tau),
         "wb_sp":    random.uniform(0.008, 0.022),
         "wb_amp":   random.uniform(0.5, 1.4),
+        "angle":    w_angle,   # 當前旋轉角（度）
+        "va":       w_va,      # 每幀旋轉速率（度，正 = 逆時針）
     }
 
 def _draw_cc_particles(surf: pygame.Surface, ms: int) -> None:
@@ -75,7 +84,7 @@ def _draw_cc_particles(surf: pygame.Surface, ms: int) -> None:
             core_r = max(1, int(r_draw * 0.40))
             pygame.draw.circle(pt_surf, (255, 255, 255, min(255, alp + 55)),
                                (px, py), core_r)
-        else:  # wisp 光絮：細長橢圓
+        else:  # wisp 光絮：細長橢圓（帶旋轉）
             ew = max(2, int(r_draw * 3))
             eh = max(4, int(r_draw * 9))
             ws = pygame.Surface((ew + 2, eh + 2), pygame.SRCALPHA)
@@ -85,11 +94,18 @@ def _draw_cc_particles(surf: pygame.Surface, ms: int) -> None:
             ir = ws.get_rect().inflate(-2, -4)
             if ir.width > 0 and ir.height > 0:
                 pygame.draw.ellipse(ws, inner_col, ir)
-            pt_surf.blit(ws, (px - ew // 2 - 1, py - eh // 2 - 1))
+            # 旋轉橢圓（使用粒子本身的 angle；舊粒子無此欄位時 fallback 0）
+            angle = p.get("angle", 0.0)
+            if angle % 360 != 0.0:
+                ws = pygame.transform.rotate(ws, angle)
+            rw, rh = ws.get_size()
+            pt_surf.blit(ws, (px - rw // 2, py - rh // 2))
 
-        # ── 更新位置 ──────────────────────────────────────────────
+        # ── 更新位置 + 旋轉角 ─────────────────────────────────────
         p["x"] += p["vx"]
         p["y"] += p["vy"]
+        if p["kind"] == "wisp":
+            p["angle"] = (p.get("angle", 0.0) + p.get("va", 0.0)) % 360
 
         # 飄出螢幕（頂部 / 兩側）則丟棄
         if p["y"] < -25 or p["x"] < -55 or p["x"] > WIN_W + 55:

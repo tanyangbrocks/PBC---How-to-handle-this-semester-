@@ -82,6 +82,8 @@ _font_bold_lg  = [None]   # 粗體字型 size-22（標題 / 上方視窗用）
 
 _font_bold_xl  = [None]   # 粗體字型 size-26（日曆週次大字用）
 
+_extra_fonts: dict = {}   # 任意字型快取（key: 描述字串 → pygame.font.Font）
+
 # ── 剩餘時間點震動特效 ──────────────────────────────────────────
 _time_shake_t0 = [0]      # 震動觸發時間戳（ms，0 = 未啟用）
 

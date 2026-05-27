@@ -695,7 +695,7 @@ def _draw_start(surf, fm, fl, mpos):
     _fy = _float_offset(amp=9, speed=0.00155)
 
     # ════════════════════════════════════════════════════════════
-    #  ① 字元輪色 + 描邊標題
+    #  ① Creative.ttc 字元輪色 + 弧形排列（Arch Up）+ 描邊標題
     # ════════════════════════════════════════════════════════════
     TITLE_TEXT  = "如何渡過這學期？"
     N           = len(TITLE_TEXT)
@@ -704,60 +704,109 @@ def _draw_start(surf, fm, fl, mpos):
     OUTLINE_COL = (18,  8, 45)     # 深紫描邊
     OUTLINE_OFF = 2                # 描邊厚度（px）
 
+    # — 字型：優先 Creative.ttc，否則 fallback 到 fl —
+    _CREATIVE_PATH = r"C:\Users\譚揚勳\AppData\Local\Microsoft\Windows\Fonts\Creative.ttc"
+    _ck = "creative_56"
+    if _ck not in _extra_fonts:
+        try:
+            _extra_fonts[_ck] = pygame.font.Font(_CREATIVE_PATH, 56)
+        except Exception:
+            _extra_fonts[_ck] = fl
+    fc = _extra_fonts[_ck]
+
     # 1 秒循環：每個字元依序亮 1000/N ms
     active_idx = int((ms % 1000) / 1000 * N)
 
-    # 預算各字元寬度（用於整體置中）
-    ch_ws   = [fl.size(ch)[0] for ch in TITLE_TEXT]
-    total_w = sum(ch_ws)
-    title_x = (WIN_W - total_w) // 2
-    title_y = WIN_H // 3 - 20 + _fy
-    th      = fl.get_height()
+    # ── 弧形參數（圓心在文字正下方，文字沿圓頂排列）──────────
+    ARC_R         = 500                   # 圓弧半徑（越大越平緩）
+    TOTAL_ARC_RAD = math.radians(60)      # 整體弧度（8 字 → 各約 7.5°）
 
-    # — 描邊層（直接繪製到 surf，8 方向）—
-    x_cur = title_x
-    for ch, cw in zip(TITLE_TEXT, ch_ws):
-        out_s = fl.render(ch, True, OUTLINE_COL)
+    arc_top_y  = WIN_H // 3 - 20 + _fy   # 弧頂（中心字元）目標 y
+    arc_cx     = WIN_W // 2
+    arc_cy     = arc_top_y + ARC_R        # 圓心在標題正下方
+
+    # 各字元弧角（依字元像素寬度比例分配弧度）
+    ch_ws_fc   = [fc.size(ch)[0] for ch in TITLE_TEXT]
+    total_w_fc = sum(ch_ws_fc)
+    thetas = []
+    acc = 0
+    for cw in ch_ws_fc:
+        t = TOTAL_ARC_RAD * (acc + cw / 2) / total_w_fc - TOTAL_ARC_RAD / 2
+        thetas.append(t)
+        acc += cw
+
+    # 各字元中心在螢幕上的位置
+    arc_positions = [
+        (arc_cx + ARC_R * math.sin(t),
+         arc_cy - ARC_R * math.cos(t))
+        for t in thetas
+    ]
+
+    # ── 建立合成 Surface（包含所有弧形字元），用於後續 glitch ──
+    char_h_fc = fc.get_height()
+    pad_c     = int(char_h_fc * 0.9)      # 旋轉 bounding box 膨脹保護
+    xs_c = [p[0] for p in arc_positions]
+    ys_c = [p[1] for p in arc_positions]
+    comp_x1 = max(0, int(min(xs_c)) - pad_c - int(max(ch_ws_fc)))
+    comp_y1 = max(0, int(min(ys_c)) - pad_c)
+    comp_x2 = min(WIN_W, int(max(xs_c)) + pad_c + int(max(ch_ws_fc)))
+    comp_y2 = min(WIN_H, int(max(ys_c)) + pad_c + char_h_fc)
+    comp_w  = max(1, comp_x2 - comp_x1)
+    comp_h  = max(1, comp_y2 - comp_y1)
+
+    comp = pygame.Surface((comp_w, comp_h), pygame.SRCALPHA)
+
+    # — 描邊層（旋轉後 8 方向貼到合成 surf）—
+    for i, ch in enumerate(TITLE_TEXT):
+        theta   = thetas[i]
+        px, py  = arc_positions[i]
+        rot_deg = -math.degrees(theta)        # pygame 正角 = 逆時針
+        out_rot = pygame.transform.rotate(fc.render(ch, True, OUTLINE_COL), rot_deg)
+        ow, oh  = out_rot.get_size()
+        bx = int(px) - ow // 2 - comp_x1
+        by = int(py) - oh // 2 - comp_y1
         for ox, oy in ((-1,-1),(0,-1),(1,-1),(-1,0),(1,0),(-1,1),(0,1),(1,1)):
-            surf.blit(out_s, (x_cur + ox * OUTLINE_OFF,
-                               title_y + oy * OUTLINE_OFF))
-        x_cur += cw
+            comp.blit(out_rot, (bx + ox * OUTLINE_OFF, by + oy * OUTLINE_OFF))
 
-    # — 主文字 Surface（用於後續 glitch 操作）—
-    t_surf = pygame.Surface((total_w, th), pygame.SRCALPHA)
-    x_cur  = 0
-    for i, (ch, cw) in enumerate(zip(TITLE_TEXT, ch_ws)):
-        col = GOLD if i == active_idx else WHITE_T
-        t_surf.blit(fl.render(ch, True, col), (x_cur, 0))
-        x_cur += cw
+    # — 主文字層（帶輪色）—
+    for i, ch in enumerate(TITLE_TEXT):
+        theta   = thetas[i]
+        px, py  = arc_positions[i]
+        rot_deg = -math.degrees(theta)
+        col     = GOLD if i == active_idx else WHITE_T
+        ch_rot  = pygame.transform.rotate(fc.render(ch, True, col), rot_deg)
+        cw_, ch_ = ch_rot.get_size()
+        bx = int(px) - cw_ // 2 - comp_x1
+        by = int(py) - ch_ // 2 - comp_y1
+        comp.blit(ch_rot, (bx, by))
 
     # ════════════════════════════════════════════════════════════
-    #  ② TV 訊號雜訊 / 掃描線扭曲特效
+    #  ② TV 訊號雜訊 / 掃描線扭曲特效（作用在合成 Surface 上）
     # ════════════════════════════════════════════════════════════
     rng = random.Random(ms // 80)   # 每 80ms 換一組雜訊
 
-    # 主文字 blit
-    surf.blit(t_surf, (title_x, title_y))
+    # 主合成 blit
+    surf.blit(comp, (comp_x1, comp_y1))
 
     # 掃描線錯位（0–3 條隨機水平帶，以 x 偏移模擬訊號不穩）
     n_strips = rng.randint(0, 3)
     for _ in range(n_strips):
-        sy  = rng.randint(0, max(1, th - 3))
-        sh_ = rng.randint(2, 5)
-        dx  = rng.randint(-22, 22)
-        avail = th - sy
+        sy   = rng.randint(0, max(1, comp_h - 3))
+        sh_  = rng.randint(2, 5)
+        dx   = rng.randint(-22, 22)
+        avail = comp_h - sy
         if avail <= 0:
             continue
-        ss = pygame.Surface((total_w, min(sh_, avail)), pygame.SRCALPHA)
-        ss.blit(t_surf, (0, 0), (0, sy, total_w, sh_))
-        surf.blit(ss, (title_x + dx, title_y + sy))
+        ss = pygame.Surface((comp_w, min(sh_, avail)), pygame.SRCALPHA)
+        ss.blit(comp, (0, 0), (0, sy, comp_w, sh_))
+        surf.blit(ss, (comp_x1 + dx, comp_y1 + sy))
 
     # 色差爆裂（25% 機率，模擬瞬間訊號失真）
     if rng.random() < 0.25:
-        ca_dx  = rng.randint(4, 10)
-        ca_sf  = t_surf.copy()
+        ca_dx = rng.randint(4, 10)
+        ca_sf = comp.copy()
         ca_sf.set_alpha(70)
-        surf.blit(ca_sf, (title_x + ca_dx, title_y))
+        surf.blit(ca_sf, (comp_x1 + ca_dx, comp_y1))
 
     # ════════════════════════════════════════════════════════════
     #  ③ 圓形「開始 / 遊戲」按鈕 + 雙軌旋轉光環
