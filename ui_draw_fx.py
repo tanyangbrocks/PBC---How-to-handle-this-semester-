@@ -704,12 +704,14 @@ def _draw_start(surf, fm, fl, mpos):
     OUTLINE_COL = (18,  8, 45)     # 深紫描邊
     OUTLINE_OFF = 2                # 描邊厚度（px）
 
-    # — 字型：優先 Creative.ttc，否則 fallback 到 fl —
+    # — 字型：優先 Creative.ttc 84px 粗體，否則 fallback 到 fl —
     _CREATIVE_PATH = r"C:\Users\譚揚勳\AppData\Local\Microsoft\Windows\Fonts\Creative.ttc"
-    _ck = "creative_56"
+    _ck = "creative_84b"
     if _ck not in _extra_fonts:
         try:
-            _extra_fonts[_ck] = pygame.font.Font(_CREATIVE_PATH, 56)
+            _f = pygame.font.Font(_CREATIVE_PATH, 84)
+            _f.set_bold(True)
+            _extra_fonts[_ck] = _f
         except Exception:
             _extra_fonts[_ck] = fl
     fc = _extra_fonts[_ck]
@@ -718,19 +720,21 @@ def _draw_start(surf, fm, fl, mpos):
     active_idx = int((ms % 1000) / 1000 * N)
 
     # ── 弧形參數（圓心在文字正下方，文字沿圓頂排列）──────────
-    ARC_R         = 500                   # 圓弧半徑（越大越平緩）
-    TOTAL_ARC_RAD = math.radians(60)      # 整體弧度（8 字 → 各約 7.5°）
+    ARC_R          = 500                  # 圓弧半徑（越大越平緩）
+    TOTAL_ARC_RAD  = math.radians(72)     # 整體弧度（字型放大後拉寬至 72°）
+    LETTER_SPACING = 22                   # 每字額外間距（px）
 
     arc_top_y  = WIN_H // 3 - 20 + _fy   # 弧頂（中心字元）目標 y
     arc_cx     = WIN_W // 2
     arc_cy     = arc_top_y + ARC_R        # 圓心在標題正下方
 
-    # 各字元弧角（依字元像素寬度比例分配弧度）
+    # 各字元弧角（字元寬度 + 間距 比例分配弧度，使字間距均勻拉開）
     ch_ws_fc   = [fc.size(ch)[0] for ch in TITLE_TEXT]
-    total_w_fc = sum(ch_ws_fc)
+    ch_ws_sp   = [cw + LETTER_SPACING for cw in ch_ws_fc]   # 含間距的虛擬寬度
+    total_w_fc = sum(ch_ws_sp)
     thetas = []
     acc = 0
-    for cw in ch_ws_fc:
+    for cw in ch_ws_sp:
         t = TOTAL_ARC_RAD * (acc + cw / 2) / total_w_fc - TOTAL_ARC_RAD / 2
         thetas.append(t)
         acc += cw

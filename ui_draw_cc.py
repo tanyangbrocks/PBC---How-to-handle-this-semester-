@@ -175,6 +175,81 @@ def _draw_cc_bg(surf: pygame.Surface) -> None:
     # ── 最上層：紫色螢光粒子（疊在遮罩上、在 UI 卡片之下）──────
     _draw_cc_particles(surf, pygame.time.get_ticks())
 
+def _draw_cc_title(surf: pygame.Surface, text: str,
+                   x_center: int, base_y: int,
+                   phase: float = 0.0) -> None:
+    """CC 各步驟標題：Creative.ttc 34px 粗體 + 循環換色 + TV 掃描線雜訊特效。"""
+    ms = pygame.time.get_ticks()
+    GOLD        = (255, 185, 30)
+    WHITE_T     = (255, 255, 255)
+    OUTLINE_COL = (18,  8, 45)
+    OUTLINE_OFF = 2
+
+    _CREATIVE_PATH = r"C:\Users\譚揚勳\AppData\Local\Microsoft\Windows\Fonts\Creative.ttc"
+    _ck = "creative_34b"
+    if _ck not in _extra_fonts:
+        try:
+            _f = pygame.font.Font(_CREATIVE_PATH, 34)
+            _f.set_bold(True)
+            _extra_fonts[_ck] = _f
+        except Exception:
+            _extra_fonts[_ck] = None
+    fc = _extra_fonts.get(_ck)
+    if fc is None:
+        return
+
+    N          = len(text)
+    active_idx = int((ms % 1000) / 1000 * N)
+    fy         = _float_offset(7, 0.00170, phase)
+
+    ch_ws   = [fc.size(ch)[0] for ch in text]
+    total_w = sum(ch_ws)
+    th      = fc.get_height()
+
+    comp = pygame.Surface((total_w + OUTLINE_OFF * 2 + 4,
+                           th + OUTLINE_OFF * 2 + 4), pygame.SRCALPHA)
+
+    # 描邊層（8 方向深紫）
+    x_cur = OUTLINE_OFF + 2
+    for ch, cw in zip(text, ch_ws):
+        out_s = fc.render(ch, True, OUTLINE_COL)
+        for ox, oy in ((-1,-1),(0,-1),(1,-1),(-1,0),(1,0),(-1,1),(0,1),(1,1)):
+            comp.blit(out_s, (x_cur + ox * OUTLINE_OFF,
+                              OUTLINE_OFF + 2 + oy * OUTLINE_OFF))
+        x_cur += cw
+
+    # 主文字層（循環亮金）
+    x_cur = OUTLINE_OFF + 2
+    for i, (ch, cw) in enumerate(zip(text, ch_ws)):
+        col = GOLD if i == active_idx else WHITE_T
+        comp.blit(fc.render(ch, True, col), (x_cur, OUTLINE_OFF + 2))
+        x_cur += cw
+
+    # TV 掃描線 / 色差雜訊
+    rng      = random.Random(ms // 80)
+    cw_, ch_ = comp.get_size()
+    blit_x   = x_center - cw_ // 2
+    blit_y   = int(base_y + fy)
+    surf.blit(comp, (blit_x, blit_y))
+
+    n_strips = rng.randint(0, 2)
+    for _ in range(n_strips):
+        sy    = rng.randint(0, max(1, ch_ - 2))
+        sh_   = rng.randint(1, 3)
+        dx    = rng.randint(-12, 12)
+        avail = ch_ - sy
+        if avail <= 0:
+            continue
+        ss = pygame.Surface((cw_, min(sh_, avail)), pygame.SRCALPHA)
+        ss.blit(comp, (0, 0), (0, sy, cw_, sh_))
+        surf.blit(ss, (blit_x + dx, blit_y + sy))
+
+    if rng.random() < 0.25:
+        ca_sf = comp.copy()
+        ca_sf.set_alpha(70)
+        surf.blit(ca_sf, (blit_x + rng.randint(3, 7), blit_y))
+
+
 def _draw_cc_name(surf, fm, fs, mpos):
     """姓名輸入 modal 卡片，回傳「確認」按鈕 Rect。"""
     fb_lg = _font_bold_lg[0] or fm
@@ -226,9 +301,7 @@ def _draw_cc_portrait(surf, fm, fs, mpos):
 
     # ── 標題 ──────────────────────────────────────────────────
     title_y = (WIN_H - 480) // 2 - 20
-    _draw_float_label_card(surf, fm, "選擇人物外觀",
-                           WIN_W // 2, title_y,
-                           pad_x=26, pad_y=11, amp=7, speed=0.00170, phase=0.0)
+    _draw_cc_title(surf, "選擇人物外觀", WIN_W // 2, title_y, phase=0.0)
 
     # ── 卡片基準尺寸與位置 ────────────────────────────────────
     CARD_W, CARD_H = 260, 420
@@ -302,8 +375,7 @@ def _draw_cc_dept(surf, fm, fs, options, mpos):
     total_h   = label_h + TITLE_GAP + grid_h
     top_y     = (WIN_H - total_h) // 2
     grid_y    = top_y + label_h + TITLE_GAP
-    _draw_float_label_card(surf, fm, "選擇學院", WIN_W // 2, top_y,
-                           pad_x=26, pad_y=11, amp=7, speed=0.00170, phase=0.0)
+    _draw_cc_title(surf, "選擇學院", WIN_W // 2, top_y, phase=0.0)
     rects = []
     for i, opt in enumerate(options):
         row = i // COLS
@@ -343,8 +415,7 @@ def _draw_cc_drawbacks(surf, fm, fs, drawbacks, sel_indices, max_sel, mpos):
     sub_y         = top_y + title_h + TITLE_SUB_GAP
     sy            = sub_y + sub_h + SUB_CARD_GAP
 
-    _draw_float_label_card(surf, fm, "選擇負面特質", WIN_W // 2, top_y,
-                           pad_x=26, pad_y=11, amp=7, speed=0.00170, phase=0.5)
+    _draw_cc_title(surf, "選擇負面特質", WIN_W // 2, top_y, phase=0.5)
     sub_text  = f"（最多選 {max_sel} 個，選取可獲得額外點數）"
     _fy_sub   = _float_offset(7, 0.00170, 0.5)
     sub_s     = fs.render(sub_text, True, WHITE)
@@ -412,8 +483,7 @@ def _draw_cc_stats(surf, fm, fs, total, base, talent, vals, raw, active, mpos, d
 
     used = sum(vals)
     rem  = total - used
-    _draw_float_label_card(surf, fm, "分配能力點", WIN_W // 2, top_y,
-                           pad_x=26, pad_y=11, amp=7, speed=0.00170, phase=1.0)
+    _draw_cc_title(surf, "分配能力點", WIN_W // 2, top_y, phase=1.0)
     bonus = total - base
     pts_label = f"{base}(+{bonus})" if bonus > 0 else str(total)
     info_text = f"可用點數：{pts_label}   已用：{used}   剩餘：{rem}   初始金錢 +{rem * 10} 元"
@@ -535,8 +605,7 @@ def _draw_cc_talent(surf, fm, fs, candidates, sel_idx, mpos):
     top_y        = (WIN_H - total_h) // 2
     sy           = top_y + label_h + TITLE_GAP
 
-    _draw_float_label_card(surf, fm, "選擇天賦", WIN_W // 2, top_y,
-                           pad_x=26, pad_y=11, amp=7, speed=0.00170, phase=1.5)
+    _draw_cc_title(surf, "選擇天賦", WIN_W // 2, top_y, phase=1.5)
 
     total_w = len(candidates) * cw + (len(candidates) - 1) * gap
     sx = (WIN_W - total_w) // 2
@@ -590,8 +659,7 @@ def _draw_cc_de_level(surf, fm, fs, levels, sel_idx, mpos):
     top_y     = (WIN_H - total_h) // 2
     sy        = top_y + title_h + TITLE_GAP
 
-    _draw_float_label_card(surf, fm, "選擇年級", WIN_W // 2, top_y,
-                           pad_x=26, pad_y=11, amp=7, speed=0.00170, phase=2.0)
+    _draw_cc_title(surf, "選擇年級", WIN_W // 2, top_y, phase=2.0)
 
     total_w = len(levels) * cw + (len(levels) - 1) * gap
     sx = (WIN_W - total_w) // 2
@@ -653,8 +721,7 @@ def _draw_cc_extra_events(surf, fm, fs, mpos):
     sub_y = top_y + title_h + TITLE_SUB_GAP
     sy    = sub_y + sub_h + SUB_CARD_GAP
 
-    _draw_float_label_card(surf, fm, "選擇額外事件", WIN_W // 2, top_y,
-                           pad_x=26, pad_y=11, amp=7, speed=0.00170, phase=4.0)
+    _draw_cc_title(surf, "選擇額外事件", WIN_W // 2, top_y, phase=4.0)
     # 直接渲染說明文字（與確認選擇按鈕同色，移除半透明遮罩底板）
     _fy_sub = _float_offset(7, 0.00170, 4.0)
     sub_s   = fs.render("（可複選社團；打工與家教只能擇一；不選可直接確認）", True, WHITE)
@@ -995,8 +1062,7 @@ def _draw_cc_slot_machine(surf, fm, fs, mpos):
     total_w    = 3 * cw + 2 * gap
     sx         = (WIN_W - total_w) // 2
 
-    _draw_float_label_card(surf, fm, "抽取天賦", WIN_W // 2 + shake_dx, top_y + shake_dy,
-                           pad_x=26, pad_y=11, amp=7, speed=0.00170, phase=3.0)
+    _draw_cc_title(surf, "抽取天賦", WIN_W // 2 + shake_dx, top_y + shake_dy, phase=3.0)
 
     all_done = all(p == "done" for p in _slot_phase)
 
