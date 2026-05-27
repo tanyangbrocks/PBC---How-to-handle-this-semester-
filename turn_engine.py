@@ -20,12 +20,22 @@ from ui import notify, ask_yn, ask_choice, ask_text, set_player, \
                ask_subject_popup, trigger_time_overflow_warning, tell_story, \
                show_extra_event_popup, ask_exam_start, set_roll_call, clear_roll_call, \
                set_roll_call_attended, set_roll_call_xed, set_special_disabled, \
-               ask_skip_class_popup
+               ask_skip_class_popup, ask_withdrawal_popup
 
 
 # ── 點名事件觸發週次 ─────────────────────────────────────────────
 ROLL_CALL_WEEKS = {2, 5, 7, 10, 12, 15}
 
+# ── 停修課程說明文字（Week 13 事件用）────────────────────────────
+_WITHDRAWAL_DESC: dict[str, str] = {
+    "商管程式設計": "作業好重，期中又不太理想，有辦法撐過期末專案嗎……",
+    "統計學":       "系訂必修，作業不太會寫，不知道到了期末考，情況會不會好轉。",
+    "經濟學":       "作業和報告都不少，不太確定是否要繼續下去……",
+    "管理學":       "報告好多，而且越來越難，感覺期末壓力會很大。",
+    "會計學":       "要唸的內容太多了，期中也不太理想，是不是不該硬撐？",
+    # Week 2 加簽的課（課名不固定，使用通用說明）
+    "_ADDON":       "這是我好不容易加簽到的課……但作業實在太重了，期末除了考試外還要交報告。",
+}
 
 # ── 每週可選擇的行動清單 ──────────────────────────────────
 ACTIONS = [
@@ -582,23 +592,25 @@ class TurnEngine:
                 "⚠️ 停修期限截止在即！",
                 "「天啊我的成績看起來超不妙，還是在停修截止前，趕快停修呢？」",
             ])
-            if ask_yn("要壯士斷腕選擇停修某一科嗎？"):
-                course_choice = ask_choice([
-                    "日文：好不容易加簽到的課，但作業太重、期末還要交報告",
-                    "統計學：系訂必修，作業不太會寫，不知道能不能撐到期末",
-                ])
+            if ask_yn("要停修嗎？"):
+                # 動態建立選項清單：固定科目查表，加簽課使用通用說明
+                _fixed_courses = set(_WITHDRAWAL_DESC.keys()) - {"_ADDON"}
+                _opts = [
+                    (cname,
+                     _WITHDRAWAL_DESC.get(cname, _WITHDRAWAL_DESC["_ADDON"]))
+                    for cname in player.subject_exp
+                    if cname != "綜合"
+                ]
+                chosen_course = ask_withdrawal_popup(_opts)
+                del player.subject_exp[chosen_course]
+                player.withdrawn_courses.append(chosen_course)
                 player.restore_stamina(10)
                 player.luck = max(0, player.luck - 10)
-                if course_choice == 1:
-                    player.change_satisfaction(-5)
-                    tell_story(["💥 停修【日文】成功！體力 +10，但運氣 -10，滿足感 -5。"])
-                else:
-                    player.subject_exp["統計學"] = max(0, player.subject_exp.get("統計學", 0) - 8)
-                    tell_story(["💥 停修【統計學】成功！體力 +10，但運氣 -10，熟練度 -8。"])
+                tell_story([f"💥 停修【{chosen_course}】完成！體力 +10，但運氣 -10。"])
             else:
                 player.change_satisfaction(5)
-                tell_story(["💪 決定硬著頭皮撐下去！滿足感 +5。"])
-            tell_story(["「無論是否停休，每堂課教授都在提醒：『距離期末只剩幾週了，大家要開始讀書囉！』」"])
+                tell_story(["💪 決定硬著頭皮撐下去！自我滿意度 +5。"])
+            tell_story(["「無論是否停修，每堂課教授都在提醒：『距離期末只剩幾週了，大家要開始讀書囉！』」"])
 
         elif week == 14:
             tell_story([

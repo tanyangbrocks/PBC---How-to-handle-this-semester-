@@ -111,6 +111,13 @@ _skip_popup_event         = threading.Event()
 
 _skip_popup_result        = [None]   # str (選定課名) 或 None (取消)
 
+# ── 停修選課彈出視窗 ──────────────────────────────────────────
+_withdrawal_popup_active: list = [False]
+
+_withdrawal_popup_opts: list = []   # [(課名, 說明文字), ...]
+
+_withdrawal_popup_rects: list = []
+
 # ── 特殊行動停用狀態 ──────────────────────────────────────────
 _special_disabled: dict = {}   # {行動名: 倒數格數} 停用中的特殊行動
 

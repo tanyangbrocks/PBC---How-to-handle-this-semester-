@@ -103,6 +103,7 @@ class Character:
         self.satisfaction = 80
         self.status_effects: dict[str, int] = {}
         self.revealed_grades: set = set()   # 已公布、可在面板顯示的成績 key
+        self.withdrawn_courses: list = []   # 已停修的科目清單
         self.subject_exp: dict[str, int] = {
             "商管程式設計": 0,
             "統計學":       0,

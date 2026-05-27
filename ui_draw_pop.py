@@ -317,6 +317,73 @@ def _draw_subj_popup(surf, fm, fs, mpos):
 
     return btn_list
 
+def _draw_withdrawal_popup(surf, fm, fs, mpos):
+    """
+    停修選課彈窗：每個選項顯示課程名稱（粗體）+ 說明文字（小字，第二行）。
+    回傳 [(rect, 課名字串), ...]。
+    """
+    fb    = _font_bold[0]    or fs    # 粗體 size-17（課名）
+    fb_lg = _font_bold_lg[0] or fm    # 粗體 size-22（標題）
+
+    # ── 半透明暗色遮罩 ────────────────────────────────────────
+    ov = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
+    ov.fill((0, 0, 0, 160))
+    surf.blit(ov, (0, 0))
+
+    n       = len(_withdrawal_popup_opts)
+    bw      = 480          # 按鈕寬度（比科目彈窗寬，容納說明文字）
+    bh      = 72           # 按鈕高度（含兩行文字）
+    gap     = 10
+    pad_x   = 40
+    pad_top = 20
+    pad_mid = 14
+    pad_bot = 24
+    sep_h   = 1
+
+    total_w = bw + pad_x * 2
+    title_h = fb_lg.get_height()
+    total_h = (pad_top + title_h + 6 + sep_h + pad_mid
+               + n * bh + max(n - 1, 0) * gap
+               + pad_bot)
+
+    px = (WIN_W - total_w) // 2
+    py = (WIN_H - total_h) // 2
+
+    # ── 視窗背景 ──────────────────────────────────────────────
+    box = pygame.Rect(px, py, total_w, total_h)
+    pygame.draw.rect(surf, (38, 24, 14), box, border_radius=18)
+    pygame.draw.rect(surf, CYAN,         box, 2, border_radius=18)
+
+    # ── 標題 ──────────────────────────────────────────────────
+    POPUP_TITLE = "好課值得一修再修，請選擇你的停修科目"
+    ttx = fb_lg.render(POPUP_TITLE, True, PANEL)
+    surf.blit(ttx, (px + (total_w - ttx.get_width()) // 2, py + pad_top))
+
+    # 標題下分隔線
+    line_y = py + pad_top + title_h + 6
+    pygame.draw.line(surf, (CYAN[0], CYAN[1], CYAN[2]),
+                     (px + 18, line_y), (px + total_w - 18, line_y), 1)
+
+    # ── 選項按鈕 ──────────────────────────────────────────────
+    bx  = px + pad_x
+    by0 = line_y + sep_h + pad_mid
+    btn_list = []
+    for i, (course, desc) in enumerate(_withdrawal_popup_opts):
+        br    = pygame.Rect(bx, by0 + i * (bh + gap), bw, bh)
+        hover = br.collidepoint(mpos)
+        dr    = _premium_btn(surf, br, BTN_N, hover, radius=12)
+        # 課程名稱（粗體，上行）
+        nt     = fb.render(course, True, PANEL)
+        name_y = dr.y + (bh - fb.get_height() - fs.get_height() - 4) // 2
+        surf.blit(nt, (dr.x + 16, name_y))
+        # 說明文字（小字，下行）
+        dt = fs.render(desc, True, (230, 210, 185))
+        surf.blit(dt, (dr.x + 16, name_y + fb.get_height() + 4))
+        btn_list.append((br, course))
+
+    return btn_list
+
+
 def _draw_skip_class_popup(surf, fm, fs, mpos):
     """
     在畫面中央繪製「翹課選課」彈出視窗。

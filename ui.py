@@ -51,6 +51,20 @@ def ask_subject_popup(title: str, options: list) -> int:
     _reply_event.wait()
     return _reply_val[0]
 
+def ask_withdrawal_popup(options: list) -> str:
+    """
+    顯示停修選課彈出視窗。阻塞直到玩家選取一科。
+    options: [(課程名稱, 說明文字), ...] 清單。
+    回傳選定的課程名稱字串。
+    """
+    _withdrawal_popup_opts.clear()
+    _withdrawal_popup_opts.extend(options)
+    _withdrawal_popup_rects.clear()
+    _cmd_q.put(("withdrawal_popup_open",))
+    _reply_event.clear()
+    _reply_event.wait()
+    return _reply_val[0]
+
 def ask_text(prompt: str, default: str = "") -> str:
     """取代自由文字輸入的 input()：顯示輸入框，確認後回傳字串。"""
     _cmd_q.put(("text", prompt, default))
@@ -742,6 +756,8 @@ def run_ui():
                 _subj_popup_opts.extend(cmd[2])
                 _subj_popup_rects.clear()
                 _subj_popup_active[0] = True
+            elif tag == "withdrawal_popup_open":
+                _withdrawal_popup_active[0] = True
             elif tag == "timetable":
                 _modal[0]      = "timetable"
                 _modal_data[0] = cmd[1]   # courses list
@@ -960,6 +976,11 @@ def run_ui():
                 _subj_popup_rects.clear()
                 _subj_popup_rects.extend(
                     _draw_subj_popup(screen, fm, fs, mpos))
+            # 停修選課彈出視窗（蓋在所有遊戲 UI 之上）
+            if _withdrawal_popup_active[0]:
+                _withdrawal_popup_rects.clear()
+                _withdrawal_popup_rects.extend(
+                    _draw_withdrawal_popup(screen, fm, fs, mpos))
 
         # ── 玩家資訊一覽 modal（遊戲中查閱，浮在所有畫面之上）─────
         if _phase[0] == "game" and _info_modal_active[0]:
@@ -1208,6 +1229,20 @@ def run_ui():
                                 _subj_popup_active[0] = False
                                 _subj_popup_opts.clear()
                                 _subj_popup_rects.clear()
+                                _reply_event.set()
+                                break
+                        continue   # 無論有沒有點中按鈕，都不透傳到下方邏輯
+
+                    # 停修選課 popup 優先攔截所有點擊
+                    if _withdrawal_popup_active[0]:
+                        for (br, val) in _withdrawal_popup_rects:
+                            if br.collidepoint(ev.pos):
+                                _play_sfx("ui_click")
+                                _click_reg[(br.centerx, br.centery)] = pygame.time.get_ticks()
+                                _reply_val[0] = val
+                                _withdrawal_popup_active[0] = False
+                                _withdrawal_popup_opts.clear()
+                                _withdrawal_popup_rects.clear()
                                 _reply_event.set()
                                 break
                         continue   # 無論有沒有點中按鈕，都不透傳到下方邏輯
