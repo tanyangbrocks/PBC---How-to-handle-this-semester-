@@ -360,7 +360,7 @@ class TurnEngine:
     # 第二週加簽課程選項
     _WEEK2_COURSES = [
         {"name": "普通心理學",   "credits": 3},
-        {"name": "商管程式設計", "credits": 3},
+        {"name": "資訊管理導論", "credits": 3},
         {"name": "總經原",       "credits": 4},
         {"name": "普通化學丙",   "credits": 3},
     ]
@@ -405,7 +405,7 @@ class TurnEngine:
                 if course["name"] not in player.subject_exp:
                     player.subject_exp[course["name"]] = 0
                 tell_story([f"努力跑了好多課程，最後加簽成功科目有：{course['name']}。"])
-                if course["name"] == "商管程式設計":
+                if course["name"] == "資訊管理導論":
                     self.skill_sys.gain_exp("綜合", 5)
             else:
                 self._week2_course = {"name": "（無）", "credits": 0}

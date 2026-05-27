@@ -293,11 +293,11 @@ _WEEK_BGM: dict = {
     8:  "Music-Rainbow_Boulder_(loop).mp3",
     9:  "Music-Forest_Day_(Otherworldly).mp3",
     10: "Music-Forest_Day_(Otherworldly).mp3",
-    11: "Music-Storm.mp3",
-    12: "Music-Storm.mp3",
-    13: None,   # 待定
-    14: None,   # 待定
-    15: None,   # 待定
+    11: "Music-Ice_biome.mp3",
+    12: "Music-Ice_biome.mp3",
+    13: "Music-Storm.mp3",
+    14: "Music-Storm.mp3",
+    15: "Music-Lunar_Boss.mp3",
     16: None,   # 待定
 }
 
@@ -2447,7 +2447,7 @@ def _draw_cc_portrait(surf, fm, fs, mpos):
     base_y         = (WIN_H - CARD_H) // 2 + 20
     rects_out      = []
 
-    for i, (prefix, label) in enumerate([("b1", "男角"), ("g1", "女角")]):
+    for i, prefix in enumerate(["b1", "g1"]):
         cx     = base_x + i * (CARD_W + GAP)
         card_r = pygame.Rect(cx, base_y, CARD_W, CARD_H)
         hover  = card_r.collidepoint(mpos)
@@ -2459,19 +2459,14 @@ def _draw_cc_portrait(surf, fm, fs, mpos):
         pygame.draw.rect(surf, bg_col, card_r, border_radius=16)
         pygame.draw.rect(surf, CYAN,   card_r, 2, border_radius=16)
 
-        # 立繪（縮放置入卡片，底部對齊）
+        # 立繪（縮放置入卡片，底部對齊；無文字標籤，圖片可延伸至底部）
         img_key = f"{prefix}_1"
-        img     = _portrait_scaled_load(img_key, CARD_W - 16, CARD_H - 56)
+        img     = _portrait_scaled_load(img_key, CARD_W - 16, CARD_H - 20)
         if img:
             iw, ih = img.get_size()
             img_x  = card_r.x + (CARD_W - iw) // 2
-            img_y  = card_r.y + CARD_H - 50 - ih
+            img_y  = card_r.y + CARD_H - 14 - ih
             surf.blit(img, (img_x, img_y))
-
-        # 標籤
-        lt = fb_lg.render(label, True, WHITE if hover else GRAY)
-        surf.blit(lt, (card_r.x + (CARD_W - lt.get_width()) // 2,
-                       card_r.bottom - 44))
 
         rects_out.append((card_r, prefix))
 
@@ -5727,29 +5722,20 @@ def run_ui():
             _modal_ok_btn = _draw_modal_grade(
                 screen, fm, fl, fs, _modal_data[0] or [], mpos)
 
-        # ── 全螢幕切換按鈕（右下角，常駐顯示）──────────────────
-        _fs_hover = fs_btn.collidepoint(mpos)
-        _fs_bg    = (110, 80, 50) if _fs_hover else (70, 50, 32)
-        pygame.draw.rect(screen, _fs_bg, fs_btn, border_radius=8)
-        pygame.draw.rect(screen, CYAN, fs_btn, 1, border_radius=8)
-        # 繪製展開 / 收縮圖示（四角 L 形括號）
-        _ix = fs_btn.x + 7
-        _iy = fs_btn.y + 7
-        _iw = fs_btn.width  - 14
-        _ih = fs_btn.height - 14
-        _a  = 7
-        _ic = PANEL
-        if _is_fullscreen[0]:
-            # 收縮圖示：L 形箭頭指向內側
-            pygame.draw.line(screen, _ic, (_ix+_a,      _iy),        (_ix+_a,      _iy+_a),        2)
-            pygame.draw.line(screen, _ic, (_ix,         _iy+_a),     (_ix+_a,      _iy+_a),        2)
-            pygame.draw.line(screen, _ic, (_ix+_iw-_a,  _iy),        (_ix+_iw-_a,  _iy+_a),        2)
-            pygame.draw.line(screen, _ic, (_ix+_iw,     _iy+_a),     (_ix+_iw-_a,  _iy+_a),        2)
-            pygame.draw.line(screen, _ic, (_ix+_a,      _iy+_ih),    (_ix+_a,      _iy+_ih-_a),    2)
-            pygame.draw.line(screen, _ic, (_ix,         _iy+_ih-_a), (_ix+_a,      _iy+_ih-_a),    2)
-            pygame.draw.line(screen, _ic, (_ix+_iw-_a,  _iy+_ih),    (_ix+_iw-_a,  _iy+_ih-_a),   2)
-            pygame.draw.line(screen, _ic, (_ix+_iw,     _iy+_ih-_a), (_ix+_iw-_a,  _iy+_ih-_a),   2)
-        else:
+        # ── 全螢幕切換按鈕（全螢幕模式下隱藏；非全螢幕時右下角常駐）──
+        if not _is_fullscreen[0]:
+            _fs_hover = fs_btn.collidepoint(mpos)
+            _fs_bg    = (110, 80, 50) if _fs_hover else (70, 50, 32)
+            pygame.draw.rect(screen, _fs_bg, fs_btn, border_radius=8)
+            pygame.draw.rect(screen, CYAN, fs_btn, 1, border_radius=8)
+        # 繪製展開圖示（非全螢幕才顯示）
+        if not _is_fullscreen[0]:
+            _ix = fs_btn.x + 7
+            _iy = fs_btn.y + 7
+            _iw = fs_btn.width  - 14
+            _ih = fs_btn.height - 14
+            _a  = 7
+            _ic = PANEL
             # 展開圖示：L 形箭頭指向四角外側
             pygame.draw.line(screen, _ic, (_ix,         _iy),        (_ix+_a,      _iy),            2)
             pygame.draw.line(screen, _ic, (_ix,         _iy),        (_ix,         _iy+_a),         2)
@@ -6029,7 +6015,11 @@ def run_ui():
                     _composing[0] = ""
 
             elif ev.type == pygame.KEYDOWN:
-                if _phase[0] == "char_create":
+                # ESC：全螢幕模式下退出全螢幕
+                if ev.key == pygame.K_ESCAPE and _is_fullscreen[0]:
+                    screen = pygame.display.set_mode((WIN_W, WIN_H))
+                    _is_fullscreen[0] = False
+                elif _phase[0] == "char_create":
                     if _cc_mode[0] == "name":
                         if ev.key == pygame.K_RETURN:
                             _cc_reply_val[0] = _cc_tvalue[0]
