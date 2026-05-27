@@ -2730,12 +2730,14 @@ def _draw_cc_stats(surf, fm, fs, total, base, talent, vals, raw, active, mpos, d
     btn_h        = 48
     n_rows       = 3
     rows_h       = n_rows * box_h + (n_rows - 1) * ROW_GAP
-    total_h      = title_h + TITLE_SUB_GAP + sub_h + SUB_ROW_GAP + rows_h + ROWS_BTN_GAP + btn_h
+    # 在三個能力列下方留 ROW_GAP + box_h 給「可用時間」顯示列
+    total_h      = title_h + TITLE_SUB_GAP + sub_h + SUB_ROW_GAP + rows_h + ROW_GAP + box_h + ROWS_BTN_GAP + btn_h
     top_y        = (WIN_H - total_h) // 2
     sub_y        = top_y + title_h + TITLE_SUB_GAP
     row_start_y  = sub_y + sub_h + SUB_ROW_GAP
     row_y        = [row_start_y + i * (box_h + ROW_GAP) for i in range(n_rows)]
-    ok_y         = row_y[-1] + box_h + ROWS_BTN_GAP
+    bt_y         = row_y[-1] + box_h + ROW_GAP   # 可用時間顯示列（運氣行正下方）
+    ok_y         = bt_y + box_h + ROWS_BTN_GAP
 
     used = sum(vals)
     rem  = total - used
@@ -2818,18 +2820,30 @@ def _draw_cc_stats(surf, fm, fs, total, base, talent, vals, raw, active, mpos, d
                 ann_s = ann_raw
             surf.blit(ann_s, (ann_x, ry))
 
-    # 可用時間加成提示（天賦 + 年級合計）
+    # ── 可用時間顯示列（對齊運氣行下方，與能力值同字體格式）────
     bt_talent = (talent   or {}).get("base_time", 0)
     bt_de     = (de_level or {}).get("base_time", 0)
-    bt_parts  = []
-    if bt_talent: bt_parts.append(f"天賦 {'+' if bt_talent > 0 else ''}{bt_talent}")
-    if bt_de:     bt_parts.append(f"年級 +{bt_de}")
-    if bt_parts:
-        bt_total = bt_talent + bt_de
-        bt_note  = f"可用時間：基礎 10 {'+' if bt_total >= 0 else ''}{bt_total}  （{'，'.join(bt_parts)}）"
-        bt_txt   = fs.render(bt_note, True, GRAY)
-        surf.blit(bt_txt, ((WIN_W - bt_txt.get_width()) // 2,
-                            row_y[-1] + box_h + 8))
+    bt_total  = bt_talent + bt_de
+    # 標籤（右對齊至 minus_x，與體力/智力/運氣標籤對齊）
+    bt_lt = fb_lg.render("可用時間", True, WHITE)
+    surf.blit(bt_lt, (row_left + label_w - bt_lt.get_width(),
+                      bt_y + (box_h - bt_lt.get_height()) // 2))
+    # 數值「10」（從 minus_x 起，與能力值輸入區同水平）
+    bt_num = fb_lg.render("10", True, WHITE)
+    surf.blit(bt_num, (minus_x,
+                       bt_y + (box_h - bt_num.get_height()) // 2))
+    # 加成括弧（+N），綠色，縮放至與增減按鈕等高（btn_sz）
+    if bt_total:
+        sign   = "+" if bt_total > 0 else ""
+        bt_ann = f"（{sign}{bt_total}）"
+        bt_col = GREEN if bt_total > 0 else (200, 80, 80)
+        bt_raw = fm.render(bt_ann, True, bt_col)
+        if bt_raw.get_height() > 0:
+            bt_w = max(1, int(bt_raw.get_width() * btn_sz / bt_raw.get_height()))
+            bt_s = pygame.transform.smoothscale(bt_raw, (bt_w, btn_sz))
+        else:
+            bt_s = bt_raw
+        surf.blit(bt_s, (minus_x + bt_num.get_width() + 4, bt_y))
 
     # 確認
     ok          = pygame.Rect((WIN_W - 160) // 2, ok_y, 160, btn_h)
