@@ -689,16 +689,28 @@ def _draw_shop(surf: pygame.Surface,
     RP_X   = GX + COLS * (ITEM_W + GAP_X)   # 645
     RP_W   = WIN_W - RP_X - 15              # 300
 
+    # ── 捲動計算 ──────────────────────────────────────────────
+    GRID_H    = WIN_H - GY * 2              # 690px 可見高度
+    rows_all  = max(1, math.ceil(len(items) / COLS))
+    total_h   = rows_all * ITEM_H + (rows_all - 1) * GAP_Y
+    max_scroll = max(0, total_h - GRID_H)
+    scroll_y  = max(0, min(_shop_scroll_y[0], max_scroll))
+    _shop_scroll_y[0] = scroll_y   # 箝制回 state
+
+    # 商品格的裁切矩形（防止卡片畫到右側面板 / 上下邊界外）
+    GRID_CLIP = pygame.Rect(GX - 4, GY, RP_X - GX, GRID_H)
+
     buy_rects  = []
     hover_this = -1
 
-    # ── 預先判斷 hover ──────────────────────────────────────────
+    # ── 預先判斷 hover（加入捲動偏移 + 限制在 grid 範圍內）──────
     for i in range(len(items)):
         col = i % COLS
         row = i // COLS
         bx  = GX + col * (ITEM_W + GAP_X)
-        by  = GY + row * (ITEM_H + GAP_Y)
-        if pygame.Rect(bx, by, ITEM_W, ITEM_H).collidepoint(mpos):
+        by  = GY + row * (ITEM_H + GAP_Y) - scroll_y
+        if (pygame.Rect(bx, by, ITEM_W, ITEM_H).collidepoint(mpos)
+                and GRID_CLIP.collidepoint(mpos)):
             hover_this = i
             break
 
@@ -707,12 +719,18 @@ def _draw_shop(surf: pygame.Surface,
     if hover_this >= 0:
         draw_order.append(hover_this)
 
+    old_clip = surf.get_clip()
+    surf.set_clip(GRID_CLIP)          # 開始裁切
+
     for i in draw_order:
         item = items[i]
         col  = i % COLS
         row  = i // COLS
         bx   = GX + col * (ITEM_W + GAP_X)
-        by   = GY + row * (ITEM_H + GAP_Y)
+        by   = GY + row * (ITEM_H + GAP_Y) - scroll_y
+        # 完全在可見範圍外則跳過
+        if by + ITEM_H < GY or by > GY + GRID_H:
+            continue
         base = pygame.Rect(bx, by, ITEM_W, ITEM_H)
         is_hov = (i == hover_this)
 
@@ -802,6 +820,23 @@ def _draw_shop(surf: pygame.Surface,
         surf.blit(pc_t, (_brow_x + pt_t.get_width() + _bc_r * 2, _brow_y))
 
         buy_rects.append((buy_r, i))
+
+    surf.set_clip(old_clip)           # 結束裁切
+
+    # ── 垂直捲軸（有超出內容時才繪製）──────────────────────────
+    if max_scroll > 0:
+        SB_X  = RP_X - 9
+        SB_W  = 5
+        SB_Y  = GY
+        SB_H  = GRID_H
+        # 軌道
+        pygame.draw.rect(surf, (200, 185, 165),
+                         (SB_X, SB_Y, SB_W, SB_H), border_radius=3)
+        # 滑塊
+        thumb_h = max(22, int(SB_H * GRID_H / total_h))
+        thumb_y = SB_Y + int((SB_H - thumb_h) * scroll_y / max_scroll)
+        pygame.draw.rect(surf, (150, 120, 88),
+                         (SB_X, thumb_y, SB_W, thumb_h), border_radius=3)
 
     _shop_hover_idx[0] = hover_this
 

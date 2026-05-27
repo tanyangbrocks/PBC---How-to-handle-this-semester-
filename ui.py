@@ -283,9 +283,10 @@ def open_shop_ui(items: list) -> None:
     """
     _shop_items.clear()
     _shop_items.extend(items)
-    _shop_hover_idx[0] = -1
-    _shop_msg[0]       = ""
-    _shop_msg_time[0]  = 0
+    _shop_hover_idx[0]  = -1
+    _shop_msg[0]        = ""
+    _shop_msg_time[0]   = 0
+    _shop_scroll_y[0]   = 0   # 每次開店重置捲動位置
     _shop_exit_event.clear()
     _cmd_q.put(("phase", "shop"))
     _shop_exit_event.wait()
@@ -1014,6 +1015,13 @@ def run_ui():
             screen.fill((0, 0, 0))
             screen.blit(_shk_copy, (_sdx, _sdy))
 
+        # ── 全螢幕 fallback：遊戲邊界外再補黑（覆蓋任何滑出畫外的面板）──
+        _sw2, _sh2 = screen.get_size()
+        if _sw2 > WIN_W:
+            screen.fill((0, 0, 0), pygame.Rect(WIN_W, 0, _sw2 - WIN_W, _sh2))
+        if _sh2 > WIN_H:
+            screen.fill((0, 0, 0), pygame.Rect(0, WIN_H, _sw2, _sh2 - WIN_H))
+
         pygame.display.flip()
 
         # ── pygame 事件 ───────────────────────────────────────
@@ -1269,6 +1277,11 @@ def run_ui():
                                 _mode[0] = None
                                 _exam_ready_label[0] = ""
                                 _reply_event.set()
+
+            elif ev.type == pygame.MOUSEWHEEL:
+                # 道具店商品格捲動（向上滾 = 往下看更多商品）
+                if _phase[0] == "shop":
+                    _shop_scroll_y[0] = max(0, _shop_scroll_y[0] - ev.y * 38)
 
             elif ev.type == pygame.TEXTEDITING:
                 # 輸入法組字中（例如注音還沒按確認）：只更新預覽，不寫入正文
