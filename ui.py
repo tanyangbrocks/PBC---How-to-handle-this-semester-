@@ -4898,44 +4898,158 @@ def _draw_modal_grade(surf, fm, fl, fs, items, mpos):
 
 
 def _draw_start(surf, fm, fl, mpos):
-    """開始畫面：遊戲標題 + 開始遊戲按鈕，回傳按鈕 Rect。"""
+    """
+    開始畫面（全面改版）：
+      - 封面背景圖
+      - 櫻花天氣特效（懶初始化）
+      - 字元輪色 + 描邊 + TV 訊號雜訊/掃描線扭曲標題（無副標）
+      - 圓形開始按鈕 + 雙軌旋轉光環粒子
+    回傳按鈕命中 Rect。
+    """
+    # ── 背景圖 ────────────────────────────────────────────────
     if "start" in _grads:
         surf.blit(_grads["start"], (0, 0))
     else:
         surf.fill(BG)
 
-    # ── 懸浮偏移（標題卡 + 按鈕同步浮動）────────────────────
+    ms = pygame.time.get_ticks()
+
+    # ── 懶初始化：開始畫面固定使用「櫻花」天氣 ───────────────
+    if _weather_type[0] is None:
+        _weather_type[0] = "sakura"
+        _weather_pts.clear()
+        for _ in range(72):
+            _weather_pts.append(_wx_leaf_new("sakura", full_screen=True))
+
+    # ── 天氣特效（櫻花）────────────────────────────────────────
+    _draw_weather(surf, ms)
+
+    # ── 懸浮偏移（標題 + 按鈕同步）────────────────────────────
     _fy = _float_offset(amp=9, speed=0.00155)
 
-    # ── 標題區半透明底板（確保圖片背景上文字可讀）─────────
-    card_w, card_h = 520, 190
-    card_x = (WIN_W - card_w) // 2
-    card_y = WIN_H // 3 - 40 + _fy
-    _soft_shadow(surf, pygame.Rect(card_x, card_y, card_w, card_h),
-                 radius=18, alpha=55, offset=(0, 8))
-    card_s = pygame.Surface((card_w, card_h), pygame.SRCALPHA)
-    card_s.fill((20, 10, 5, 148))   # 深棕半透明
-    surf.blit(card_s, (card_x, card_y))
-    pygame.draw.rect(surf, CYAN, (card_x, card_y, card_w, card_h),
-                     2, border_radius=18)
-    _gloss_rect(surf, pygame.Rect(card_x, card_y, card_w, card_h))
+    # ════════════════════════════════════════════════════════════
+    #  ① 字元輪色 + 描邊標題
+    # ════════════════════════════════════════════════════════════
+    TITLE_TEXT  = "如何渡過這學期？"
+    N           = len(TITLE_TEXT)
+    GOLD        = (255, 185, 30)   # 活躍字元高亮色
+    WHITE_T     = (255, 255, 255)
+    OUTLINE_COL = (18,  8, 45)     # 深紫描邊
+    OUTLINE_OFF = 2                # 描邊厚度（px）
 
-    # 標題
-    title = fl.render("如何渡過這學期？", True, (255, 255, 255))
-    surf.blit(title, ((WIN_W - title.get_width()) // 2, card_y + 24))
-    # 副標
-    sub = fm.render("一款大學生存模擬遊戲", True, (255, 230, 140))
-    surf.blit(sub, ((WIN_W - sub.get_width()) // 2,
-                    card_y + 24 + fl.get_height() + 16))
+    # 1 秒循環：每個字元依序亮 1000/N ms
+    active_idx = int((ms % 1000) / 1000 * N)
 
-    # ── 按鈕（與標題卡同步浮動）──────────────────────────
-    btn   = pygame.Rect((WIN_W - 220) // 2, WIN_H // 2 + 68 + _fy, 220, 56)
-    hover = btn.collidepoint(mpos)
-    dr    = _premium_btn(surf, btn, BTN_N, hover, radius=16)
-    t     = fm.render("開始遊戲", True, (255, 255, 255))
-    surf.blit(t, (dr.x + (dr.width  - t.get_width())  // 2,
-                  dr.y + (dr.height - t.get_height()) // 2))
-    return btn
+    # 預算各字元寬度（用於整體置中）
+    ch_ws   = [fl.size(ch)[0] for ch in TITLE_TEXT]
+    total_w = sum(ch_ws)
+    title_x = (WIN_W - total_w) // 2
+    title_y = WIN_H // 3 - 20 + _fy
+    th      = fl.get_height()
+
+    # — 描邊層（直接繪製到 surf，8 方向）—
+    x_cur = title_x
+    for ch, cw in zip(TITLE_TEXT, ch_ws):
+        out_s = fl.render(ch, True, OUTLINE_COL)
+        for ox, oy in ((-1,-1),(0,-1),(1,-1),(-1,0),(1,0),(-1,1),(0,1),(1,1)):
+            surf.blit(out_s, (x_cur + ox * OUTLINE_OFF,
+                               title_y + oy * OUTLINE_OFF))
+        x_cur += cw
+
+    # — 主文字 Surface（用於後續 glitch 操作）—
+    t_surf = pygame.Surface((total_w, th), pygame.SRCALPHA)
+    x_cur  = 0
+    for i, (ch, cw) in enumerate(zip(TITLE_TEXT, ch_ws)):
+        col = GOLD if i == active_idx else WHITE_T
+        t_surf.blit(fl.render(ch, True, col), (x_cur, 0))
+        x_cur += cw
+
+    # ════════════════════════════════════════════════════════════
+    #  ② TV 訊號雜訊 / 掃描線扭曲特效
+    # ════════════════════════════════════════════════════════════
+    rng = random.Random(ms // 80)   # 每 80ms 換一組雜訊
+
+    # 主文字 blit
+    surf.blit(t_surf, (title_x, title_y))
+
+    # 掃描線錯位（0–3 條隨機水平帶，以 x 偏移模擬訊號不穩）
+    n_strips = rng.randint(0, 3)
+    for _ in range(n_strips):
+        sy  = rng.randint(0, max(1, th - 3))
+        sh_ = rng.randint(2, 5)
+        dx  = rng.randint(-22, 22)
+        avail = th - sy
+        if avail <= 0:
+            continue
+        ss = pygame.Surface((total_w, min(sh_, avail)), pygame.SRCALPHA)
+        ss.blit(t_surf, (0, 0), (0, sy, total_w, sh_))
+        surf.blit(ss, (title_x + dx, title_y + sy))
+
+    # 色差爆裂（25% 機率，模擬瞬間訊號失真）
+    if rng.random() < 0.25:
+        ca_dx  = rng.randint(4, 10)
+        ca_sf  = t_surf.copy()
+        ca_sf.set_alpha(70)
+        surf.blit(ca_sf, (title_x + ca_dx, title_y))
+
+    # ════════════════════════════════════════════════════════════
+    #  ③ 圓形「開始 / 遊戲」按鈕 + 雙軌旋轉光環
+    # ════════════════════════════════════════════════════════════
+    BTN_R  = 54
+    btn_cx = WIN_W // 2
+    btn_cy = WIN_H // 2 + 90 + _fy
+
+    # 圓形 hover 判定
+    _bdx  = mpos[0] - btn_cx
+    _bdy  = mpos[1] - btn_cy
+    hover = (_bdx * _bdx + _bdy * _bdy) <= (BTN_R * BTN_R)
+
+    # — 光環粒子（SRCALPHA surface，避免蓋住背景）—
+    halo_sf = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
+
+    # 靜態光暈圈
+    pygame.draw.circle(halo_sf, (*BTN_N, 40),  (btn_cx, btn_cy), BTN_R + 16, 14)
+    pygame.draw.circle(halo_sf, (*BTN_N, 18),  (btn_cx, btn_cy), BTN_R + 32,  6)
+
+    # 內軌粒子（順時針，1 圈/秒）
+    _HALO_N1 = 20
+    _HALO_R1 = BTN_R + 22
+    _ang0    = (ms * 0.001) * math.tau
+    for i in range(_HALO_N1):
+        ang = _ang0 + i * math.tau / _HALO_N1
+        px  = btn_cx + math.cos(ang) * _HALO_R1
+        py  = btn_cy + math.sin(ang) * _HALO_R1
+        pr  = max(1, 3 + int(1.5 * math.sin(ang * 3 + ms * 0.002)))
+        alp = max(0, min(255, 185 + int(70 * math.sin(ang * 2 + ms * 0.0015))))
+        pygame.draw.circle(halo_sf, (*BTN_N, alp), (int(px), int(py)), pr)
+
+    # 外軌粒子（逆時針，約 0.45 圈/秒）
+    _HALO_N2 = 11
+    _HALO_R2 = BTN_R + 38
+    _ang1    = -(ms * 0.00045) * math.tau
+    for i in range(_HALO_N2):
+        ang = _ang1 + i * math.tau / _HALO_N2
+        px  = btn_cx + math.cos(ang) * _HALO_R2
+        py  = btn_cy + math.sin(ang) * _HALO_R2
+        alp = max(0, min(255, 105 + int(65 * math.sin(ang * 2))))
+        pygame.draw.circle(halo_sf, (255, 215, 120, alp), (int(px), int(py)), 2)
+
+    surf.blit(halo_sf, (0, 0))
+
+    # — 按鈕主圓 —
+    _soft_shadow_circle(surf, btn_cx, btn_cy, BTN_R, alpha=70)
+    _premium_circle(surf, btn_cx, btn_cy, BTN_R, BTN_N, hover, key=("start_btn",))
+
+    # — 文字（「開始」/ 「遊戲」各佔一行）—
+    fb = _font_bold[0] or fm
+    t1 = fb.render("開始", True, (255, 255, 255))
+    t2 = fb.render("遊戲", True, (255, 255, 255))
+    lh = t1.get_height()
+    surf.blit(t1, (btn_cx - t1.get_width() // 2, btn_cy - lh - 2))
+    surf.blit(t2, (btn_cx - t2.get_width() // 2, btn_cy + 2))
+
+    # 回傳外接方形 Rect（供 collidepoint 命中判定使用）
+    return pygame.Rect(btn_cx - BTN_R, btn_cy - BTN_R, BTN_R * 2, BTN_R * 2)
 
 
 def _draw_end(surf, fm, fs, lr, mpos):
