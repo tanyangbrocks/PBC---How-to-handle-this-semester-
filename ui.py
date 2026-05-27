@@ -203,6 +203,10 @@ _cc_extra_sel   : list = []   # 已選的 event id 列表
 _cc_extra_intel  = [0]        # 玩家當前智力（判斷家教資格用）
 _cc_extra_warn   = [0]        # 互斥衝突警告觸發時間 ticks（0=無）
 
+# ── 角色創建紫色螢光粒子 ─────────────────────────────────────────
+_cc_ptcl:       list = []     # 粒子池（紫色光球 / 光絮）
+_cc_ptcl_ready       = [False] # 是否已初始化
+
 # ── event_ok 彩色邊框擴充 ─────────────────────────────────────────
 _event_ok_border_color = [None]   # None = 預設棕色；或 (r,g,b) tuple
 
@@ -2332,6 +2336,115 @@ def _draw_panel(surf, rect, border=CYAN):
     pygame.draw.rect(surf, border, rect, 2, border_radius=18)
 
 
+# ── 角色創建紫色螢光粒子工廠 ─────────────────────────────────────
+
+_CC_PTCL_COLORS = [
+    (180,  80, 255),
+    (210, 100, 255),
+    (140,  60, 230),
+    (200, 120, 255),
+    (160,  70, 240),
+    (220,  90, 255),
+    (170, 110, 248),
+    (230, 140, 255),
+]
+
+
+def _cc_ptcl_new(full_screen: bool = False) -> dict:
+    """生成一顆紫色螢光粒子（orb 光球 或 wisp 光絮）。"""
+    kind = "orb" if random.random() < 0.55 else "wisp"
+    if full_screen:
+        y0 = random.uniform(-20, WIN_H + 20)
+    else:
+        y0 = random.uniform(WIN_H + 10, WIN_H + 80)
+    return {
+        "kind":     kind,
+        "x":        random.uniform(-30, WIN_W + 30),
+        "y":        y0,
+        "vx":       random.uniform(-0.20, 0.20),
+        "vy":       random.uniform(-0.58, -0.18),   # 向上飄
+        "r":        (random.uniform(3.0, 6.5) if kind == "orb"
+                     else random.uniform(1.5, 3.2)),
+        "alpha":    random.randint(140, 225),
+        "color":    random.choice(_CC_PTCL_COLORS),
+        "pulse_ph": random.uniform(0, math.tau),
+        "pulse_sp": random.uniform(0.018, 0.055),
+        "wb_ph":    random.uniform(0, math.tau),
+        "wb_sp":    random.uniform(0.008, 0.022),
+        "wb_amp":   random.uniform(0.5, 1.4),
+    }
+
+
+def _draw_cc_particles(surf: pygame.Surface, ms: int) -> None:
+    """
+    繪製並更新角色創建畫面的紫色螢光粒子效果。
+    應在 _draw_cc_bg() 的最後（overlay 之後）呼叫。
+    """
+    # ── 懶初始化 ─────────────────────────────────────────────────
+    if not _cc_ptcl_ready[0]:
+        _cc_ptcl.clear()
+        for _ in range(58):
+            _cc_ptcl.append(_cc_ptcl_new(full_screen=True))
+        _cc_ptcl_ready[0] = True
+
+    # ── 每幀繪製到 SRCALPHA Surface 再合成 ───────────────────────
+    pt_surf = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
+
+    survived: list = []
+    for p in _cc_ptcl:
+        # 脈動：振幅調整 alpha 與半徑
+        pulse     = math.sin(ms * p["pulse_sp"] + p["pulse_ph"])
+        r_draw    = max(1.0, p["r"] * (1.0 + 0.30 * pulse))
+        alp       = int(p["alpha"] * (0.68 + 0.32 * (pulse + 1.0) * 0.5))
+        alp       = max(0, min(255, alp))
+        # 橫向飄動
+        wb        = math.sin(ms * p["wb_sp"] + p["wb_ph"]) * p["wb_amp"]
+        px        = int(p["x"] + wb)
+        py        = int(p["y"])
+        col       = p["color"]
+
+        if p["kind"] == "orb":
+            # 外層柔暈（兩圈）
+            h1r = max(2, int(r_draw * 2.4))
+            h2r = max(2, int(r_draw * 1.7))
+            pygame.draw.circle(pt_surf, (*col, max(0, alp //  6)), (px, py), h1r)
+            pygame.draw.circle(pt_surf, (*col, max(0, alp //  4)), (px, py), h2r)
+            # 主光球
+            pygame.draw.circle(pt_surf, (*col, alp),               (px, py), max(1, int(r_draw)))
+            # 內芯白光
+            core_r = max(1, int(r_draw * 0.40))
+            pygame.draw.circle(pt_surf, (255, 255, 255, min(255, alp + 55)),
+                               (px, py), core_r)
+        else:  # wisp 光絮：細長橢圓
+            ew = max(2, int(r_draw * 3))
+            eh = max(4, int(r_draw * 9))
+            ws = pygame.Surface((ew + 2, eh + 2), pygame.SRCALPHA)
+            outer_col = (*col, max(0, alp // 3))
+            inner_col = (*col, alp)
+            pygame.draw.ellipse(ws, outer_col, ws.get_rect())
+            ir = ws.get_rect().inflate(-2, -4)
+            if ir.width > 0 and ir.height > 0:
+                pygame.draw.ellipse(ws, inner_col, ir)
+            pt_surf.blit(ws, (px - ew // 2 - 1, py - eh // 2 - 1))
+
+        # ── 更新位置 ──────────────────────────────────────────────
+        p["x"] += p["vx"]
+        p["y"] += p["vy"]
+
+        # 飄出螢幕（頂部 / 兩側）則丟棄
+        if p["y"] < -25 or p["x"] < -55 or p["x"] > WIN_W + 55:
+            survived.append(_cc_ptcl_new(full_screen=False))
+        else:
+            survived.append(p)
+
+    _cc_ptcl[:] = survived
+    # 補充至目標數量
+    while len(_cc_ptcl) < 58:
+        _cc_ptcl.append(_cc_ptcl_new(full_screen=False))
+
+    surf.blit(pt_surf, (0, 0))
+
+
 def _draw_cc_bg(surf: pygame.Surface) -> None:
     """
     在 surf 上繪製角色創建畫面的背景：
@@ -2339,6 +2452,7 @@ def _draw_cc_bg(surf: pygame.Surface) -> None:
          若影片未載入則退回靜態漸層。
       2. 上層：75% 不透明奶茶色→奶白色縱向漸層遮罩，
          讓 UI 卡片在影片上仍保有良好對比。
+      3. 最上層：紫色螢光粒子特效（光球 + 光絮飄盪）。
     """
     # ── 底層：影片 or 靜態漸層 ───────────────────────────────
     cap = _cc_video_cap[0]
@@ -2382,6 +2496,9 @@ def _draw_cc_bg(surf: pygame.Surface) -> None:
             pygame.draw.line(ov, (_r, _g, _b, _a), (0, _i), (WIN_W - 1, _i))
         _cc_overlay_surf[0] = ov
     surf.blit(_cc_overlay_surf[0], (0, 0))
+
+    # ── 最上層：紫色螢光粒子（疊在遮罩上、在 UI 卡片之下）──────
+    _draw_cc_particles(surf, pygame.time.get_ticks())
 
 
 def _draw_cc_name(surf, fm, fs, mpos):
@@ -2428,7 +2545,8 @@ def _draw_cc_portrait(surf, fm, fs, mpos):
     """
     角色外觀選擇畫面（CC 第 1.5 步）。
     左：b1_1（男角），右：g1_1（女角）。
-    回傳 [(card_rect, prefix_str), ...] 供 _handle_cc_action 使用。
+    每張卡片具備輕微懸浮動畫（相位不同）及游標滑入時流暢放大效果。
+    回傳 [(base_card_rect, prefix_str), ...] 供 _handle_cc_action 使用。
     """
     fb_lg = _font_bold_lg[0] or fm
     _draw_cc_bg(surf)
@@ -2439,7 +2557,7 @@ def _draw_cc_portrait(surf, fm, fs, mpos):
                            WIN_W // 2, title_y,
                            pad_x=26, pad_y=11, amp=7, speed=0.00170, phase=0.0)
 
-    # ── 卡片尺寸與位置 ────────────────────────────────────────
+    # ── 卡片基準尺寸與位置 ────────────────────────────────────
     CARD_W, CARD_H = 260, 420
     GAP            = 60
     total_w        = CARD_W * 2 + GAP
@@ -2448,27 +2566,49 @@ def _draw_cc_portrait(surf, fm, fs, mpos):
     rects_out      = []
 
     for i, prefix in enumerate(["b1", "g1"]):
+        # ── 懸浮偏移（兩張卡相位差 1.3 rad，各自獨立飄動）────
+        fy = _float_offset(amp=6, speed=0.00155, phase=i * 1.3)
+
+        # ── 基準 Rect（用於碰撞判斷與回傳）─────────────────────
         cx     = base_x + i * (CARD_W + GAP)
-        card_r = pygame.Rect(cx, base_y, CARD_W, CARD_H)
+        card_r = pygame.Rect(cx, base_y + fy, CARD_W, CARD_H)
         hover  = card_r.collidepoint(mpos)
 
-        # 投影
-        _soft_shadow(surf, card_r, radius=16, alpha=50, offset=(0, 6))
+        # ── 平滑 hover 縮放（_anim_hover 自動插值 0→1）──────────
+        hkey   = ("cc_p", i)
+        ht     = _anim_hover.get(hkey, 0.0)
+        ht     = min(1.0, ht + 0.10) if hover else max(0.0, ht - 0.10)
+        _anim_hover[hkey] = ht
+        scale  = 1.0 + _ease_out_back(ht) * 0.055 if ht > 0 else 1.0
+        dr     = _scaled_rect(card_r, scale)   # 實際繪製用 Rect
+
+        # 投影（用放大後的 Rect）
+        _soft_shadow(surf, dr, radius=18, alpha=55, offset=(0, 7))
         # 卡片底色
         bg_col = (240, 228, 210) if hover else PANEL
-        pygame.draw.rect(surf, bg_col, card_r, border_radius=16)
-        pygame.draw.rect(surf, CYAN,   card_r, 2, border_radius=16)
+        pygame.draw.rect(surf, bg_col, dr, border_radius=16)
+        # hover 時紫色邊框輝光（強調選中感）
+        border_col = (190, 100, 255) if hover else CYAN
+        border_w   = 3 if hover else 2
+        pygame.draw.rect(surf, border_col, dr, border_w, border_radius=16)
+        if hover and ht > 0.3:
+            # 額外暈光邊框
+            glow_sf = pygame.Surface((dr.width + 12, dr.height + 12), pygame.SRCALPHA)
+            glow_a  = int(60 * ht)
+            pygame.draw.rect(glow_sf, (190, 100, 255, glow_a),
+                             glow_sf.get_rect(), border_radius=20)
+            surf.blit(glow_sf, (dr.x - 6, dr.y - 6))
 
-        # 立繪（縮放置入卡片，底部對齊；無文字標籤，圖片可延伸至底部）
+        # 立繪（依放大 Rect 等比縮放後底部對齊）
         img_key = f"{prefix}_1"
-        img     = _portrait_scaled_load(img_key, CARD_W - 16, CARD_H - 20)
+        img     = _portrait_scaled_load(img_key, dr.width - 16, dr.height - 20)
         if img:
             iw, ih = img.get_size()
-            img_x  = card_r.x + (CARD_W - iw) // 2
-            img_y  = card_r.y + CARD_H - 14 - ih
+            img_x  = dr.x + (dr.width  - iw) // 2
+            img_y  = dr.y +  dr.height - 14 - ih
             surf.blit(img, (img_x, img_y))
 
-        rects_out.append((card_r, prefix))
+        rects_out.append((card_r, prefix))   # 回傳基準 Rect（邏輯碰撞用）
 
     return rects_out
 
