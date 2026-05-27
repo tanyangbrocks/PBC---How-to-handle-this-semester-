@@ -742,9 +742,9 @@ class TurnEngine:
             self.event_sys.set_allnighter_risk(0.10)
             results.append("睡過頭機率 ↑10%")
 
-        # ── 翹課隨機小考風險（roll_call 已由呼叫端明確處理）──────
+        # ── 翹課固定 / 隨機後果（roll_call 已由呼叫端明確處理）──────
         if sa.get("quiz_miss_chance"):
-            self._roll_skip_effects(player)
+            results.extend(self._roll_skip_effects(player))
 
         # ── 飽腹狀態 ──────────────────────────────────────────
         if sa.get("gives_full_status"):
@@ -753,13 +753,26 @@ class TurnEngine:
         notify(f"  ✔ 執行【{sa['name']}】完成。")
         show_action_result(results, title=sa["name"])
 
-    def _roll_skip_effects(self, player) -> None:
-        """翹課的隨機後果：可能錯過小考。（點名由呼叫端明確處理，不在此隨機判定）"""
-        skip_prob = max(0.0, (100 - player.luck)) / 100
-        if random.random() < skip_prob:
-            player.grades["參與度"] = max(0, player.grades["參與度"] - 3)
-            player.change_satisfaction(-5)
-            notify("  📕 翹課結果：錯過了一次小考考核！參與度 -3，滿足感 -5。")
+    def _roll_skip_effects(self, player) -> list:
+        """翹課的固定 + 隨機後果，回傳供行動結果彈窗顯示的字串列表。
+        固定：自我滿足度 -5。
+        隨機：(100 - 運氣)% 機率課堂參與度 -5，否則 -3。
+        """
+        msgs = []
+
+        # 固定：自我滿足度 -5
+        player.change_satisfaction(-5)
+        msgs.append("自我滿足度 -5")
+
+        # 隨機：依運氣決定參與度扣點
+        bad_prob = max(0.0, (100 - player.luck)) / 100
+        deduct = 5 if random.random() < bad_prob else 3
+        player.grades["參與度"] = max(0, player.grades["參與度"] - deduct)
+        player.revealed_grades.add("參與度")
+        msgs.append(f"課堂參與度 -{deduct}")
+
+        notify(f"  📕 翹課後果：自我滿足度 -5，課堂參與度 -{deduct}。")
+        return msgs
 
     # ============================================================
     # 期中 / 期末考
