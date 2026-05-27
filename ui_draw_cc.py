@@ -345,10 +345,11 @@ def _draw_cc_drawbacks(surf, fm, fs, drawbacks, sel_indices, max_sel, mpos):
 
     _draw_float_label_card(surf, fm, "選擇負面特質", WIN_W // 2, top_y,
                            pad_x=26, pad_y=11, amp=7, speed=0.00170, phase=0.5)
-    sub_text = f"（最多選 {max_sel} 個，選取可獲得額外點數）"
-    _draw_float_label_card(surf, fs, sub_text, WIN_W // 2, sub_y,
-                           text_col=GRAY, bg=(30, 20, 8), bg_alpha=115,
-                           pad_x=16, pad_y=6, amp=7, speed=0.00170, phase=0.5)
+    sub_text  = f"（最多選 {max_sel} 個，選取可獲得額外點數）"
+    _fy_sub   = _float_offset(7, 0.00170, 0.5)
+    sub_s     = fs.render(sub_text, True, WHITE)
+    surf.blit(sub_s, (WIN_W // 2 - sub_s.get_width() // 2,
+                      sub_y + _fy_sub + (sub_h - sub_s.get_height()) // 2))
 
     total_w = len(drawbacks) * cw + (len(drawbacks) - 1) * gap
     sx = (WIN_W - total_w) // 2
@@ -357,14 +358,14 @@ def _draw_cc_drawbacks(surf, fm, fs, drawbacks, sel_indices, max_sel, mpos):
         selected = i in sel_indices
         r        = pygame.Rect(sx + i * (cw + gap), sy, cw, ch)
         hover    = r.collidepoint(mpos) and not selected
-        # 底色：選中用橙紅強調，未選中用對話框主體米白
-        bg_col   = (230, 108, 58) if selected else (255, 248, 238)
+        # 底色：選中用暖羊皮紙（比米白深一點但仍是淺色），未選中用對話框主體米白
+        bg_col   = (238, 210, 170) if selected else (255, 248, 238)
         dr       = _premium_btn(surf, r, bg_col, hover, radius=16)
-        # 已選：加黃色外框強調
+        # 已選：加琥珀外框強調
         if selected:
             pygame.draw.rect(surf, YELLOW, dr, 2, border_radius=16)
-        # name
-        nt = fb_lg.render(d["name"], True, YELLOW if selected else WHITE)
+        # name（深棕文字在淺底上高對比，選中/未選中一致）
+        nt = fb_lg.render(d["name"], True, WHITE)
         surf.blit(nt, (dr.x + (dr.width - nt.get_width()) // 2, dr.y + 14))
         # desc (wrap)
         desc_lines = _wrap(d["desc"], fs, cw - 20)
@@ -416,9 +417,9 @@ def _draw_cc_stats(surf, fm, fs, total, base, talent, vals, raw, active, mpos, d
     bonus = total - base
     pts_label = f"{base}(+{bonus})" if bonus > 0 else str(total)
     info_text = f"可用點數：{pts_label}   已用：{used}   剩餘：{rem}   初始金錢 +{rem * 10} 元"
-    # 直接渲染文字（與標籤同色，移除半透明遮罩底板）
+    # 直接渲染文字（粗體，與標籤同色，移除半透明遮罩底板）
     _fy_info = _float_offset(7, 0.00170, 1.0)
-    info_s   = fs.render(info_text, True, WHITE)
+    info_s   = fb_lg.render(info_text, True, WHITE)
     surf.blit(info_s, (WIN_W // 2 - info_s.get_width() // 2,
                        sub_y + _fy_info + (sub_h - info_s.get_height()) // 2))
 
@@ -481,16 +482,11 @@ def _draw_cc_stats(surf, fm, fs, total, base, talent, vals, raw, active, mpos, d
         total_bonus = t_bonus + dl_bonus
         if total_bonus:
             sign    = "+" if total_bonus > 0 else ""
-            ann_txt = f"（{sign}{total_bonus}）"
+            ann_txt = f"({sign}{total_bonus})"          # 半形括號
             ann_col = GREEN if total_bonus > 0 else (200, 80, 80)
-            ann_raw = fm.render(ann_txt, True, ann_col)
-            # 等比縮放至 btn_sz 高度，使字體高度與增減按鈕一致
-            if ann_raw.get_height() > 0:
-                scale_w = max(1, int(ann_raw.get_width() * btn_sz / ann_raw.get_height()))
-                ann_s   = pygame.transform.smoothscale(ann_raw, (scale_w, btn_sz))
-            else:
-                ann_s = ann_raw
-            surf.blit(ann_s, (ann_x, ry))
+            ann_s   = fb_lg.render(ann_txt, True, ann_col)   # 粗體，直接渲染
+            surf.blit(ann_s, (ann_x,
+                              ry + (btn_sz - ann_s.get_height()) // 2))
 
     # ── 可用時間顯示列（對齊運氣行下方，與能力值同字體格式）────
     bt_talent = (talent   or {}).get("base_time", 0)
@@ -507,15 +503,11 @@ def _draw_cc_stats(surf, fm, fs, total, base, talent, vals, raw, active, mpos, d
     # 加成括弧（+N）：從 ann_x 起，對齊上方加成標注欄
     if bt_total:
         sign   = "+" if bt_total > 0 else ""
-        bt_ann = f"（{sign}{bt_total}）"
+        bt_ann = f"({sign}{bt_total})"                       # 半形括號
         bt_col = GREEN if bt_total > 0 else (200, 80, 80)
-        bt_raw = fm.render(bt_ann, True, bt_col)
-        if bt_raw.get_height() > 0:
-            bt_w = max(1, int(bt_raw.get_width() * btn_sz / bt_raw.get_height()))
-            bt_s = pygame.transform.smoothscale(bt_raw, (bt_w, btn_sz))
-        else:
-            bt_s = bt_raw
-        surf.blit(bt_s, (ann_x, bt_y))
+        bt_s   = fb_lg.render(bt_ann, True, bt_col)          # 粗體，直接渲染
+        surf.blit(bt_s, (ann_x,
+                         bt_y + (box_h - bt_s.get_height()) // 2))
 
     # 確認
     ok          = pygame.Rect((WIN_W - 160) // 2, ok_y, 160, btn_h)
@@ -553,8 +545,8 @@ def _draw_cc_talent(surf, fm, fs, candidates, sel_idx, mpos):
         selected = (i == sel_idx)
         r        = pygame.Rect(sx + i * (cw + gap), sy, cw, ch)
         hover    = r.collidepoint(mpos) and not selected
-        # 調淡背景：選中用中棕琥珀，未選中用淺暖金（深色文字在兩者上均清晰）
-        bg_col   = (180, 125, 58) if selected else (225, 180, 100)
+        # 底色：選中用稍深一階的暖金，未選中用淺暖金（深色文字在兩者上均清晰）
+        bg_col   = (200, 155, 75) if selected else (225, 180, 100)
         dr       = _premium_btn(surf, r, bg_col, hover, radius=16)
         if selected:
             pygame.draw.rect(surf, YELLOW, dr, 2, border_radius=16)
@@ -613,8 +605,8 @@ def _draw_cc_de_level(surf, fm, fs, levels, sel_idx, mpos):
         selected = (i == sel_idx)
         r        = pygame.Rect(sx + i * (cw + gap), sy, cw, ch)
         hover    = r.collidepoint(mpos) and not selected
-        # 底色：選中用對話框標題橙棕，未選中用對話框主體米白
-        bg_col   = (165, 88, 32) if selected else (255, 248, 238)
+        # 底色：選中用暖羊皮紙（比米白深一點但仍是淺色），未選中用對話框主體米白
+        bg_col   = (238, 210, 170) if selected else (255, 248, 238)
         dr       = _premium_btn(surf, r, bg_col, hover, radius=16)
         if selected:
             pygame.draw.rect(surf, YELLOW, dr, 2, border_radius=16)
@@ -665,7 +657,7 @@ def _draw_cc_extra_events(surf, fm, fs, mpos):
                            pad_x=26, pad_y=11, amp=7, speed=0.00170, phase=4.0)
     # 直接渲染說明文字（與確認選擇按鈕同色，移除半透明遮罩底板）
     _fy_sub = _float_offset(7, 0.00170, 4.0)
-    sub_s   = fs.render("（可複選社團；打工與家教只能擇一；不選可直接確認）", True, BTN_N)
+    sub_s   = fs.render("（可複選社團；打工與家教只能擇一；不選可直接確認）", True, WHITE)
     surf.blit(sub_s, (WIN_W // 2 - sub_s.get_width() // 2,
                       sub_y + _fy_sub + (sub_h - sub_s.get_height()) // 2))
 
@@ -681,12 +673,12 @@ def _draw_cc_extra_events(surf, fm, fs, mpos):
         disabled = ev.get("intel_req", 0) > intel
         r        = pygame.Rect(sx + i * (cw + gap), sy, cw, ch)
         hover    = r.collidepoint(mpos) and not selected and not disabled
-        # 底色：停用深棕、選中橙紅、未選中用對話框米白
-        bg_col   = (50, 35, 20) if disabled else ((230, 108, 58) if selected else (255, 248, 238))
+        # 底色：停用深棕、選中暖羊皮紙、未選中用對話框米白
+        bg_col   = (50, 35, 20) if disabled else ((238, 210, 170) if selected else (255, 248, 238))
         dr       = _premium_btn(surf, r, bg_col, hover, radius=16)
         if selected:
             pygame.draw.rect(surf, YELLOW, dr, 2, border_radius=16)
-        name_col = GRAY if disabled else (YELLOW if selected else WHITE)
+        name_col = GRAY if disabled else WHITE  # 深棕文字在淺底上高對比，選中/未選中一致
         nt = fb_lg.render(ev["name"], True, name_col)
         surf.blit(nt, (dr.x + (dr.width - nt.get_width()) // 2, dr.y + 14))
         tc = ev.get("time_cost", 0)
