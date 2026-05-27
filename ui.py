@@ -2996,10 +2996,11 @@ def _draw_cc_extra_events(surf, fm, fs, mpos):
 
     _draw_float_label_card(surf, fm, "選擇額外事件", WIN_W // 2, top_y,
                            pad_x=26, pad_y=11, amp=7, speed=0.00170, phase=4.0)
-    _draw_float_label_card(surf, fs, "（可複選社團；打工與家教只能擇一；不選可直接確認）",
-                           WIN_W // 2, sub_y, text_col=GRAY,
-                           bg=(30, 20, 8), bg_alpha=115,
-                           pad_x=16, pad_y=6, amp=7, speed=0.00170, phase=4.0)
+    # 直接渲染說明文字（與確認選擇按鈕同色，移除半透明遮罩底板）
+    _fy_sub = _float_offset(7, 0.00170, 4.0)
+    sub_s   = fs.render("（可複選社團；打工與家教只能擇一；不選可直接確認）", True, BTN_N)
+    surf.blit(sub_s, (WIN_W // 2 - sub_s.get_width() // 2,
+                      sub_y + _fy_sub + (sub_h - sub_s.get_height()) // 2))
 
     events = _cc_extra_data or []
     intel  = _cc_extra_intel[0]
@@ -3013,7 +3014,8 @@ def _draw_cc_extra_events(surf, fm, fs, mpos):
         disabled = ev.get("intel_req", 0) > intel
         r        = pygame.Rect(sx + i * (cw + gap), sy, cw, ch)
         hover    = r.collidepoint(mpos) and not selected and not disabled
-        bg_col   = (50, 35, 20) if disabled else ((230, 108, 58) if selected else BTN_N)
+        # 底色：停用深棕、選中橙紅、未選中用對話框米白
+        bg_col   = (50, 35, 20) if disabled else ((230, 108, 58) if selected else (255, 248, 238))
         dr       = _premium_btn(surf, r, bg_col, hover, radius=16)
         if selected:
             pygame.draw.rect(surf, YELLOW, dr, 2, border_radius=16)
