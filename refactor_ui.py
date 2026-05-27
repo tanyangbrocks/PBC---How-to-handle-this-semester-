@@ -282,7 +282,7 @@ _HEADER: dict[str, str] = {
         "#  by refactor_ui.py\n"
         "# ============================================================\n"
         "import threading\nimport queue\nimport os\nimport pygame\n\n"
-        + _B + "\n"
+        "from ui_const import *\n\n"   # ui_state 自身不可 import ui_state（避免自循環）
     ),
 
     "ui_draw_base": (

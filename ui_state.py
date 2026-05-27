@@ -8,7 +8,6 @@ import os
 import pygame
 
 from ui_const import *
-from ui_state  import *
 
 # ─────────────────────────────────────────
 #  執行緒通訊
@@ -219,6 +218,8 @@ _shop_hover_idx  = [-1]   # 目前被 hover 的商品索引（-1 = 無）
 _shop_msg        = [""]   # 購買結果訊息
 
 _shop_msg_time   = [0]    # 訊息顯示的時間戳（ms）
+
+_shop_scroll_y   = [0]    # 商品格列表的垂直捲動偏移（px）
 
 _shop_exit_event = threading.Event()
 
