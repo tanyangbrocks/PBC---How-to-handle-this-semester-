@@ -2746,9 +2746,11 @@ def _draw_cc_stats(surf, fm, fs, total, base, talent, vals, raw, active, mpos, d
     bonus = total - base
     pts_label = f"{base}(+{bonus})" if bonus > 0 else str(total)
     info_text = f"可用點數：{pts_label}   已用：{used}   剩餘：{rem}   初始金錢 +{rem * 10} 元"
-    _draw_float_label_card(surf, fs, info_text, WIN_W // 2, sub_y,
-                           text_col=YELLOW, bg=(30, 15, 0), bg_alpha=128,
-                           pad_x=16, pad_y=6, amp=7, speed=0.00170, phase=1.0)
+    # 直接渲染文字（與標籤同色，移除半透明遮罩底板）
+    _fy_info = _float_offset(7, 0.00170, 1.0)
+    info_s   = fs.render(info_text, True, WHITE)
+    surf.blit(info_s, (WIN_W // 2 - info_s.get_width() // 2,
+                       sub_y + _fy_info + (sub_h - info_s.get_height()) // 2))
 
     labels      = ["體力", "智力", "運氣"]
     talent_keys = ["stamina", "intel", "luck"]
