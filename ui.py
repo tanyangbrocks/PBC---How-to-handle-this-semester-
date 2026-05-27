@@ -2686,7 +2686,8 @@ def _draw_cc_drawbacks(surf, fm, fs, drawbacks, sel_indices, max_sel, mpos):
         selected = i in sel_indices
         r        = pygame.Rect(sx + i * (cw + gap), sy, cw, ch)
         hover    = r.collidepoint(mpos) and not selected
-        bg_col   = (230, 108, 58) if selected else BTN_N
+        # 底色：選中用橙紅強調，未選中用對話框主體米白
+        bg_col   = (230, 108, 58) if selected else (255, 248, 238)
         dr       = _premium_btn(surf, r, bg_col, hover, radius=16)
         # 已選：加黃色外框強調
         if selected:
@@ -2851,16 +2852,24 @@ def _draw_cc_talent(surf, fm, fs, candidates, sel_idx, mpos):
         selected = (i == sel_idx)
         r        = pygame.Rect(sx + i * (cw + gap), sy, cw, ch)
         hover    = r.collidepoint(mpos) and not selected
-        bg_col   = (110, 72, 36) if selected else BTN_N
+        # 調淡背景：選中用中棕琥珀，未選中用淺暖金（深色文字在兩者上均清晰）
+        bg_col   = (180, 125, 58) if selected else (225, 180, 100)
         dr       = _premium_btn(surf, r, bg_col, hover, radius=16)
         if selected:
             pygame.draw.rect(surf, YELLOW, dr, 2, border_radius=16)
-        nt = fb_lg.render(t_data["name"], True, YELLOW if selected else WHITE)
-        surf.blit(nt, (dr.x + (dr.width - nt.get_width()) // 2, dr.y + 18))
+        # 名稱（深棕，在調淡底色上清晰可讀）
+        nt = fb_lg.render(t_data["name"], True, WHITE)
+        # ── 垂直 + 水平置中：名稱 + 間距 + 說明行 ────────────────────
         desc_lines = _wrap(t_data["desc"], fs, cw - 20)
+        lh      = fs.get_height() + 4
+        block_h = fb_lg.get_height() + 12 + len(desc_lines) * lh
+        name_y  = dr.y + (dr.height - block_h) // 2
+        surf.blit(nt, (dr.x + (dr.width - nt.get_width()) // 2, name_y))
+        desc_y = name_y + fb_lg.get_height() + 12
         for li, dl in enumerate(desc_lines):
             dt = fs.render(dl, True, WHITE)
-            surf.blit(dt, (dr.x + 10, dr.y + 60 + li * (fs.get_height() + 4)))
+            surf.blit(dt, (dr.x + (dr.width - dt.get_width()) // 2,
+                           desc_y + li * lh))
         card_rects.append((r, i))
     # 確認按鈕
     ok          = pygame.Rect((WIN_W - 160) // 2, sy + ch + CARD_BTN_GAP, 160, btn_h)
@@ -2904,12 +2913,13 @@ def _draw_cc_de_level(surf, fm, fs, levels, sel_idx, mpos):
         selected = (i == sel_idx)
         r        = pygame.Rect(sx + i * (cw + gap), sy, cw, ch)
         hover    = r.collidepoint(mpos) and not selected
-        bg_col   = (110, 72, 36) if selected else BTN_N
+        # 底色：選中用對話框標題橙棕，未選中用對話框主體米白
+        bg_col   = (165, 88, 32) if selected else (255, 248, 238)
         dr       = _premium_btn(surf, r, bg_col, hover, radius=16)
         if selected:
             pygame.draw.rect(surf, YELLOW, dr, 2, border_radius=16)
-        # 年級名稱
-        nt = fb_lg.render(lv["name"], True, YELLOW if selected else WHITE)
+        # 年級名稱（深棕色文字，在米白或橙棕底上皆清晰可讀）
+        nt = fb_lg.render(lv["name"], True, WHITE)
         surf.blit(nt, (dr.x + (dr.width - nt.get_width()) // 2, dr.y + 18))
         # buff 列表
         by = dr.y + 60
@@ -3330,21 +3340,32 @@ def _draw_cc_slot_machine(surf, fm, fs, mpos):
                 surf.blit(ghost, (dr.x + 8, ny + off))
 
         elif phase == "done":
-            result     = _slot_results[i]
-            is_talent  = result and result.get("name") != "無天賦"
-            bg_col     = (110, 72, 36) if is_talent else (48, 33, 18)
-            dr         = _premium_btn(surf, r, bg_col, False, radius=16)
+            result    = _slot_results[i]
+            is_talent = result and result.get("name") != "無天賦"
+            # 背景調淡：有天賦用暖金琥珀，無天賦用暖灰棕（皆可讀深色文字）
+            bg_col    = (215, 165, 88) if is_talent else (170, 130, 90)
+            dr        = _premium_btn(surf, r, bg_col, False, radius=16)
             if is_talent:
                 pygame.draw.rect(surf, YELLOW, dr, 2, border_radius=16)
             name     = result.get("name", "無天賦") if result else "無天賦"
-            name_col = YELLOW if is_talent else GRAY
-            nt = fb_lg.render(name, True, name_col)
-            surf.blit(nt, (dr.x + (dr.width - nt.get_width()) // 2, dr.y + 20))
+            # 深棕文字在淺色底上清晰可讀
+            name_col = TITLE if is_talent else WHITE
+            nt       = fb_lg.render(name, True, name_col)
+            # ── 垂直 + 水平置中 ─────────────────────────────────
             if is_talent:
                 desc_lines = _wrap(result.get("desc", ""), fs, cw - 20)
+                lh      = fs.get_height() + 4
+                block_h = fb_lg.get_height() + 12 + len(desc_lines) * lh
+                name_y  = dr.y + (dr.height - block_h) // 2
+                surf.blit(nt, (dr.x + (dr.width - nt.get_width()) // 2, name_y))
+                desc_y = name_y + fb_lg.get_height() + 12
                 for li, dl in enumerate(desc_lines):
                     dt = fs.render(dl, True, WHITE)
-                    surf.blit(dt, (dr.x + 10, dr.y + 62 + li * (fs.get_height() + 4)))
+                    surf.blit(dt, (dr.x + (dr.width - dt.get_width()) // 2,
+                                   desc_y + li * lh))
+            else:   # 無天賦 — 只有名稱，垂直置中
+                name_y = dr.y + (dr.height - nt.get_height()) // 2
+                surf.blit(nt, (dr.x + (dr.width - nt.get_width()) // 2, name_y))
 
     # ── 繼續按鈕（全部完成後才出現）──────────────────────────────
     ok = pygame.Rect((WIN_W - 160) // 2, sy + ch + SLOT_BTN, 160, btn_h)
