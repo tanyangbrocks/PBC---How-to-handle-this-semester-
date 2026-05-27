@@ -12,15 +12,25 @@ class Shop:
     道具商店類別。
     這裡存放了商品的清單，並負責處理購買邏輯。
     """
-    def __init__(self, player):
-        self.player = player
+    def __init__(self, player, event_sys=None):
+        self.player    = player
+        self.event_sys = event_sys   # 用於咖啡的睡過頭風險效果
         self.items = [
             {
                 "id": "coffee",
-                "name": "超商咖啡",
+                "name": "咖啡",
                 "price": 10,
-                "desc": "恢復 10 點體力，學生熬夜良伴。",
-                "stamina_restore": 10
+                "desc": "恢復 10 點體力，但睡過頭觸發機率增加 10%。",
+                "stamina_restore": 10,
+                "allnighter_risk": 0.10,
+            },
+            {
+                "id": "snack",
+                "name": "點心",
+                "price": 10,
+                "desc": "恢復 5 點體力，自我滿足度 +10。",
+                "stamina_restore": 5,
+                "satisfaction_gain": 10,
             },
             {
                 "id": "energy_drink_monster",
@@ -130,3 +140,6 @@ class Shop:
             notify(f"  🍀 運氣提升了 {item['luck_gain']} 點！")
         if "status" in item:
             self.player.add_status(item["status"], item["duration"])
+        if "allnighter_risk" in item and self.event_sys is not None:
+            self.event_sys.set_allnighter_risk(item["allnighter_risk"])
+            notify(f"  ⚠️ 睡過頭觸發機率增加 {int(item['allnighter_risk'] * 100)}%！")

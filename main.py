@@ -42,7 +42,7 @@ def game_main():
         # ── 步驟 2：建立各大子系統 ───────────────────────────
         event_sys = EventSystem(player)
         skill_sys = SkillSystem(player)
-        shop      = Shop(player)
+        shop      = Shop(player, event_sys=event_sys)
         engine    = TurnEngine(
             player    = player,
             event_sys = event_sys,
