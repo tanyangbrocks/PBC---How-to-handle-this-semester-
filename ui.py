@@ -113,6 +113,9 @@ _EVT_SHAKE_AMP = 14       # 最大震動幅度（px）
 # ── 點名警示便利貼 ──────────────────────────────────────────────
 _roll_call_course = [""]   # 當週點名科目（空字串 = 未啟用）
 
+# ── 特殊行動停用狀態 ──────────────────────────────────────────
+_special_disabled: dict = {}   # {行動名: 倒數格數} 停用中的特殊行動
+
 # ── 行動成功白光閃爍 ────────────────────────────────────────────
 _action_flash_t0 = [0]    # 閃爍觸發時間戳（ms，0 = 未啟用）
 _ACTION_FLASH_MS = 300    # 整段閃爍時長（ms）
@@ -952,6 +955,10 @@ def set_roll_call(course: str) -> None:
 def clear_roll_call() -> None:
     """清除點名警示便利貼（週末結算後呼叫）。非阻塞。"""
     _cmd_q.put(("roll_call_clear",))
+
+def set_special_disabled(names: dict) -> None:
+    """更新特殊行動的停用狀態。names = {行動名: 倒數格數}（空 dict 表示清除全部）。"""
+    _cmd_q.put(("special_disabled", dict(names)))
 
 def _get_evt_shake_offset() -> tuple:
     """回傳突發事件全螢幕震動的 (dx, dy) 位移量（px）。震動結束後自動清除。"""
@@ -3357,6 +3364,14 @@ _cc_btn_cache: dict = {}
 _STANDARD_ACTIONS = {"認真讀書", "正常上課", "社團活動", "打工賺錢",
                      "好好休息", "幫助朋友", "🏪 前往道具店"}
 
+# ── 特殊行動（凸起面板）常數 ──────────────────────────────────
+_BUMP_H  = 88    # 凸起高度（向上突出面板頂邊）
+_BUMP_W  = 310   # 凸起寬度
+_BUMP_R  = 30    # 特殊按鈕半徑
+_BUMP_SP = 105   # 特殊按鈕間距
+_SPECIAL_ACTION_NAMES = ["熬夜", "翹課", "進食"]
+_SPECIAL_ICONS = {"熬夜": "月", "翹課": "逃", "進食": "食"}
+
 # 各行動的體力消耗說明 + 預期效果（用於 hover 提示列）
 _ACTION_INFO = {
     "認真讀書": ("消耗體力 4", "課業熟練度 +8    自我滿足度 -5"),
@@ -3365,6 +3380,10 @@ _ACTION_INFO = {
     "打工賺錢": ("消耗體力 4", "金錢 +150    自我滿足度 +3"),
     "好好休息": ("恢復體力 6", "自我滿足度 +8"),
     "幫助朋友": ("消耗體力 2", "自我滿足度 +12"),
+    # 特殊行動
+    "熬夜": ("體力 -10, 時間 +2", "睡過頭機率 ↑10%    滿足感 -5"),
+    "翹課": ("體力 +10, 時間 +1", "錯過小考/點名機率：(100-運氣)%"),
+    "進食": ("金錢 -50, 體力 +10", "獲得飽腹狀態（3 個時間格）"),
 }
 
 
@@ -3831,6 +3850,29 @@ def _draw_action_icon(surf: pygame.Surface, cx: int, cy: int, ar: int, label: st
     surf.blit(scaled, (cx - ar, cy - ar))
 
 
+def _draw_bump_bg(surf: pygame.Surface, pr: pygame.Rect) -> None:
+    """
+    在行動面板（pr）頂邊繪製向上凸起的特殊行動承載區。
+    凸起底部延伸至 pr.y + 14，使面板卡片（同奶霜色）自然覆蓋接縫。
+    """
+    cx     = pr.x + pr.width // 2
+    bx     = cx - _BUMP_W // 2
+    top_y  = pr.y - _BUMP_H
+    full_h = _BUMP_H + 14                    # 凸起 + 與面板的重疊部份
+
+    # 陰影
+    sh_sf = pygame.Surface((_BUMP_W + 8, full_h + 6), pygame.SRCALPHA)
+    pygame.draw.rect(sh_sf, (0, 0, 0, 42),
+                     pygame.Rect(0, 0, _BUMP_W + 8, full_h + 6), border_radius=14)
+    surf.blit(sh_sf, (bx - 2, top_y + 5))
+
+    # 凸起本體（奶霜底色 + 深棕邊框）
+    pygame.draw.rect(surf, (255, 244, 228),
+                     pygame.Rect(bx, top_y, _BUMP_W, full_h), border_radius=14)
+    pygame.draw.rect(surf, CYAN,
+                     pygame.Rect(bx, top_y, _BUMP_W, full_h), 2, border_radius=14)
+
+
 def _draw_action_panel(surf, fm, fs, mode, choices, log, prompt, tvalue, rect, time_left, mpos):
     """
     新版底部面板（浮動卡片）。
@@ -3842,6 +3884,14 @@ def _draw_action_panel(surf, fm, fs, mode, choices, log, prompt, tvalue, rect, t
     M  = 8
     pr = pygame.Rect(rect.x + M, rect.y + M,
                      rect.width - M * 2, rect.height - M * 2)
+
+    # ── 判斷是否為標準行動模式（需在投影前確定，以便決定是否畫凸起）──
+    is_std_action = (mode == "choices" and
+                     all(c in _STANDARD_ACTIONS for c in choices))
+
+    # ── 特殊行動凸起（標準行動模式才顯示，畫在面板投影之前）────────
+    if is_std_action:
+        _draw_bump_bg(surf, pr)
 
     # ── 投影 ──────────────────────────────────────────────────
     sh = pygame.Surface((pr.width, pr.height), pygame.SRCALPHA)
@@ -3861,8 +3911,6 @@ def _draw_action_panel(surf, fm, fs, mode, choices, log, prompt, tvalue, rect, t
     content_top = pr.y + TAB_H
 
     # ── 預先計算 hover 狀態（供標籤列 tooltip 使用）─────────
-    is_std_action = (mode == "choices" and
-                     all(c in _STANDARD_ACTIONS for c in choices))
     hovered_action = None
     if is_std_action:
         action_choices_pre = [c for c in choices if c != "🏪 前往道具店"]
@@ -3877,6 +3925,16 @@ def _draw_action_panel(surf, fm, fs, mode, choices, log, prompt, tvalue, rect, t
                            (r_pre + 8) * 2, (r_pre + 8) * 2).collidepoint(mpos):
                 hovered_action = lbl
                 break
+        # ── 特殊按鈕 hover 偵測（主按鈕沒中才繼續）──────────────
+        if hovered_action is None:
+            _sp_cy_pre = pr.y - _BUMP_H // 2
+            for _si_p, _sn_p in enumerate(_SPECIAL_ACTION_NAMES):
+                _sp_cx_p = pr.x + pr.width // 2 + (_si_p - 1) * _BUMP_SP
+                if (_sn_p not in _special_disabled and
+                        pygame.Rect(_sp_cx_p - _BUMP_R - 8, _sp_cy_pre - _BUMP_R - 8,
+                                    (_BUMP_R + 8) * 2, (_BUMP_R + 8) * 2).collidepoint(mpos)):
+                    hovered_action = _sn_p
+                    break
 
     # 左側：剩餘時間點（含震動 / 紅色閃動特效）
     _now_ms      = pygame.time.get_ticks()
@@ -4029,6 +4087,99 @@ def _draw_action_panel(surf, fm, fs, mode, choices, log, prompt, tvalue, rect, t
                     x_cur += ch_s.get_width()
 
             content_rects.append((brect, orig_idx))
+
+        # ── 特殊行動按鈕（凸起區，畫在主按鈕之後）────────────────
+        _sp_cy  = pr.y - _BUMP_H // 2
+        _sp_cx0 = pr.x + pr.width // 2
+        for _si, _sn in enumerate(_SPECIAL_ACTION_NAMES):
+            _sp_cx    = _sp_cx0 + (_si - 1) * _BUMP_SP
+            _disabled = _sn in _special_disabled
+            _sp_hover = (not _disabled and
+                         pygame.Rect(_sp_cx - _BUMP_R - 8, _sp_cy - _BUMP_R - 8,
+                                     (_BUMP_R + 8) * 2, (_BUMP_R + 8) * 2).collidepoint(mpos))
+
+            # 脈動（停用 / hover 時固定）
+            _SP_PULSE_CYCLE = 1000
+            _SP_PULSE_SPAN  = 500
+            _sp_tp = ms_now % _SP_PULSE_CYCLE
+            if _disabled or _sp_hover:
+                _sp_r_draw = _BUMP_R
+            elif _sp_tp < _SP_PULSE_SPAN:
+                _sp_pulse_phase = (_sp_tp / _SP_PULSE_SPAN) * math.tau
+                _sp_r_draw = _BUMP_R + int(math.sin(_sp_pulse_phase) * 3.0)
+            else:
+                _sp_r_draw = _BUMP_R
+
+            # 按鈕本體顏色（停用時灰色）
+            _sp_col = (105, 105, 115) if _disabled else BTN_N
+            _sp_ar  = _premium_circle(surf, _sp_cx, _sp_cy, _sp_r_draw,
+                                      _sp_col, _sp_hover and not _disabled,
+                                      key=(_sp_cx, _sp_cy + 9000))  # 避免 key 衝突
+
+            # 圖示文字（粗體字元放圓心）
+            _sp_icon_str = _SPECIAL_ICONS.get(_sn, _sn[0])
+            _sp_icon_col = (160, 160, 170) if _disabled else PANEL
+            _sp_icon_s   = fb.render(_sp_icon_str, True, _sp_icon_col)
+            surf.blit(_sp_icon_s, (_sp_cx - _sp_icon_s.get_width() // 2,
+                                   _sp_cy - _sp_icon_s.get_height() // 2))
+
+            # hover 光暈
+            if _sp_hover:
+                _glow_sz = (_sp_ar + 28) * 2
+                _glow_sf = pygame.Surface((_glow_sz, _glow_sz), pygame.SRCALPHA)
+                _gc2     = _glow_sz // 2
+                for _gr2, _ga2 in [(_sp_ar + 24, 28), (_sp_ar + 16, 50), (_sp_ar + 8, 72)]:
+                    pygame.draw.circle(_glow_sf, (160, 210, 255, _ga2),
+                                       (_gc2, _gc2), _gr2, 4)
+                surf.blit(_glow_sf, (_sp_cx - _gc2, _sp_cy - _gc2))
+
+            # 停用倒數數字 overlay
+            if _disabled:
+                _cd_val  = _special_disabled[_sn]
+                _cd_str  = str(_cd_val)
+                _cd_s    = fb.render(_cd_str, True, (220, 100, 60))
+                surf.blit(_cd_s, (_sp_cx + _sp_ar // 2 - _cd_s.get_width() // 2,
+                                  _sp_cy + _sp_ar // 2 - _cd_s.get_height() // 2))
+
+            # 波浪標籤（與主按鈕相同邏輯）
+            _sp_clean   = _sn
+            _SP_WAVE_CYCLE = 2000
+            _SP_WAVE_SPAN  = 1000
+            _sp_tw     = ms_now % _SP_WAVE_CYCLE
+            _sp_wave_amp  = 3.5
+            _sp_wave_step = 0.9
+            _sp_ch_surfs  = [fb.render(ch, True, WHITE if not _disabled else (140, 140, 150))
+                             for ch in _sp_clean]
+            _sp_txt_total = sum(s.get_width() for s in _sp_ch_surfs)
+            _sp_x_cur     = _sp_cx - _sp_txt_total // 2
+            _sp_label_y   = _sp_cy + _BUMP_R + 8
+
+            if _sp_hover:
+                for _ch_s in _sp_ch_surfs:
+                    surf.blit(_ch_s, (_sp_x_cur, _sp_label_y))
+                    _sp_x_cur += _ch_s.get_width()
+            elif _disabled:
+                for _ch_s in _sp_ch_surfs:
+                    surf.blit(_ch_s, (_sp_x_cur, _sp_label_y))
+                    _sp_x_cur += _ch_s.get_width()
+            elif _sp_tw < _SP_WAVE_SPAN:
+                _sp_t_norm    = _sp_tw / _SP_WAVE_SPAN
+                _sp_wave_base = _sp_t_norm * math.tau
+                _sp_env       = math.sin(_sp_t_norm * math.pi)
+                for j2, _ch_s in enumerate(_sp_ch_surfs):
+                    _y_off2 = int(_sp_wave_amp * _sp_env * math.sin(_sp_wave_base - j2 * _sp_wave_step))
+                    surf.blit(_ch_s, (_sp_x_cur, _sp_label_y + _y_off2))
+                    _sp_x_cur += _ch_s.get_width()
+            else:
+                for _ch_s in _sp_ch_surfs:
+                    surf.blit(_ch_s, (_sp_x_cur, _sp_label_y))
+                    _sp_x_cur += _ch_s.get_width()
+
+            # 點擊判定（停用時不加入）
+            if not _disabled:
+                _sp_brect = pygame.Rect(_sp_cx - _BUMP_R - 8, _sp_cy - _BUMP_R - 8,
+                                        (_BUMP_R + 8) * 2, (_BUMP_R + 8) * 2)
+                content_rects.append((_sp_brect, -(_si + 1)))
 
     elif mode == "choices" and not is_std_action:
         # ── 非標準選項：上方顯示最新 log（題目文字），下方按鈕作答 ──
@@ -5319,6 +5470,9 @@ def run_ui():
                 _roll_call_course[0] = cmd[1]
             elif tag == "roll_call_clear":
                 _roll_call_course[0] = ""
+            elif tag == "special_disabled":
+                _special_disabled.clear()
+                _special_disabled.update(cmd[1])
             elif tag == "subj_popup":
                 _subj_popup_title[0] = cmd[1]
                 _subj_popup_opts.clear()

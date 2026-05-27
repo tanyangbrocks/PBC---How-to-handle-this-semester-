@@ -248,6 +248,7 @@ class EventSystem:
         self.active_debuffs      = []
         self.events_this_week    = 0    # 本週已觸發突發事件次數（最多 2）
         self.triggered_this_week = set()  # 本週已觸發的事件 ID（防重複）
+        self.allnighter_risk     = 0.0  # 熬夜後額外睡過頭機率（累加）
 
     # ── 公開 API ──────────────────────────────────────────────────
 
@@ -256,11 +257,16 @@ class EventSystem:
         self.events_this_week    = 0
         self.triggered_this_week = set()
 
+    def set_allnighter_risk(self, chance: float = 0.10) -> None:
+        """熬夜後增加睡過頭額外觸發機率（可累加，最高 100%）。"""
+        self.allnighter_risk = min(1.0, self.allnighter_risk + chance)
+
     def roll_event_after_action(self, week: int) -> bool:
         """
         每次行動結束後呼叫。
         觸發規則：
           - 宿醉（pending_hangover）：強制觸發，不受次數限制
+          - 熬夜睡過頭（allnighter_risk > 0）：獨立擲骰
           - 一般事件：每週至多 2 次
           - 有週次範圍的事件 > 全學期事件（同優先級隨機選一）
         回傳 True 若有事件觸發。
@@ -272,6 +278,17 @@ class EventSystem:
             self._fire_event("hangover", None)
             self.events_this_week += 1
             return True
+
+        # 熬夜額外睡過頭風險
+        if self.allnighter_risk > 0.0:
+            if random.random() < self.allnighter_risk:
+                popup_text = "💤 熬夜代價：【睡過頭】\n昨晚熬夜太晚，今天完全爬不起來！"
+                notify(popup_text)
+                trigger_screen_shake()
+                ask_ok(popup_text)
+                _oversleep_effect(player)
+                self.events_this_week += 1
+            self.allnighter_risk = 0.0
 
         # 已達本週上限
         if self.events_this_week >= 2:

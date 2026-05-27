@@ -18,7 +18,8 @@ from shop_V03 import Shop
 from ui import notify, ask_yn, ask_choice, ask_text, set_player, \
                notify_timetable, notify_grade_report, set_time, show_action_result, \
                ask_subject_popup, trigger_time_overflow_warning, tell_story, \
-               show_extra_event_popup, ask_exam_start, set_roll_call, clear_roll_call
+               show_extra_event_popup, ask_exam_start, set_roll_call, clear_roll_call, \
+               set_special_disabled
 
 
 # ── 點名事件觸發週次 ─────────────────────────────────────────────
@@ -84,6 +85,38 @@ ACTIONS = [
         "exp_gain": 0,
         "satisfaction": 0,
         "desc": "前往校園道具店購買道具（不消耗時間單位）。",
+    },
+]
+
+# ── 特殊行動（不消耗時間單位，不觸發突發事件）────────────────
+SPECIAL_ACTIONS = [
+    {
+        "id": "pull_allnighter",
+        "name": "熬夜",
+        "stamina_cost": 10,       # 消耗體力
+        "time_gain": 2,           # 增加可用時間格
+        "satisfaction": -5,
+        "allnighter_risk": True,  # 睡過頭機率 +10%
+        "desc": "犧牲體力換取額外行動時間，但睡過頭機率上升。",
+    },
+    {
+        "id": "skip_class",
+        "name": "翹課",
+        "stamina_cost": -10,      # 恢復體力（負值代表回復）
+        "time_gain": 1,
+        "satisfaction": 0,
+        "quiz_miss_chance": True, # 可能錯過小考 / 點名
+        "desc": "翹課補眠，不消耗時間，但可能錯過小考或點名。",
+    },
+    {
+        "id": "eat",
+        "name": "進食",
+        "stamina_cost": -10,      # 恢復體力
+        "money_cost": 50,
+        "satisfaction": 0,
+        "time_gain": 0,
+        "gives_full_status": True,
+        "desc": "花 50 元吃飯恢復體力，飽腹後無法再進食（持續 3 時間格）。",
     },
 ]
 
@@ -193,6 +226,7 @@ class TurnEngine:
         # ── 行動選擇迴圈 ──────────────────────────────────
         remaining_time = time_units
         attended_class = False     # 本週是否有執行「正常上課」（點名結算用）
+        full_timer = 0             # 飽腹倒數格數（>0 表示飽腹中）
         set_time(remaining_time)   # 初始化底部標籤列
 
         while remaining_time >= 0:
@@ -204,6 +238,30 @@ class TurnEngine:
 
             if choice == 0:
                 break
+
+            # ── 特殊行動（負值 index）─────────────────────────
+            if choice < 0:
+                sa = SPECIAL_ACTIONS[(-choice) - 1]
+
+                # 進食：飽腹中不可用 / 錢不夠不可用
+                if sa["id"] == "eat":
+                    if full_timer > 0:
+                        notify(f"😶 你還不餓，飽腹狀態剩 {full_timer} 個時間格後解除。")
+                        continue
+                    if player.money < sa.get("money_cost", 0):
+                        notify(f"💸 錢不夠！【{sa['name']}】需要 ${sa['money_cost']}，"
+                               f"目前只有 ${player.money}。")
+                        continue
+
+                self._execute_special_action(sa, roll_call_course)
+                remaining_time += sa.get("time_gain", 0)
+                set_time(remaining_time)
+
+                if sa.get("gives_full_status"):
+                    full_timer = 3
+                    set_special_disabled({"進食": 3})
+                # 特殊行動不觸發突發事件，直接繼續
+                continue
 
             action = ACTIONS[choice - 1]
 
@@ -237,6 +295,13 @@ class TurnEngine:
                 if action["id"] == "attend_class":
                     attended_class = True
                 self.event_sys.roll_event_after_action(week)   # 行動後突發事件
+                # 普通行動消耗一格時間 → 飽腹倒數
+                if full_timer > 0:
+                    full_timer -= 1
+                    if full_timer == 0:
+                        set_special_disabled({})
+                    else:
+                        set_special_disabled({"進食": full_timer})
                 break
 
             if action["stamina_cost"] > player.stamina:
@@ -255,6 +320,18 @@ class TurnEngine:
             self.event_sys.roll_event_after_action(week)   # 行動後突發事件
             remaining_time -= 1
             set_time(remaining_time)
+
+            # 普通行動消耗一格時間 → 飽腹倒數
+            if full_timer > 0:
+                full_timer -= 1
+                if full_timer == 0:
+                    set_special_disabled({})
+                else:
+                    set_special_disabled({"進食": full_timer})
+
+        # 週結束時清除飽腹停用狀態
+        if full_timer > 0:
+            set_special_disabled({})
 
         # ── 點名結算（週末，所有行動結束後）────────────────────
         if roll_call_course is not None:
@@ -575,6 +652,64 @@ class TurnEngine:
 
         # ── 觸發彈出結果視窗 ──────────────────────────────────
         show_action_result(results, title=action["name"])
+
+    def _execute_special_action(self, sa: dict, roll_call_course) -> None:
+        """執行特殊行動（熬夜 / 翹課 / 進食）。不消耗時間單位，不觸發突發事件。"""
+        player  = self.player
+        results = []
+
+        # ── 體力 ──────────────────────────────────────────────
+        stamina_cost = sa.get("stamina_cost", 0)
+        if stamina_cost > 0:
+            player.consume_stamina(stamina_cost)
+            results.append(f"體力 -{stamina_cost}")
+        elif stamina_cost < 0:
+            player.restore_stamina(-stamina_cost)
+            results.append(f"體力 +{-stamina_cost}")
+
+        # ── 金錢 ──────────────────────────────────────────────
+        money_cost = sa.get("money_cost", 0)
+        if money_cost > 0:
+            player.money -= money_cost
+            results.append(f"金錢 -{money_cost}")
+
+        # ── 自我滿足度 ────────────────────────────────────────
+        sat = sa.get("satisfaction", 0)
+        if sat != 0:
+            player.change_satisfaction(sat)
+            sign = "+" if sat > 0 else ""
+            results.append(f"自我滿足度 {sign}{sat}")
+
+        # ── 時間加成 ──────────────────────────────────────────
+        if sa.get("time_gain", 0) > 0:
+            results.append(f"時間 +{sa['time_gain']}")
+
+        # ── 熬夜副作用 ────────────────────────────────────────
+        if sa.get("allnighter_risk"):
+            self.event_sys.set_allnighter_risk(0.10)
+            results.append("睡過頭機率 ↑10%")
+
+        # ── 翹課風險 ──────────────────────────────────────────
+        if sa.get("quiz_miss_chance"):
+            self._roll_skip_effects(player, roll_call_course)
+
+        # ── 飽腹狀態 ──────────────────────────────────────────
+        if sa.get("gives_full_status"):
+            results.append("獲得「飽腹」狀態（3 個時間格後解除）")
+
+        notify(f"  ✔ 執行【{sa['name']}】完成。")
+        show_action_result(results, title=sa["name"])
+
+    def _roll_skip_effects(self, player, roll_call_course) -> None:
+        """翹課的隨機後果：可能錯過小考 / 點名。"""
+        skip_prob = max(0.0, (100 - player.luck)) / 100
+        if random.random() < skip_prob:
+            player.grades["參與度"] = max(0, player.grades["參與度"] - 3)
+            player.change_satisfaction(-5)
+            notify("  📕 翹課結果：錯過了一次小考考核！參與度 -3，滿足感 -5。")
+        if roll_call_course and random.random() < skip_prob:
+            player.grades["參與度"] = max(0, player.grades["參與度"] - 2)
+            notify(f"  📋 翹課時剛好是【{roll_call_course}】的點名日！參與度 -2。")
 
     # ============================================================
     # 期中 / 期末考
