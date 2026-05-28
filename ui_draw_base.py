@@ -136,6 +136,95 @@ def _clean(text: str) -> str:
     # 移除因去掉前置 Emoji 而殘留的空白
     return "".join(out).lstrip()
 
+# ── Segoe UI Emoji 備用字型（Windows 內建，支援 Emoji）────────────────────
+_EMOJI_FONT_PATH = r"C:\Windows\Fonts\seguiemj.ttf"
+_emoji_font_cache: dict = {}
+
+def _get_emoji_font(size: int):
+    """載入並快取 Segoe UI Emoji，失敗時回傳 None。"""
+    if size not in _emoji_font_cache:
+        try:
+            _emoji_font_cache[size] = pygame.font.Font(_EMOJI_FONT_PATH, size)
+        except Exception:
+            _emoji_font_cache[size] = None
+    return _emoji_font_cache[size]
+
+def _is_emoji_char(ch: str) -> bool:
+    """判斷字元是否為主字型（CJK）無法渲染、需用 Emoji 字型補渲的符號。"""
+    cp = ord(ch)
+    if cp <= 0x02FF:            return False   # ASCII + Latin
+    if 0x2000 <= cp <= 0x206F:  return False   # 一般標點
+    if 0x2E00 <= cp <= 0x2E7F:  return False   # 補充標點
+    if 0x3000 <= cp <= 0x9FFF:  return False   # CJK 標點 + 統一表意文字
+    if 0xA000 <= cp <= 0xFAFF:  return False   # CJK 延伸
+    if 0xFF00 <= cp <= 0xFFEF:  return False   # 全形 / 半形
+    return True                                # 其餘視為 Emoji / 符號
+
+def _render_mixed(surf: pygame.Surface,
+                  main_font, text: str, color: tuple,
+                  x: int, y: int) -> int:
+    """
+    以主字型繪製一般文字，遇到 Emoji 改用 Segoe UI Emoji。
+    若 Emoji 字型不可用，自動降格為 _clean() 去除 Emoji。
+    回傳渲染後的總像素寬度。
+    """
+    emoji_font = _get_emoji_font(main_font.get_height())
+    if emoji_font is None:
+        s = main_font.render(_clean(text), True, color)
+        surf.blit(s, (x, y))
+        return s.get_width()
+
+    main_h  = main_font.get_height()
+    cur_x   = x
+    seg     = ""
+    in_em   = False
+
+    def _flush(segment: str, use_emoji: bool):
+        nonlocal cur_x
+        if not segment:
+            return
+        f = emoji_font if use_emoji else main_font
+        s = f.render(segment, True, color)
+        # 垂直對齊：Emoji 字型高度可能與主字型不同，置中對齊
+        y_off = max(0, (main_h - s.get_height()) // 2)
+        surf.blit(s, (cur_x, y + y_off))
+        cur_x += s.get_width()
+
+    for ch in text:
+        is_em = _is_emoji_char(ch)
+        if is_em != in_em:
+            _flush(seg, in_em)
+            seg, in_em = ch, is_em
+        else:
+            seg += ch
+    _flush(seg, in_em)
+    return cur_x - x
+
+def _measure_mixed(main_font, text: str) -> int:
+    """計算混合字型（含 Emoji）的渲染寬度，用於置中計算。"""
+    emoji_font = _get_emoji_font(main_font.get_height())
+    total = 0
+    seg   = ""
+    in_em = False
+
+    def _flush_m(segment: str, use_emoji: bool):
+        nonlocal total
+        if not segment:
+            return
+        f = (emoji_font if (use_emoji and emoji_font) else main_font)
+        total += f.size(segment)[0]
+
+    for ch in text:
+        is_em = _is_emoji_char(ch)
+        if is_em != in_em:
+            _flush_m(seg, in_em)
+            seg, in_em = ch, is_em
+        else:
+            seg += ch
+    _flush_m(seg, in_em)
+    return total
+
+
 def _wrap(text: str, font, max_w: int) -> list:
     """依寬度切行，支援 \\n 換段。"""
     lines = []

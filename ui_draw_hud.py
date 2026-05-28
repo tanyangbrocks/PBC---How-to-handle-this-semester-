@@ -11,6 +11,22 @@ from ui_const import *
 from ui_state  import *
 from ui_draw_base import *
 
+# ── 狀態效果 Emoji 對應表 ─────────────────────────────────────
+_STATUS_EMOJI = {
+    "生病":    "🤒",
+    "無力狀態": "😔",
+    "神采奕奕": "✨",
+    "激勵":    "💪",
+    "幸運":    "🍀",
+}
+# 正面/負面顏色區分
+_STATUS_POS = {"神采奕奕", "激勵", "幸運"}   # GREEN；其餘 RED
+_FW_DIGITS  = "０１２３４５６７８９"
+
+def _fw_num(v: int) -> str:
+    """整數轉全形數字；v == 0（條件型狀態）→ '∞'"""
+    return "∞" if v == 0 else "".join(_FW_DIGITS[int(d)] for d in str(v))
+
 def _draw_status(surf, fs, fm, player, rect):
     """上方狀態欄。"""
     if "status" in _grads:
@@ -54,11 +70,19 @@ def _draw_status(surf, fs, fm, player, rect):
     y += bh + gap
 
     if player.status_effects:
-        eff = "  ".join(
-            k if v == 0 else f"{k} {v}週"
-            for k, v in player.status_effects.items()
-        )
-        surf.blit(fs.render(eff, True, RED), (x, y))
+        ex = x
+        em_f = _get_emoji_font(fs.get_height() + 2)
+        for sname, sv in player.status_effects.items():
+            em_ch  = _STATUS_EMOJI.get(sname, "❓")
+            num_ch = _fw_num(sv)
+            col    = GREEN if sname in _STATUS_POS else RED
+            em_s   = em_f.render(em_ch, True, WHITE) if em_f else None
+            num_s  = fs.render(num_ch, True, col)
+            if em_s:
+                surf.blit(em_s,  (ex, y + (num_s.get_height() - em_s.get_height()) // 2))
+                ex += em_s.get_width() + 1
+            surf.blit(num_s, (ex, y))
+            ex += num_s.get_width() + 8
 
 def _draw_icon_cart(surf: pygame.Surface, cx: int, cy: int, r: int) -> None:
     """購物車小圖示（純 pygame.draw，不使用外部資源）。"""
@@ -279,6 +303,23 @@ def _draw_icon_clover(surf: pygame.Surface, cx: int, cy: int, r: int) -> None:
     # 中心蓋住葉脈交叉點
     pygame.draw.circle(surf, dark_g, (cx, cy), max(1, leaf_r // 2))
 
+def _draw_icon_info(surf: pygame.Surface, cx: int, cy: int, r: int) -> None:
+    """ℹ 圓形資訊圖示：白藍底圓 + 深藍 i 字形（點 + 豎）。r = 外圓半徑。"""
+    FILL   = (240, 248, 255)   # 偏白藍底圓
+    INK    = (40,   80, 140)   # 深藍 i 字
+    BORDER = (160, 200, 235)   # 淡藍描邊
+    # 底圓
+    pygame.draw.circle(surf, FILL,   (cx, cy), r)
+    pygame.draw.circle(surf, BORDER, (cx, cy), r, 1)
+    # i 的點（上方）
+    dot_r = max(1, r // 4)
+    pygame.draw.circle(surf, INK, (cx, cy - r // 3), dot_r)
+    # i 的豎（下方中段）
+    bar_h = max(2, r // 2 + 1)
+    bar_w = max(1, r // 3)
+    pygame.draw.rect(surf, INK,
+                     pygame.Rect(cx - bar_w // 2, cy - r // 8, bar_w, bar_h))
+
 def _draw_status_v2(surf, fm, fs, player, rect, mpos):
     """
     新版狀態欄（浮動卡片）：
@@ -328,21 +369,88 @@ def _draw_status_v2(surf, fm, fs, player, rect, mpos):
                            av_cy - init_t.get_height() // 2))
     pygame.draw.circle(surf, CYAN, (av_cx, av_cy), av_r, 3)
 
-    # ── 名字 + 系級 + 狀態效果（同一行，純文字，無外框）────
+    # ── 名字 + 系級（純文字）────────────────────────────────
     info_x = pr.x + 106
     info_y = pr.y + 14
-    _de_name = player.de_level.get("name", "") if hasattr(player, "de_level") else ""
+    _de_name  = player.de_level.get("name", "") if hasattr(player, "de_level") else ""
     _base_str = f"{player.name}  {player.department}{' ' + _de_name if _de_name else ''}"
     name_t = fb_lg.render(_base_str, True, WHITE)
     surf.blit(name_t, (info_x, info_y))
-    # 狀態效果（接在年級後，紅色，無括號；v=0 表示條件型，不顯示週數）
+
+    # ── 狀態效果 emoji chip（接在名字右側）──────────────────
+    _hovered_status[0] = None          # 每幀重置
     if player.status_effects:
-        _eff_str = "  " + "  ".join(
-            k if v == 0 else f"{k} {v}週"
-            for k, v in player.status_effects.items()
-        )
-        _eff_t   = fb_lg.render(_eff_str, True, RED)
-        surf.blit(_eff_t, (info_x + name_t.get_width(), info_y))
+        CHIP_H   = name_t.get_height()  # chip 高度與名字行等高
+        EM_SZ_N  = 20                   # 正常 emoji 大小
+        EM_SZ_H  = 28                   # hover emoji 大小
+
+        em_fn = _get_emoji_font(EM_SZ_N)
+        em_fh = _get_emoji_font(EM_SZ_H)
+
+        cx = info_x + name_t.get_width() + 10  # chip 起始 x
+
+        for sname, sv in player.status_effects.items():
+            em_ch  = _STATUS_EMOJI.get(sname, "❓")
+            num_ch = _fw_num(sv)
+            col_n  = GREEN if sname in _STATUS_POS else RED
+
+            # ── 正常尺寸量測 ──────────────────────────────
+            em_sn   = em_fn.render(em_ch, True, WHITE) if em_fn else None
+            num_sn  = fb_lg.render(num_ch, True, col_n)
+            em_wn   = em_sn.get_width() if em_sn else 0
+            cw_n    = em_wn + 2 + num_sn.get_width()
+
+            # ── hover 偵測 ────────────────────────────────
+            hit = pygame.Rect(cx - 2, info_y, cw_n + 8, CHIP_H)
+            is_hov = hit.collidepoint(mpos)
+
+            if is_hov:
+                # 寫入提示文字（text, is_positive）
+                _hovered_status[0] = (
+                    f"{sname} {sv}週" if sv > 0 else sname,
+                    sname in _STATUS_POS,
+                )
+
+                # hover 尺寸
+                em_sh   = em_fh.render(em_ch, True, WHITE) if em_fh else em_sn
+                num_sh  = fb_lg.render(num_ch, True, (255, 220, 80))
+                em_wh   = em_sh.get_width() if em_sh else 0
+                cw_h    = em_wh + 2 + num_sh.get_width()
+                th      = max(
+                    em_sh.get_height() if em_sh else 0,
+                    num_sh.get_height()
+                )
+
+                # 把 emoji + 數字畫進 temp SRCALPHA Surface
+                temp = pygame.Surface((cw_h, th), pygame.SRCALPHA)
+                if em_sh:
+                    temp.blit(em_sh,  (0,          (th - em_sh.get_height())  // 2))
+                temp.blit(num_sh, (em_wh + 2,  (th - num_sh.get_height()) // 2))
+
+                # smoothscale 放大至 1.3×
+                nw = max(1, int(cw_h * 1.3))
+                nh = max(1, int(th   * 1.3))
+                scaled = pygame.transform.smoothscale(temp, (nw, nh))
+
+                # 發光背景（SRCALPHA 圓角矩形）
+                gw, gh = nw + 12, nh + 8
+                glow = pygame.Surface((gw, gh), pygame.SRCALPHA)
+                pygame.draw.rect(glow, (255, 220, 80, 60),
+                                 pygame.Rect(0, 0, gw, gh), border_radius=9)
+                surf.blit(glow,   (cx - 6,  info_y + (CHIP_H - gh) // 2))
+                surf.blit(scaled, (cx,       info_y + (CHIP_H - nh) // 2))
+
+                cx += nw + 10
+
+            else:
+                # 正常繪製
+                dy_em  = info_y + (CHIP_H - (em_sn.get_height()  if em_sn  else 0)) // 2
+                dy_num = info_y + (CHIP_H - num_sn.get_height()) // 2
+                if em_sn:
+                    surf.blit(em_sn,  (cx,           dy_em))
+                surf.blit(num_sn, (cx + em_wn + 2, dy_num))
+                cx += cw_n + 8
+
     # 名字下細線
     line_y = info_y + name_t.get_height() + 2
     pygame.draw.line(surf, (210, 190, 165),
@@ -399,18 +507,21 @@ def _draw_status_v2(surf, fm, fs, player, rect, mpos):
     # ── 智力 / 運氣 小標籤 + 資訊一覽按鈕（頭像正下方）─────
     chip_y = pr.bottom - 42
 
-    # 「資訊一覽」按鈕（最左）
-    info_btn_w = 78
-    info_btn_r = pygame.Rect(pr.x + 6, chip_y, info_btn_w, 30)
-    _ib_hover  = info_btn_r.collidepoint(mpos)
-    _ib_bg     = (100, 68, 38) if _ib_hover else (78, 52, 28)
-    pygame.draw.rect(surf, _ib_bg, info_btn_r, border_radius=8)
-    pygame.draw.rect(surf, GRAY,   info_btn_r, 1, border_radius=8)
-    _ib_t = fb.render("資訊一覽", True, PANEL)
-    surf.blit(_ib_t, (info_btn_r.x + (info_btn_r.width  - _ib_t.get_width())  // 2,
-                      info_btn_r.y + (info_btn_r.height - _ib_t.get_height()) // 2))
+    # 「自我滿足度」標籤左緣 = 「自」字 x 位置（供腦圖示對齊）
+    _sat_label_left = info_x + lbl_col_w - _lbl_sat.get_width()
 
-    # 智力 chip（接在按鈕右側）
+    # 「資訊一覽」按鈕：寬度由「腦圖示對齊『自』字」反推，顏色與道具店一致
+    # intel_chip_x = info_btn_r.right + 8，腦圖示左緣 = intel_chip_x + 9
+    # 故 info_btn_w = _sat_label_left - 9（腦圖示左緣） - 8（間距） - (pr.x+6)（按鈕左）
+    _ib_t      = fb.render("資訊一覽", True, PANEL)
+    info_btn_w = max(_sat_label_left - 9 - 8 - (pr.x + 6), 60)
+    info_btn_r = pygame.Rect(pr.x + 6, chip_y, info_btn_w, 32)
+    _ib_hover  = info_btn_r.collidepoint(mpos)
+    dr_info    = _premium_btn(surf, info_btn_r, BTN_N, _ib_hover, radius=12)
+    surf.blit(_ib_t, (dr_info.x + (dr_info.width  - _ib_t.get_width())  // 2,
+                      dr_info.y + (dr_info.height - _ib_t.get_height()) // 2))
+
+    # 智力 chip（緊接按鈕右側；腦圖示左緣因此對齊「自我滿足度」的「自」）
     intel_lvl  = _get_intel_level_ui(player.intel)
     lvl_name   = _INTEL_NAMES_UI[intel_lvl]
     lvl_col    = _INTEL_ANNOT_COLS_UI[intel_lvl]
@@ -465,6 +576,11 @@ def _draw_status_v2(surf, fm, fs, player, rect, mpos):
     _draw_icon_coin(surf, _mx0 + _COIN_R, _mcy, _COIN_R)
     surf.blit(money_t, (_mx0 + _COIN_R * 2 + 5, pr.y + 14))
 
+    # 提前計算（供日曆等距置中使用）
+    sat_right  = bar_x + bar_w + 12   # 進度條右緣 + 間距
+    money_left = shop_r.x - 12        # 道具店左緣 - 間距
+    _cdwn_rx   = money_left           # fallback：無倒數提示時以此為右界
+
     # ── 考試倒數提示（道具店按鈕正下方，靠右對齊）──────────────
     _w = _week[0]
     if fb and _w > 0:
@@ -501,13 +617,11 @@ def _draw_status_v2(surf, fm, fs, player, rect, mpos):
         surf.blit(_cdwn_pill, (_cdwn_rx, _cdwn_ry))
         surf.blit(_cdwn_s,    (_cdwn_rx + _cdwn_px, _cdwn_ry + _cdwn_py))
 
-    # ── 週次日曆（條右邊緣 ↔ 道具店左 中間空白）──────────────
-    sat_right  = bar_x + bar_w + 12   # 條右邊緣 + 間距
-    money_left = shop_r.x - 12
-    CAL_W      = 108
-    ticker_cx  = (sat_right + money_left) // 2
-    ticker_cy  = pr.y + pr.height // 2
-    if money_left - sat_right >= CAL_W + 8:
+    # ── 週次日曆（等距置中：進度條右緣 ↔ 倒數提示左緣）──────────────
+    CAL_W     = 108
+    ticker_cx = (sat_right + _cdwn_rx) // 2
+    ticker_cy = pr.y + pr.height // 2
+    if _cdwn_rx - sat_right >= CAL_W + 8:
         _draw_week_calendar(surf, fm, ticker_cx, ticker_cy, _week[0])
 
     return shop_r, info_btn_r

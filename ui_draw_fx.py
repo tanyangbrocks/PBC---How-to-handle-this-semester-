@@ -1230,8 +1230,9 @@ def _draw_end_report(surf, fm, fs, mpos, data, ms, elapsed):
 
 
 # ── Game Over 畫面 ──────────────────────────────────────────────────────────────
-_GO_FADE_MS  = 600    # 淡出 / 淡入各 600ms
-_GO_WAIT_BTN = 3000   # 背景出現後幾 ms 才顯示按鈕
+_GO_FADE_MS      = 600    # 淡出 / 淡入各 600ms
+_GO_WAIT_BTN     = 1000   # 背景出現後幾 ms 才顯示按鈕
+_GO_TEXT_FALL_MS = 2400   # 遺憾文字從頂端滑入所需時間（ms，cubic ease-out）
 
 def _build_go_silhouette() -> "pygame.Surface | None":
     """將當前立繪 Surface 轉為純黑剪影（保留 alpha）。"""
@@ -1323,6 +1324,17 @@ def _draw_gameover(surf: pygame.Surface, fm, fs, mpos) -> "pygame.Rect | None":
     # ── show：完整 Game Over 畫面 ──────────────────────────────────
     # 人物黑色剪影 + 內部雜訊
     _draw_go_silhouette_with_noise(surf, cr)
+
+    # ── 緩降標題文字「很遺憾，你沒能撐過這學期……」──────────────────
+    _go_fb_xl  = _font_bold_xl[0] or fm
+    _go_msg    = _go_fb_xl.render("很遺憾，你沒能撐過這學期……", True, PANEL)
+    _go_msg_w  = _go_msg.get_width()
+    _go_msg_h  = _go_msg.get_height()
+    _go_tgt_y  = 68                                    # 最終停駐 y（距頂部）
+    _go_tnorm  = min(1.0, elapsed / _GO_TEXT_FALL_MS)
+    _go_eased  = 1.0 - (1.0 - _go_tnorm) ** 3        # cubic ease-out
+    _go_text_y = int(-_go_msg_h + (_go_tgt_y + _go_msg_h) * _go_eased)
+    surf.blit(_go_msg, ((WIN_W - _go_msg_w) // 2, _go_text_y))
 
     # 「再來一次」按鈕（3 秒後才出現）
     if elapsed < _GO_WAIT_BTN:

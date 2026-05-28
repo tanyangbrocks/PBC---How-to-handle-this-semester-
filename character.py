@@ -227,6 +227,8 @@ class Character:
 
     def add_status(self, name: str, duration: int):
         """手動賦予計時型狀態（如 consume_stamina 觸發的生病）。"""
+        if name == "幸運" and "幸運" not in self.status_effects:
+            self.luck += 1
         self.status_effects[name] = duration
         notify(f"  ➕ 獲得狀態：【{name}】（持續 {duration} 週）")
 
@@ -290,6 +292,8 @@ class Character:
         expired = [name for name, weeks in self.status_effects.items()
                    if weeks == 1]
         for name in expired:
+            if name == "幸運":
+                self.luck -= 1
             del self.status_effects[name]
             notify(f"  ➖ 狀態解除：【{name}】")
         for name in list(self.status_effects):
@@ -316,8 +320,6 @@ class Character:
         return max(1, int(base_time * mult))
 
     def is_game_over(self) -> bool:
-        if self.stamina <= 0 and "生病" in self.status_effects:
-            return False
         if self.satisfaction <= 0:
             return True
         return False
@@ -354,18 +356,30 @@ class Character:
 
     @classmethod
     def _draw_slots(cls) -> list:
-        """拉霸機抽 3 槽；若前兩槽均為無天賦，第三槽保底抽到天賦。"""
-        pool        = TALENTS
-        weights     = [t["prob"] for t in pool]
-        non_null    = [t for t in pool if t["name"] != "無天賦"]
-        nn_weights  = [t["prob"] for t in non_null]
+        """拉霸機抽 3 槽（每槽不重複）；若前兩槽均為無天賦，第三槽保底抽到天賦。"""
+        pool    = list(TALENTS)          # 可變副本，每抽一槽就移除，確保不重複
+        weights = [t["prob"] for t in pool]
         results = []
+
         for i in range(3):
             if i == 2 and all(r["name"] == "無天賦" for r in results):
-                drawn = random.choices(non_null, weights=nn_weights, k=1)[0]
+                # 第三槽保底：從剩餘非無天賦中抽
+                cands = [(t, w) for t, w in zip(pool, weights)
+                         if t["name"] != "無天賦"]
+                if cands:
+                    ts, ws = zip(*cands)
+                    drawn = random.choices(list(ts), weights=list(ws), k=1)[0]
+                else:
+                    drawn = random.choices(pool, weights=weights, k=1)[0]
             else:
                 drawn = random.choices(pool, weights=weights, k=1)[0]
+
             results.append(drawn)
+            # 從可用池移除已抽到的天賦，避免重複出現
+            j = next(k for k, t in enumerate(pool) if t is drawn)
+            pool.pop(j)
+            weights.pop(j)
+
         return results
 
     @staticmethod
