@@ -607,7 +607,7 @@ def _draw_action_popup(surf, fs):
     title_w = _measure_mixed(fs, _popup_title[0])
     _render_mixed(surf, fs, _popup_title[0], TITLE,
                   pop_r.x + (POPUP_W - title_w) // 2, ty)
-    ty += title_t.get_height() + 4
+    ty += fs.get_height() + 4
     pygame.draw.line(surf, DARK_GRAY,
                      (pop_r.x + 12, ty), (pop_r.right - 12, ty), 1)
     ty += 6

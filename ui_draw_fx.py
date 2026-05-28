@@ -1008,11 +1008,9 @@ def _draw_end_anim(surf, fm, fs, elapsed):
                     ret, frame = cap.read()
                     if ret:
                         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                        fh, fw    = frame_rgb.shape[:2]
                         vsf       = pygame.surfarray.make_surface(
                                         frame_rgb.transpose(1, 0, 2))
-                        if fw != WIN_W or fh != WIN_H:
-                            vsf = pygame.transform.scale(vsf, (WIN_W, WIN_H))
+                        vsf = pygame.transform.scale(vsf, (WIN_W, WIN_H))  # 強制撐滿，允許變形
                         _end_video_surf[0] = vsf
                         _end_video_last[0] = now
                     else:
@@ -1099,10 +1097,8 @@ def _draw_end_report(surf, fm, fs, mpos, data, ms, elapsed):
                 ret, frame = cap.read()
                 if ret:
                     frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    fh, fw    = frame_rgb.shape[:2]
                     vsf       = pygame.surfarray.make_surface(frame_rgb.transpose(1, 0, 2))
-                    if fw != WIN_W or fh != WIN_H:
-                        vsf = pygame.transform.scale(vsf, (WIN_W, WIN_H))
+                    vsf = pygame.transform.scale(vsf, (WIN_W, WIN_H))  # 強制撐滿，允許變形
                     _end_bg_surf[0] = vsf
                     _end_bg_last[0] = ms
                 else:
