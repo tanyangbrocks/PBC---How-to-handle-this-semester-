@@ -96,6 +96,15 @@ def game_main():
             shop      = shop,
         )
 
+        # ── 步驟 2.5：詢問是否跳過新手教學 ──────────────────
+        skip_tutorial = ui.ask_yn(
+            "要跳過新手教學嗎？",
+            yes_label="直接開始",
+            no_label="觀看教學",
+            show_ctx=False,
+        )
+        engine.show_tutorial = not skip_tutorial
+
         # ── 步驟 3：主遊戲循環（共 16 回合 = 16 週）──────────
         premature_gameover = False
         for week in range(1, 17):
