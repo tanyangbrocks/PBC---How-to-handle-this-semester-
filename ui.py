@@ -1063,6 +1063,9 @@ def run_ui():
                 _smg_q_answered[0]     = False
                 _smg_r1_score_t0[0]    = 0
                 _smg_final_score_t0[0] = 0
+                _smg_phase_clearing[0] = False   # 確保 phase 清場旗標歸零
+                _info_modal_active[0]  = False   # 確保資訊 modal 不會鎖住點擊
+                _modal[0]              = None    # 確保課表/成績 modal 不會鎖住點擊
 
         # ── 繪製（依畫面階段切換內容）────────────────────────
         # 全螢幕：先把黑邊區域鋪上背景圖（screen 是 real_screen 的子 Surface，
@@ -1450,7 +1453,9 @@ def run_ui():
                     continue   # modal 開著時攔截所有點擊
 
                 # ── 遊戲中「資訊一覽」按鈕開啟 modal ────────────
-                if _phase[0] == "game" and info_btn_rect is not None \
+                # 小遊戲進行中禁止開啟（形狀可能覆蓋按鈕，誤觸會鎖住所有點擊）
+                if _phase[0] == "game" and not _smg_active[0] \
+                        and info_btn_rect is not None \
                         and info_btn_rect.collidepoint(_tpos(ev.pos)):
                     _play_sfx("ui_click")
                     player = _player[0]
