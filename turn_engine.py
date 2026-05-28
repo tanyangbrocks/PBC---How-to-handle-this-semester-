@@ -580,6 +580,11 @@ class TurnEngine:
                 "「明明早八遲到了二十分鐘，但我居然是第五個到教室的。」",
                 "「來上課的人真的少了好多，而且圖書館變得好難找位置。」",
             ])
+            show_extra_event_popup(
+                ["下週就要考試了，建議考前保留體力，避免考前出現意外！"],
+                "📋 期中考前提醒",
+                (180, 130, 30),
+            )
 
         elif week == 9:
             tell_story([
@@ -709,6 +714,11 @@ class TurnEngine:
                 "「系館半夜依然燈火通明，平常大家此起彼落的聊天聲，都變成了敲擊鍵盤的聲音。」",
                 "「大家見面的第一句話從『要一起吃飯嗎』變成『你做完了嗎』。」",
             ])
+            show_extra_event_popup(
+                ["下週就要考試了，建議考前保留體力，避免考前出現意外！"],
+                "📋 期末考前提醒",
+                (180, 130, 30),
+            )
 
         else:
             # 其餘週（無特定劇情）
@@ -976,7 +986,7 @@ class TurnEngine:
         base_stats_score = self._calculate_exam_score("期中") * 0.5
         mini_game_rate   = self._run_exam_mini_game("期中")
         qa_score         = mini_game_rate * 100 * 0.25
-        minigame_rate    = run_shape_minigame()
+        minigame_rate    = run_shape_minigame("期中")
         minigame_score   = minigame_rate * 100 * 0.25
 
         total_score = (base_stats_score + qa_score + minigame_score) * exam_modifier
@@ -1007,7 +1017,7 @@ class TurnEngine:
         base_stats_score = self._calculate_exam_score("期末") * 0.5
         mini_game_rate   = self._run_exam_mini_game("期末")
         qa_score         = mini_game_rate * 100 * 0.25
-        minigame_rate    = run_shape_minigame()
+        minigame_rate    = run_shape_minigame("期末")
         minigame_score   = minigame_rate * 100 * 0.25
 
         total_score = (base_stats_score + qa_score + minigame_score) * exam_modifier
