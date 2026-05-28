@@ -128,10 +128,10 @@ def play_exam_sfx(correct: bool) -> None:
     """播放考試答題音效（答對/答錯）。可從遊戲執行緒直接呼叫。"""
     _play_sfx("exam_correct" if correct else "event_bad")
 
-def run_shape_minigame() -> float:
+def run_shape_minigame(exam_type: str = "期中") -> float:
     """執行形狀小遊戲，阻塞直到兩回合結束，回傳 0.0–1.0。"""
-    _cmd_q.put(("shape_minigame",))
     _reply_event.clear()
+    _cmd_q.put(("shape_minigame", exam_type))
     _reply_event.wait()
     return float(_reply_val[0])
 
@@ -1040,6 +1040,7 @@ def run_ui():
                 _choices.extend(cmd[1])
                 _mode[0] = "exam_q"
             elif tag == "shape_minigame":
+                _smg_exam_type[0]      = cmd[1] if len(cmd) > 1 else "期中"
                 _smg_active[0]         = True
                 _smg_round[0]          = 1
                 _smg_direction[0]      = -1
@@ -1059,6 +1060,9 @@ def run_ui():
                 _smg_next_spawn_dt[0]  = random.randint(700, 1100)
                 _smg_round_scores[:]   = [0, 0]
                 _smg_q_active[0]       = False
+                _smg_q_answered[0]     = False
+                _smg_r1_score_t0[0]    = 0
+                _smg_final_score_t0[0] = 0
 
         # ── 繪製（依畫面階段切換內容）────────────────────────
         # 全螢幕：先把黑邊區域鋪上背景圖（screen 是 real_screen 的子 Surface，
@@ -1545,43 +1549,36 @@ def run_ui():
 
                     # 形狀小遊戲優先攔截（蓋過所有遊戲 UI）
                     if _smg_active[0]:
+                        # ── 最終分數畫面：只響應「確認」按鈕 ─────────
+                        if _smg_final_score_t0[0] > 0:
+                            ok_rect = _smg_final_ok_rect[0]
+                            if ok_rect and ok_rect.collidepoint(_tpos(ev.pos)):
+                                _play_sfx("ui_click")
+                                total = _smg_round_scores[0] + _smg_round_scores[1]
+                                _smg_active[0]         = False
+                                _smg_final_score_t0[0] = 0
+                                _smg_final_ok_rect[0]  = None
+                                _reply_val[0]          = total / 200.0
+                                _reply_event.set()
+                            continue   # 最終分數畫面攔截所有點擊
                         if _smg_q_active[0]:
-                            for br, val in _smg_q_rects:
-                                if br.collidepoint(_tpos(ev.pos)):
-                                    _play_sfx("ui_click")
-                                    mem_score = 30 if val == _smg_q_correct[0] else 0
-                                    pv = 70 / 20
-                                    click_score = max(
-                                        0.0,
-                                        _smg_correct_clicks[0] * pv
-                                        - _smg_wrong_clicks[0] * pv,
-                                    )
-                                    _smg_round_scores[_smg_round[0] - 1] = int(click_score + mem_score)
-                                    _smg_q_active[0] = False
-
-                                    if _smg_round[0] == 1:
-                                        _smg_round[0]          = 2
-                                        _smg_direction[0]      = 1
-                                        _smg_t0[0]             = pygame.time.get_ticks()
-                                        _smg_phase[0]          = random.choice(["circle", "cross"])
-                                        _smg_phase_end_t[0]    = _smg_t0[0] + random.randint(8000, 12000)
-                                        _smg_phase_flash_t[0]  = 0
-                                        _smg_shapes.clear()
-                                        _smg_tri_count[0]      = 0
-                                        _smg_dia_count[0]      = 0
-                                        _smg_correct_clicks[0] = 0
-                                        _smg_wrong_clicks[0]   = 0
-                                        _smg_spawn_budget[0]   = 20
-                                        _smg_tri_budget[0]     = random.randint(7, 12)
-                                        _smg_dia_budget[0]     = random.randint(7, 12)
-                                        _smg_last_spawn_t[0]   = _smg_t0[0]
-                                        _smg_next_spawn_dt[0]  = random.randint(700, 1100)
-                                    else:
-                                        total = _smg_round_scores[0] + _smg_round_scores[1]
-                                        _smg_active[0]  = False
-                                        _reply_val[0]   = total / 200.0
-                                        _reply_event.set()
-                                    break
+                            if not _smg_q_answered[0]:   # 防止重複點擊
+                                for br, val in _smg_q_rects:
+                                    if br.collidepoint(_tpos(ev.pos)):
+                                        _play_sfx("ui_click")
+                                        mem_score = 20 if val == _smg_q_correct[0] else 0
+                                        pv = 80 / 20
+                                        click_score = max(
+                                            0.0,
+                                            _smg_correct_clicks[0] * pv
+                                            - _smg_wrong_clicks[0] * pv,
+                                        )
+                                        _smg_round_scores[_smg_round[0] - 1] = min(100, int(click_score + mem_score))
+                                        _smg_q_ans_correct[0] = (val == _smg_q_correct[0])
+                                        _smg_q_ans_t0[0]      = pygame.time.get_ticks()
+                                        _smg_q_answered[0]    = True
+                                        # 回合轉換由 _draw_shape_minigame 計時 1.5s 後處理
+                                        break
                         else:
                             for s in _smg_shapes:
                                 if not s["alive"]:

@@ -403,6 +403,17 @@ _smg_q_correct      = [0]         # 正確答案
 _smg_q_opts:        list = []     # 4 個選項（int list）
 _smg_q_rects:       list = []     # 按鈕 Rect list（每幀更新）
 _smg_round_scores:  list = [0, 0] # 兩回合分數
+_smg_phase_clearing = [False]    # phase 切換前等待畫面清空
+_smg_r1_score_t0    = [0]        # 第一回合成績展示計時（0=未顯示）
+_smg_bg_surf        = [None]     # 第二回合背景 Surface（已縮放至螢幕）
+_smg_bg_key         = [""]       # 當前背景檔名（換背景時避免重複）
+_smg_icon_cache:    dict = {}    # (type, size) -> Surface（圖示快取）
+_smg_exam_type       = [""]       # "期中" | "期末"
+_smg_final_score_t0  = [0]        # 第二回合結束成績展示計時（0=未顯示）
+_smg_final_ok_rect   = [None]     # 「確認」按鈕 Rect（每幀更新）
+_smg_q_answered     = [False]    # 記憶題已作答（顯示對錯結果中）
+_smg_q_ans_correct  = [False]    # 本次作答是否正確
+_smg_q_ans_t0       = [0]        # 作答時間戳（ms）
 
 # 明確宣告所有名稱可被 import * 匯出（含 _ 前綴）
 __all__ = [_n for _n in vars() if not _n.startswith('__')]
