@@ -68,7 +68,9 @@ CHAR_H   = WIN_H - STATUS_H - ACTION_H   # 人物立繪區 = 335px
 _CHAR_ART_DIR      = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                    "asset", "picture", "character")
 
-_PORTRAIT_FADE_MS  = 200     # 淡入總時長（ms）
+_PORTRAIT_FADE_MS        = 200   # 淡入總時長（ms）
+PORTRAIT_DISPLAY_H_FACTOR = 2.2  # 立繪縱向放大倍率（腰部以上可見，約 45% 顯示）
+PORTRAIT_TOP_PAD          = 15   # 頭部距立繪區頂部的留白（px）
 
 _TIME_SHAKE_MS = 520      # 整段動畫時長（ms）
 
@@ -239,6 +241,11 @@ _BUMP_SP = 74    # 凸起內三顆按鈕水平間距
 
 _BUMP_IR = 12    # 凸起與面板交接處的內凹弧半徑
 
+# ── 底部行動面板折疊 toggle ────────────────────────────────────
+AP_COLLAPSE_MS = 280   # 折疊/展開動畫時長（ms）
+_AP_TOGGLE_W   = 80    # toggle 按鈕寬（px）
+_AP_TOGGLE_H   = 22    # toggle 按鈕高（px）
+
 _SPECIAL_ACTION_NAMES = ["熬夜", "翹課", "進食"]
 
 _SPECIAL_ICONS = {"熬夜": "月", "翹課": "逃", "進食": "食"}
@@ -247,7 +254,7 @@ _SPECIAL_ICONS = {"熬夜": "月", "翹課": "逃", "進食": "食"}
 _ACTION_INFO = {
     "認真讀書": ("消耗體力 4", "課業熟練度 +8    自我滿足度 -5"),
     "正常上課": ("消耗體力 2", "課業熟練度 +4    課堂參與度 +5"),
-    "社團活動": ("消耗體力 3", "自我滿足度 +10"),
+    "社團活動": ("體力-3，30%免", "滿足度+10~15 金錢-10~+50"),
     "打工賺錢": ("消耗體力 4", "金錢 +150    自我滿足度 +3"),
     "好好休息": ("恢復體力 6", "自我滿足度 +8"),
     "幫助朋友": ("消耗體力 2", "自我滿足度 +12"),

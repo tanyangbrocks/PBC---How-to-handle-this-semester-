@@ -125,6 +125,10 @@ _withdrawal_popup_rects: list = []
 _special_disabled: dict = {}   # {行動名: 倒數格數} 停用中的特殊行動
 _allnighter_count = [0]        # 本週已熬夜次數（上限 5）
 
+# ── 遊戲說明 modal ──────────────────────────────────────────
+_guide_active = [False]   # 說明 modal 是否開啟
+_guide_page   = [0]       # 當前頁碼（0-based，共 6 頁）
+
 # ── 行動成功白光閃爍 ────────────────────────────────────────────
 _action_flash_t0 = [0]    # 閃爍觸發時間戳（ms，0 = 未啟用）
 
@@ -318,6 +322,15 @@ _panel_slide_t0  = [0]        # 動畫開始時間（ms）
 
 _panel_slide_val = [0.0]      # 0.0=完全展開, 1.0=完全收起
 
+# ── 底部行動面板折疊（玩家手動收起/展開）────────────────────────
+_ap_collapse_dir  = ["none"]  # "out"=折疊中 | "in"=展開中 | "none"
+
+_ap_collapse_t0   = [0]       # 動畫開始時間（ms）
+
+_ap_collapse_val  = [0.0]     # 0.0=完全展開, 1.0=完全折疊
+
+_ap_toggle_rect   = [None]    # toggle 按鈕 Rect（每幀由繪製函式更新）
+
 _weather_type  = [None]   # 目前天氣類型字串
 
 _weather_pts   = []       # 粒子池（葉子 / 花瓣 / 雨滴 / 光塵 / 霧團）
@@ -357,6 +370,39 @@ _end_video_surf  = [None]   # 當前幀的 pygame.Surface（已縮放至螢幕�
 _end_video_last  = [0]      # 上次更新幀的時間戳（ms）
 _end_video_done  = [False]  # 影片播完旗標（觸發後推進到 fade_out_2）
 
+# ── 結局背景影片（成績單評語出現後顯示）────────────────────
+_end_bg_caps    = {}      # {"best": cap, "next": cap, "break": cap, "lose": cap}
+_end_bg_fps_map = {}      # {"best": fps, ...}
+_end_bg_surf    = [None]  # 當前幀的 pygame.Surface
+_end_bg_last    = [0]     # 上次更新幀的時間戳（ms）
+_end_bg_fade_t0 = [0]     # 背景漸變開始時間戳（0=未開始）
+_end_bg_key     = [None]  # 目前播放的結局背景 key（best/next/break/lose）
+
+
+# ── 形狀小遊戲狀態 ────────────────────────────────────────
+_smg_active         = [False]     # 小遊戲是否執行中
+_smg_round          = [1]         # 目前回合（1 or 2）
+_smg_t0             = [0]         # 回合開始 ticks
+_smg_phase          = ["circle"]  # "circle" | "cross"
+_smg_phase_end_t    = [0]         # 下次 phase 切換的 ticks
+_smg_phase_flash_t  = [0]         # phase 切換提示的開始 ticks（0=無）
+_smg_direction      = [-1]        # -1=右進左出, +1=左進右出
+_smg_shapes:        list = []     # 目前畫面上的形狀 list
+_smg_tri_count      = [0]         # 本回合三角形出現數
+_smg_dia_count      = [0]         # 本回合菱形出現數
+_smg_correct_clicks = [0]
+_smg_wrong_clicks   = [0]
+_smg_spawn_budget   = [20]        # 本回合剩餘可生成目標數
+_smg_tri_budget     = [0]         # 本回合三角形剩餘可生成數
+_smg_dia_budget     = [0]         # 本回合菱形剩餘可生成數
+_smg_last_spawn_t   = [0]         # 上次生成形狀的時間戳
+_smg_next_spawn_dt  = [800]       # 下次生成的間隔（ms）
+_smg_q_active       = [False]     # 記憶問題是否顯示中
+_smg_q_shape        = [""]        # "triangle" | "diamond"
+_smg_q_correct      = [0]         # 正確答案
+_smg_q_opts:        list = []     # 4 個選項（int list）
+_smg_q_rects:       list = []     # 按鈕 Rect list（每幀更新）
+_smg_round_scores:  list = [0, 0] # 兩回合分數
 
 # 明確宣告所有名稱可被 import * 匯出（含 _ 前綴）
 __all__ = [_n for _n in vars() if not _n.startswith('__')]
