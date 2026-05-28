@@ -18,6 +18,7 @@ from ui_draw_hud  import *
 from ui_draw_cc   import *
 from ui_draw_pop  import *
 from ui_draw_ap   import *
+from ui_draw_exam import *
 
 def notify(msg: str):
     """取代 print()：把訊息推入 UI 訊息區。"""
@@ -126,6 +127,13 @@ def ask_exam_question(prompt: str, options: list) -> int:
 def play_exam_sfx(correct: bool) -> None:
     """播放考試答題音效（答對/答錯）。可從遊戲執行緒直接呼叫。"""
     _play_sfx("exam_correct" if correct else "event_bad")
+
+def run_shape_minigame() -> float:
+    """執行形狀小遊戲，阻塞直到兩回合結束，回傳 0.0–1.0。"""
+    _cmd_q.put(("shape_minigame",))
+    _reply_event.clear()
+    _reply_event.wait()
+    return float(_reply_val[0])
 
 def tell_story(lines: list) -> None:
     """顯示劇情對話框，每次點擊推進一行，全部結束後解除阻塞。
@@ -758,6 +766,27 @@ def run_ui():
     except Exception:
         pass
 
+    # ── 結局背景影片（WEBM，評語出現後淡入）────────────────────
+    _ENDING_BG_FILES = {
+        "best":  "best_ending_background.webm",
+        "next":  "next_ending_background.webm",
+        "break": "break_background.webm",
+        "lose":  "lose_background.webm",
+    }
+    try:
+        import cv2 as _cv2_eb
+        for _ebkey, _ebfname in _ENDING_BG_FILES.items():
+            _ebpath = os.path.join(_bg_dir, _ebfname)
+            _ebcap  = _cv2_eb.VideoCapture(_ebpath)
+            if _ebcap.isOpened():
+                _end_bg_caps[_ebkey] = _ebcap
+                _ebfps = _ebcap.get(_cv2_eb.CAP_PROP_FPS)
+                _end_bg_fps_map[_ebkey] = float(_ebfps) if _ebfps and _ebfps > 0 else 30.0
+            else:
+                _ebcap.release()
+    except Exception:
+        pass
+
     # 全螢幕切換按鈕固定 Rect（右下角，各畫面常駐）
     fs_btn = pygame.Rect(WIN_W - 46, WIN_H - 46, 40, 40)
 
@@ -772,7 +801,11 @@ def run_ui():
 
     running = True
     _prev_hov_btns: set = set()   # 上一幀 hover 中的按鈕 key 集合（用於首次進入偵測）
+    _prev_tick = pygame.time.get_ticks()
     while running:
+        _now_tick = pygame.time.get_ticks()
+        _dt_ms    = max(1, _now_tick - _prev_tick)
+        _prev_tick = _now_tick
         mpos = _tpos(pygame.mouse.get_pos())
         # 道具店按鈕是否可點擊：只有在行動選單中且選項包含道具店時才亮起
         shop_active = (_mode[0] == "choices" and "🏪 前往道具店" in _choices)
@@ -847,6 +880,17 @@ def run_ui():
                     _ending_bgm_triggered[0] = False
                     _end_video_done[0]       = False
                     _end_video_surf[0]       = None
+                    _end_bg_surf[0]          = None
+                    _end_bg_last[0]          = 0
+                    _end_bg_fade_t0[0]       = 0
+                    _end_bg_key[0]           = None
+                    # 結局背景影片倒帶，以供下一局重新播放
+                    for _rkey, _rcap in _end_bg_caps.items():
+                        try:
+                            import cv2 as _cv2_rew
+                            _rcap.set(_cv2_rew.CAP_PROP_POS_FRAMES, 0)
+                        except Exception:
+                            pass
                 elif cmd[1] == "gameover":
                     _request_bgm(None)
                     _play_sfx("game_over")
@@ -995,6 +1039,26 @@ def run_ui():
                 _choices.clear()
                 _choices.extend(cmd[1])
                 _mode[0] = "exam_q"
+            elif tag == "shape_minigame":
+                _smg_active[0]         = True
+                _smg_round[0]          = 1
+                _smg_direction[0]      = -1
+                _smg_t0[0]             = pygame.time.get_ticks()
+                _smg_phase[0]          = random.choice(["circle", "cross"])
+                _smg_phase_end_t[0]    = _smg_t0[0] + random.randint(8000, 12000)
+                _smg_phase_flash_t[0]  = 0
+                _smg_shapes.clear()
+                _smg_tri_count[0]      = 0
+                _smg_dia_count[0]      = 0
+                _smg_correct_clicks[0] = 0
+                _smg_wrong_clicks[0]   = 0
+                _smg_spawn_budget[0]   = 20
+                _smg_tri_budget[0]     = random.randint(7, 12)
+                _smg_dia_budget[0]     = random.randint(7, 12)
+                _smg_last_spawn_t[0]   = _smg_t0[0]
+                _smg_next_spawn_dt[0]  = random.randint(700, 1100)
+                _smg_round_scores[:]   = [0, 0]
+                _smg_q_active[0]       = False
 
         # ── 繪製（依畫面階段切換內容）────────────────────────
         # 全螢幕：先把黑邊區域鋪上背景圖（screen 是 real_screen 的子 Surface，
@@ -1005,6 +1069,10 @@ def run_ui():
         btn_rects      = []
         start_btn      = None
         _debug_btn     = None
+        _guide_btn     = None
+        _guide_close_r = None
+        _guide_prev_r  = None
+        _guide_next_r  = None
         end_btn        = None
         go_btn         = None
         end_week_btn   = None
@@ -1014,7 +1082,10 @@ def run_ui():
         shop_exit_btn  = None
 
         if _phase[0] == "start":
-            start_btn, _debug_btn = _draw_start(screen, fm, fl, mpos)
+            start_btn, _debug_btn, _guide_btn = _draw_start(screen, fm, fl, mpos)
+            if _guide_active[0]:
+                _guide_close_r, _guide_prev_r, _guide_next_r = \
+                    _draw_guide_modal(screen, fm, fl, mpos)
         elif _phase[0] == "shop":
             # ── 計算道具店滑動偏移 ──────────────────────────────
             _sdir = _shop_slide_dir[0]
@@ -1131,7 +1202,24 @@ def run_ui():
                     if _pt >= 1.0:
                         _panel_slide_dir[0] = "none"
                         _panel_slide_val[0] = 0.0
-            pst = _panel_slide_val[0]   # 0.0 = 全展開, 1.0 = 全收起
+            # max：story 模式收折 vs. 玩家手動收折，取較大者驅動上/左/右面板
+            pst = max(_panel_slide_val[0], _ap_collapse_val[0])
+
+            # ── 底部行動面板折疊動畫 ──────────────────────────────────────
+            _acdir = _ap_collapse_dir[0]
+            if _acdir != "none":
+                _acel = max(pygame.time.get_ticks() - _ap_collapse_t0[0], 0)
+                _act  = min(_acel / AP_COLLAPSE_MS, 1.0)
+                if _acdir == "out":
+                    _ap_collapse_val[0] = _ease_in_cubic(_act)
+                    if _act >= 1.0:
+                        _ap_collapse_dir[0] = "none"
+                        _ap_collapse_val[0] = 1.0
+                elif _acdir == "in":
+                    _ap_collapse_val[0] = 1.0 - _ease_out_quart(_act)
+                    if _act >= 1.0:
+                        _ap_collapse_dir[0] = "none"
+                        _ap_collapse_val[0] = 0.0
 
             # 依 pst 計算各面板偏移量
             _SL_M    = _SIDE_PANEL_W + 20          # 足以完全移出畫面的距離
@@ -1172,10 +1260,12 @@ def run_ui():
                 or _withdrawal_popup_active[0]
                 or _modal[0] is not None   # 課表 / 成績公告 modal 背景靜音
             )
+            _ap_yoff  = int(_ap_collapse_val[0] * ACTION_H)
+            ar_drawn  = pygame.Rect(ar.x, ar.y + _ap_yoff, ar.width, ar.height)
             btn_rects, end_week_btn = _draw_action_panel(
                 screen, fm, fs, _panel_mode, _panel_choices,
                 [] if _popup_hides_log else _log,
-                _prompt, _tvalue, ar, _time_units[0], mpos)
+                _prompt, _tvalue, ar_drawn, _time_units[0], mpos)
             # 考前壓力特效（邊框顫抖 + 底色微微泛紅）：疊在所有面板之上、彈窗之下
             _draw_exam_stress_fx(screen)
             # 低滿意度黑色暈圈遮罩（中央亮、外圍暗 + 雜訊）
@@ -1257,6 +1347,10 @@ def run_ui():
             pygame.draw.line(screen, _ic, (_ix,         _iy+_ih),    (_ix,         _iy+_ih-_a),     2)
             pygame.draw.line(screen, _ic, (_ix+_iw,     _iy+_ih),    (_ix+_iw-_a,  _iy+_ih),       2)
             pygame.draw.line(screen, _ic, (_ix+_iw,     _iy+_ih),    (_ix+_iw,     _iy+_ih-_a),    2)
+
+        # ── 形狀小遊戲覆蓋層（優先蓋過所有遊戲 UI）────────────
+        if _smg_active[0]:
+            _draw_shape_minigame(screen, fm, fs, fm, mpos, _dt_ms)
 
         # ── 漣漪轉場覆蓋層（最頂層，疊在所有內容之上）──────────
         _draw_ripple_overlay(screen)
@@ -1376,7 +1470,17 @@ def run_ui():
                     continue
 
                 if _phase[0] == "start":
-                    if start_btn and start_btn.collidepoint(_tpos(ev.pos)):
+                    if _guide_active[0]:
+                        if _guide_close_r and _guide_close_r.collidepoint(_tpos(ev.pos)):
+                            _play_sfx("back")
+                            _guide_active[0] = False
+                        elif _guide_prev_r and _guide_prev_r.collidepoint(_tpos(ev.pos)):
+                            _play_sfx("ui_click")
+                            _guide_page[0] = max(0, _guide_page[0] - 1)
+                        elif _guide_next_r and _guide_next_r.collidepoint(_tpos(ev.pos)):
+                            _play_sfx("ui_click")
+                            _guide_page[0] = min(_GUIDE_N - 1, _guide_page[0] + 1)
+                    elif start_btn and start_btn.collidepoint(_tpos(ev.pos)):
                         _play_sfx("start_click")
                         _click_reg[(start_btn.centerx, start_btn.centery)] = pygame.time.get_ticks()
                         _phase[0] = "game"
@@ -1386,6 +1490,10 @@ def run_ui():
                         _phase[0] = "game"
                         _debug_skip_event.set()
                         _start_event.set()
+                    elif _guide_btn and _guide_btn.collidepoint(_tpos(ev.pos)):
+                        _play_sfx("ui_click")
+                        _guide_active[0] = True
+                        _guide_page[0]   = 0
                 elif _phase[0] == "shop":
                     # 離開按鈕：僅在靜止狀態（非動畫中）才響應
                     if (shop_exit_btn and shop_exit_btn.collidepoint(_tpos(ev.pos))
@@ -1434,6 +1542,64 @@ def run_ui():
                         _restart_event.set()
                 else:
                     # ── 遊戲中 ────────────────────────────────
+
+                    # 形狀小遊戲優先攔截（蓋過所有遊戲 UI）
+                    if _smg_active[0]:
+                        if _smg_q_active[0]:
+                            for br, val in _smg_q_rects:
+                                if br.collidepoint(_tpos(ev.pos)):
+                                    _play_sfx("ui_click")
+                                    mem_score = 30 if val == _smg_q_correct[0] else 0
+                                    pv = 70 / 20
+                                    click_score = max(
+                                        0.0,
+                                        _smg_correct_clicks[0] * pv
+                                        - _smg_wrong_clicks[0] * pv,
+                                    )
+                                    _smg_round_scores[_smg_round[0] - 1] = int(click_score + mem_score)
+                                    _smg_q_active[0] = False
+
+                                    if _smg_round[0] == 1:
+                                        _smg_round[0]          = 2
+                                        _smg_direction[0]      = 1
+                                        _smg_t0[0]             = pygame.time.get_ticks()
+                                        _smg_phase[0]          = random.choice(["circle", "cross"])
+                                        _smg_phase_end_t[0]    = _smg_t0[0] + random.randint(8000, 12000)
+                                        _smg_phase_flash_t[0]  = 0
+                                        _smg_shapes.clear()
+                                        _smg_tri_count[0]      = 0
+                                        _smg_dia_count[0]      = 0
+                                        _smg_correct_clicks[0] = 0
+                                        _smg_wrong_clicks[0]   = 0
+                                        _smg_spawn_budget[0]   = 20
+                                        _smg_tri_budget[0]     = random.randint(7, 12)
+                                        _smg_dia_budget[0]     = random.randint(7, 12)
+                                        _smg_last_spawn_t[0]   = _smg_t0[0]
+                                        _smg_next_spawn_dt[0]  = random.randint(700, 1100)
+                                    else:
+                                        total = _smg_round_scores[0] + _smg_round_scores[1]
+                                        _smg_active[0]  = False
+                                        _reply_val[0]   = total / 200.0
+                                        _reply_event.set()
+                                    break
+                        else:
+                            for s in _smg_shapes:
+                                if not s["alive"]:
+                                    continue
+                                if shape_rect(s).collidepoint(_tpos(ev.pos)):
+                                    s["alive"] = False
+                                    is_target = (
+                                        (s["type"] == "circle" and _smg_phase[0] == "circle")
+                                        or (s["type"] == "cross" and _smg_phase[0] == "cross")
+                                    )
+                                    if is_target:
+                                        _smg_correct_clicks[0] += 1
+                                        _play_sfx("talent_none")
+                                    else:
+                                        _smg_wrong_clicks[0] += 1
+                                        _play_sfx("damage6")
+                                    break
+                        continue   # 小遊戲中攔截所有底層點擊
 
                     # 劇情對話框：任意點擊推進（優先級次於突發事件彈窗）
                     if _mode[0] == "story":
@@ -1533,6 +1699,17 @@ def run_ui():
                                 _reply_event.set()
                                 break
                         continue   # 無論有沒有點中按鈕，都不透傳到下方邏輯
+
+                    # ── 底部行動面板折疊/展開 toggle ─────────────────────
+                    if (_ap_toggle_rect[0] is not None
+                            and _ap_toggle_rect[0].collidepoint(_tpos(ev.pos))):
+                        _play_sfx("ui_click")
+                        if _ap_collapse_val[0] < 0.5:
+                            _ap_collapse_dir[0] = "out"
+                        else:
+                            _ap_collapse_dir[0] = "in"
+                        _ap_collapse_t0[0] = pygame.time.get_ticks()
+                        continue
 
                     # 狀態欄道具店按鈕（僅在行動選單時有效）
                     if (shop_active
