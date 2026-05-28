@@ -164,65 +164,17 @@ def _render_mixed(surf: pygame.Surface,
                   main_font, text: str, color: tuple,
                   x: int, y: int) -> int:
     """
-    以主字型繪製一般文字，遇到 Emoji 改用 Segoe UI Emoji。
-    若 Emoji 字型不可用，自動降格為 _clean() 去除 Emoji。
+    以主字型繪製文字；Emoji 字元直接略去（_clean 過濾），避免渲染成 □。
     回傳渲染後的總像素寬度。
     """
-    emoji_font = _get_emoji_font(main_font.get_height())
-    if emoji_font is None:
-        s = main_font.render(_clean(text), True, color)
-        surf.blit(s, (x, y))
-        return s.get_width()
-
-    main_h  = main_font.get_height()
-    cur_x   = x
-    seg     = ""
-    in_em   = False
-
-    def _flush(segment: str, use_emoji: bool):
-        nonlocal cur_x
-        if not segment:
-            return
-        f = emoji_font if use_emoji else main_font
-        s = f.render(segment, True, color)
-        # 垂直對齊：Emoji 字型高度可能與主字型不同，置中對齊
-        y_off = max(0, (main_h - s.get_height()) // 2)
-        surf.blit(s, (cur_x, y + y_off))
-        cur_x += s.get_width()
-
-    for ch in text:
-        is_em = _is_emoji_char(ch)
-        if is_em != in_em:
-            _flush(seg, in_em)
-            seg, in_em = ch, is_em
-        else:
-            seg += ch
-    _flush(seg, in_em)
-    return cur_x - x
+    cleaned = _clean(text)
+    s = main_font.render(cleaned, True, color)
+    surf.blit(s, (x, y))
+    return s.get_width()
 
 def _measure_mixed(main_font, text: str) -> int:
-    """計算混合字型（含 Emoji）的渲染寬度，用於置中計算。"""
-    emoji_font = _get_emoji_font(main_font.get_height())
-    total = 0
-    seg   = ""
-    in_em = False
-
-    def _flush_m(segment: str, use_emoji: bool):
-        nonlocal total
-        if not segment:
-            return
-        f = (emoji_font if (use_emoji and emoji_font) else main_font)
-        total += f.size(segment)[0]
-
-    for ch in text:
-        is_em = _is_emoji_char(ch)
-        if is_em != in_em:
-            _flush_m(seg, in_em)
-            seg, in_em = ch, is_em
-        else:
-            seg += ch
-    _flush_m(seg, in_em)
-    return total
+    """計算文字渲染寬度（Emoji 已濾除），用於置中計算。"""
+    return main_font.size(_clean(text))[0]
 
 
 def _wrap(text: str, font, max_w: int) -> list:
@@ -588,7 +540,7 @@ def _get_portrait_key() -> str:
     if player is not None:
         sat   = player.satisfaction
         ratio = player.stamina / max(player.stamina_max, 1)
-        if sat <= 60:
+        if sat < 50:
             return f"{prefix}_5"
         if ratio < 1 / 3:
             return f"{prefix}_0"
