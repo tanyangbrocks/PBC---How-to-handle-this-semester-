@@ -249,6 +249,10 @@ def set_special_disabled(names: dict) -> None:
     """更新特殊行動的停用狀態。names = {行動名: 倒數格數}（空 dict 表示清除全部）。"""
     _cmd_q.put(("special_disabled", dict(names)))
 
+def set_allnighter_count(n: int) -> None:
+    """更新本週已熬夜次數（0-5），驅動按鈕右下角計數器。"""
+    _cmd_q.put(("allnighter_count", n))
+
 def set_week(w: int):
     """由遊戲執行緒呼叫，更新週次輪盤顯示並觸發對應 BGM。"""
     _week[0] = w
@@ -372,15 +376,19 @@ def trigger_ripple() -> None:
     """觸發漣漪轉場效果；由遊戲執行緒在週次切換時呼叫。"""
     _cmd_q.put(("ripple",))
 
-def show_action_result(lines: list, title: str = "行動結果") -> None:
+def show_action_result(lines: list, title: str = "行動結果",
+                       direction: str = "right") -> None:
     """
-    由遊戲執行緒呼叫，觸發畫面右側由右而左滑入的行動結果視窗。
+    由遊戲執行緒呼叫，觸發行動結果視窗。
+    direction="right" → 由右而左滑入（一般行動 / 特殊行動）
+    direction="top"   → 由上而下滑入（考試答對 / 答錯）
     lines: 要顯示的結果文字列表（如「體力 -4」、「金錢 +150」）。
     title: 彈出視窗的標題，通常傳入行動名稱（如「認真讀書」）。
     """
     _popup_lines.clear()
     _popup_lines.extend(lines)   # 保留 tuple 型別（"multi" 多色行、(text,col) 標注行）
-    _popup_title[0] = title
+    _popup_title[0]     = title
+    _popup_direction[0] = direction
     _now = pygame.time.get_ticks()
     _popup_t0[0]        = _now
     _action_flash_t0[0] = _now   # 觸發全螢幕白光閃爍
@@ -954,6 +962,8 @@ def run_ui():
             elif tag == "special_disabled":
                 _special_disabled.clear()
                 _special_disabled.update(cmd[1])
+            elif tag == "allnighter_count":
+                _allnighter_count[0] = cmd[1]
             elif tag == "subj_popup":
                 _subj_popup_title[0] = cmd[1]
                 _subj_popup_opts.clear()
@@ -1172,9 +1182,7 @@ def run_ui():
             _draw_low_sat_vignette(screen, _player[0])
             # 生病狀態邊緣光暈（紅→藍→綠循環脈動，疊在黑色遮罩之上）
             _draw_sick_vignette(screen, _player[0])
-            # 行動結果彈出視窗（右側由右而左滑入）
-            _draw_action_popup(screen, fs)
-            # 中央彈出視窗（yn / 非標準選項）
+            # 中央彈出視窗（yn / 非標準選項 / 考試題目）
             _draw_cp = (
                 (_mode[0] == "choices" and bool(_choices)
                  and not all(c in _STANDARD_ACTIONS for c in _choices))
@@ -1187,6 +1195,8 @@ def run_ui():
                                        _log, _prompt[0], _yn_labels, mpos))
             else:
                 _choice_popup_rects.clear()
+            # 行動結果彈出視窗（上方由上而下滑入，畫在考試遮罩之上）
+            _draw_action_popup(screen, fs)
             # 突發事件通知彈窗（單按鈕，最上層）
             if _mode[0] == "event_ok":
                 _event_ok_popup_rects.clear()
@@ -1410,14 +1420,14 @@ def run_ui():
                     _handle_cc_action(_tpos(ev.pos))
                 elif _phase[0] == "end":
                     if end_btn and end_btn.collidepoint(_tpos(ev.pos)):
-                        _play_sfx("ui_click")
+                        _play_sfx("start_click")
                         _click_reg[(end_btn.centerx, end_btn.centery)] = pygame.time.get_ticks()
                         _phase[0] = "start"
                         _request_bgm("Music-Morning_Rain.mp3")
                         _restart_event.set()
                 elif _phase[0] == "gameover":
                     if go_btn and go_btn.collidepoint(_tpos(ev.pos)):
-                        _play_sfx("ui_click")
+                        _play_sfx("start_click")
                         _click_reg[(go_btn.centerx, go_btn.centery)] = pygame.time.get_ticks()
                         _phase[0] = "start"
                         _request_bgm("Music-Morning_Rain.mp3")

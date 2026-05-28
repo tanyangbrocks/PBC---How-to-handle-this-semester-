@@ -20,6 +20,7 @@ from ui import notify, ask_ok, ask_yn, ask_choice, ask_text, set_player, \
                ask_subject_popup, trigger_time_overflow_warning, tell_story, \
                show_extra_event_popup, ask_exam_start, set_roll_call, clear_roll_call, \
                set_roll_call_attended, set_roll_call_xed, set_special_disabled, \
+               set_allnighter_count, \
                ask_skip_class_popup, ask_withdrawal_popup, set_settlement_data, \
                ask_exam_question, play_exam_sfx
 
@@ -243,7 +244,9 @@ class TurnEngine:
         attended_this_week: set = set()   # 本週已上的科目（翹課 popup 用）
         roll_call_skipped = False   # 是否明確翹掉點名課
         all_courses = [k for k in player.subject_exp.keys() if k != "綜合"]
-        full_timer = 0             # 飽腹倒數格數（>0 表示飽腹中）
+        full_timer       = 0   # 飽腹倒數格數（>0 表示飽腹中）
+        allnighter_count = 0   # 本週已熬夜次數（上限 5）
+        set_allnighter_count(0)
         set_time(remaining_time)   # 初始化底部標籤列
 
         while remaining_time >= 0:
@@ -296,7 +299,30 @@ class TurnEngine:
                         set_roll_call_xed(True)
                         set_roll_call_attended(False)
 
+                # ── 熬夜：每週上限 5 次 ───────────────────────────
+                if sa["id"] == "pull_allnighter":
+                    if allnighter_count >= 5:
+                        show_extra_event_popup(
+                            ["你已經連續熬了好幾天，身體再也撐不住了。"],
+                            "你沒辦法再熬夜了！",
+                            (200, 80, 50),
+                        )
+                        continue
+                    # ── 低體力警告 ────────────────────────────────
+                    if player.stamina < 10:
+                        if not ask_yn(
+                            "體力不足，繼續熬夜將會生病！確定要繼續嗎？",
+                            yes_label="硬撐到底",
+                            no_label="算了",
+                            show_ctx=False,
+                        ):
+                            continue
+
                 self._execute_special_action(sa)
+
+                if sa["id"] == "pull_allnighter":
+                    allnighter_count += 1
+                    set_allnighter_count(allnighter_count)
                 remaining_time += sa.get("time_gain", 0)
                 set_time(remaining_time)
 
@@ -368,9 +394,10 @@ class TurnEngine:
                 else:
                     set_special_disabled({"進食": full_timer})
 
-        # 週結束時清除飽腹停用狀態
+        # 週結束時清除飽腹停用狀態 + 熬夜計數器
         if full_timer > 0:
             set_special_disabled({})
+        set_allnighter_count(0)
 
         # ── 點名結算（週末，所有行動結束後）────────────────────
         if roll_call_course is not None:
@@ -863,10 +890,10 @@ class TurnEngine:
             if ans == q["a"]:
                 correct_count += 1
                 play_exam_sfx(True)                                       # 答對音效
-                show_action_result(["✅ 答對了！"], title=f"題目 {i}")
+                show_action_result(["✅ 答對了！"], title=f"題目 {i}", direction="top")
             else:
                 play_exam_sfx(False)                                      # 答錯音效
-                show_action_result(["❌ 選錯了……"], title=f"題目 {i}")
+                show_action_result(["❌ 選錯了……"], title=f"題目 {i}", direction="top")
 
         return correct_count / len(selected_qs)
 

@@ -75,23 +75,22 @@ def _draw_action_panel(surf, fm, fs, mode, choices, log, prompt, tvalue, rect, t
     is_std_action = (mode == "choices" and
                      all(c in _STANDARD_ACTIONS for c in choices))
 
-    # ── 凸起幾何（絕對座標，僅標準行動模式使用）────────────────
+    # ── tab 幾何（絕對座標，僅標準行動模式使用）────────────────
     if is_std_action:
-        _brx     = WIN_W - _SIDE_PANEL_W - 16   # 凸起右邊界
-        _blx     = _brx - _BUMP_W               # 凸起左邊界
-        _btop    = pr.y  - _BUMP_H              # 凸起頂邊
-        _bump_cx = (_blx + _brx) // 2           # 凸起水平中心
-        _bump_cy = (_btop + pr.y) // 2          # 凸起垂直中心
+        _brx     = WIN_W - _SIDE_PANEL_W - 16
+        _blx     = _brx - _BUMP_W
+        _btop    = pr.y  - _BUMP_H
+        _bump_cx = (_blx + _brx) // 2
+        _bump_cy = (_btop + pr.y) // 2
 
-        # 凸起投影（在主面板投影之前先畫，層次正確）
-        _bsh = pygame.Surface((_BUMP_W + 4, _BUMP_H + 4), pygame.SRCALPHA)
-        pygame.draw.rect(_bsh, (0, 0, 0, 40),
+        # tab 投影（頂部圓角）
+        _TR = 12
+        _tsh = pygame.Surface((_BUMP_W + 6, _BUMP_H + 6), pygame.SRCALPHA)
+        pygame.draw.rect(_tsh, (0, 0, 0, 40),
                          pygame.Rect(0, 0, _BUMP_W, _BUMP_H),
-                         border_top_left_radius=12,
-                         border_top_right_radius=12,
-                         border_bottom_left_radius=0,
-                         border_bottom_right_radius=0)
-        surf.blit(_bsh, (_blx + 4, _btop + 4))
+                         border_top_left_radius=_TR,
+                         border_top_right_radius=_TR)
+        surf.blit(_tsh, (_blx + 4, _btop + 4))
 
     # ── 主面板投影 ──────────────────────────────────────────────
     sh = pygame.Surface((pr.width, pr.height), pygame.SRCALPHA)
@@ -104,51 +103,51 @@ def _draw_action_panel(surf, fm, fs, mode, choices, log, prompt, tvalue, rect, t
     pygame.draw.rect(card, (255, 244, 228, 238),
                      pygame.Rect(0, 0, pr.width, pr.height), border_radius=14)
     surf.blit(card, pr.topleft)
-    pygame.draw.rect(surf, CYAN, pr, 2, border_radius=14)
+    if not is_std_action:
+        pygame.draw.rect(surf, CYAN, pr, 2, border_radius=14)
 
-    # ── 凸起底色 ＋ 邊框 ＋ 內凹弧 ────────────────────────────────
+    # ── tab 填色 + 合體外框（主面板圓角 + tab 直角，邊線無斷裂）──
     if is_std_action:
-        _PF = (255, 244, 228)   # 面板填色（不含 alpha，供直接畫線使用）
+        _PF = (255, 244, 228)
+        # tab 填色（同奶霜底色，頂部圓角）
+        _TR = 12
+        pygame.draw.rect(surf, _PF,
+                         pygame.Rect(_blx, _btop, _BUMP_W, _BUMP_H + 2),
+                         border_top_left_radius=_TR,
+                         border_top_right_radius=_TR)
 
-        # 凸起填色（頂部圓角、底部直角，向下多 3px 與主面板無縫銜接）
-        _bcard = pygame.Surface((_BUMP_W, _BUMP_H + 3), pygame.SRCALPHA)
-        pygame.draw.rect(_bcard, (255, 244, 228, 238),
-                         pygame.Rect(0, 0, _BUMP_W, _BUMP_H + 3),
-                         border_top_left_radius=12,
-                         border_top_right_radius=12,
-                         border_bottom_left_radius=0,
-                         border_bottom_right_radius=0)
-        surf.blit(_bcard, (_blx, _btop))
-
-        # 內凹弧：用遊戲背景色填圓，「咬掉」交接直角
-        pygame.draw.circle(surf, BG,
-                           (_blx + _BUMP_IR, pr.y - _BUMP_IR), _BUMP_IR)
-
-        # 頂部左圓角弧
+        # 合體外框：依序畫完整輪廓（面板四個圓角 + tab 三條直角邊）
+        R = 14
         pygame.draw.arc(surf, CYAN,
-                        pygame.Rect(_blx, _btop, 24, 24),
-                        math.pi / 2, math.pi, 2)
-        # 頂部右圓角弧
+                        pygame.Rect(pr.x, pr.y, R * 2, R * 2),
+                        math.pi / 2, math.pi, 2)                              # 左上圓角
+        pygame.draw.line(surf, CYAN, (pr.x + R, pr.y), (_blx, pr.y), 2)      # 頂邊左段
+        pygame.draw.line(surf, CYAN, (_blx, pr.y), (_blx, _btop + _TR), 2)    # tab 左邊
         pygame.draw.arc(surf, CYAN,
-                        pygame.Rect(_brx - 24, _btop, 24, 24),
-                        0, math.pi / 2, 2)
-        # 頂邊直線
+                        pygame.Rect(_blx, _btop, _TR * 2, _TR * 2),
+                        math.pi / 2, math.pi, 2)                              # tab 左上圓角
         pygame.draw.line(surf, CYAN,
-                         (_blx + 12, _btop + 1), (_brx - 12, _btop + 1), 2)
-        # 左側邊線（圓角底 → 內凹弧上方）
-        pygame.draw.line(surf, CYAN,
-                         (_blx + 1, _btop + 12), (_blx + 1, pr.y - _BUMP_IR), 2)
-        # 右側邊線（圓角底 → 主面板頂邊）
-        pygame.draw.line(surf, CYAN,
-                         (_brx - 1, _btop + 12), (_brx - 1, pr.y + 1), 2)
-        # 內凹弧外框線（CYAN，從 180° 逆時針到 270°）
+                         (_blx + _TR, _btop), (_brx - _TR, _btop), 2)        # tab 頂邊
         pygame.draw.arc(surf, CYAN,
-                        pygame.Rect(_blx, pr.y - _BUMP_IR * 2,
-                                    _BUMP_IR * 2, _BUMP_IR * 2),
-                        math.pi, 3 * math.pi / 2, 2)
-        # 遮蓋主面板頂邊框線（凸起覆蓋的那一段）
-        pygame.draw.line(surf, _PF,
-                         (_blx, pr.y), (_brx, pr.y), 3)
+                        pygame.Rect(_brx - _TR * 2, _btop, _TR * 2, _TR * 2),
+                        0, math.pi / 2, 2)                                    # tab 右上圓角
+        pygame.draw.line(surf, CYAN, (_brx, _btop + _TR), (_brx, pr.y), 2)   # tab 右邊
+        pygame.draw.line(surf, CYAN, (_brx, pr.y), (pr.right - R, pr.y), 2)  # 頂邊右段
+        pygame.draw.arc(surf, CYAN,
+                        pygame.Rect(pr.right - R * 2, pr.y, R * 2, R * 2),
+                        0, math.pi / 2, 2)                                    # 右上圓角
+        pygame.draw.line(surf, CYAN,
+                         (pr.right, pr.y + R), (pr.right, pr.bottom - R), 2) # 右邊
+        pygame.draw.arc(surf, CYAN,
+                        pygame.Rect(pr.right - R * 2, pr.bottom - R * 2, R * 2, R * 2),
+                        3 * math.pi / 2, 2 * math.pi, 2)                     # 右下圓角
+        pygame.draw.line(surf, CYAN,
+                         (pr.right - R, pr.bottom), (pr.x + R, pr.bottom), 2)# 底邊
+        pygame.draw.arc(surf, CYAN,
+                        pygame.Rect(pr.x, pr.bottom - R * 2, R * 2, R * 2),
+                        math.pi, 3 * math.pi / 2, 2)                         # 左下圓角
+        pygame.draw.line(surf, CYAN,
+                         (pr.x, pr.bottom - R), (pr.x, pr.y + R), 2)         # 左邊
 
     # ── 標籤列 ───────────────────────────────────────────────
     tab_rect    = pygame.Rect(pr.x, pr.y, pr.width, TAB_H)
@@ -214,20 +213,27 @@ def _draw_action_panel(surf, fm, fs, mode, choices, log, prompt, tvalue, rect, t
     surf.blit(time_txt, (_clk_x0 + _CLK_R * 2 + 5,
                          tab_rect.y + (TAB_H - time_txt.get_height()) // 2))
 
-    # 中間：行動 hover 提示（體力消耗 + 預期效果）
-    if hovered_action and hovered_action in _ACTION_INFO:
+    # 中間：狀態效果 hover 提示（優先）/ 行動 hover 提示
+    _tip_x0 = _clk_x0 + _CLK_R * 2 + 5 + time_txt.get_width() + 24
+    _tip_y  = tab_rect.y + (TAB_H - fb.get_height()) // 2
+
+    if _hovered_status[0]:
+        # 狀態效果 hover：顯示 "生病 1週" 等說明文字
+        _st_text, _st_pos = _hovered_status[0]
+        _st_col = (30, 120, 50) if _st_pos else (160, 50, 30)   # 正面→深綠；負面→深紅棕
+        st_t = fb.render(_st_text, True, _st_col)
+        surf.blit(st_t, (_tip_x0, _tip_y))
+    elif hovered_action and hovered_action in _ACTION_INFO:
         cost_str, eff_str = _ACTION_INFO[hovered_action]
         is_restore = cost_str.startswith("恢復")
         cost_col   = GREEN if is_restore else RED
-        tip_x = _clk_x0 + _CLK_R * 2 + 5 + time_txt.get_width() + 24
-        tip_y = tab_rect.y + (TAB_H - fb.get_height()) // 2
         cost_t = fb.render(cost_str, True, cost_col)
-        surf.blit(cost_t, (tip_x, tip_y))
-        sep_x  = tip_x + cost_t.get_width() + 10
+        surf.blit(cost_t, (_tip_x0, _tip_y))
+        sep_x  = _tip_x0 + cost_t.get_width() + 10
         sep_t  = fs.render("|", True, GRAY)
-        surf.blit(sep_t, (sep_x, tip_y))
+        surf.blit(sep_t, (sep_x, _tip_y))
         eff_t  = fb.render(eff_str, True, YELLOW)
-        surf.blit(eff_t, (sep_x + sep_t.get_width() + 10, tip_y))
+        surf.blit(eff_t, (sep_x + sep_t.get_width() + 10, _tip_y))
 
     # 右側：結束本週按鈕（考試週隱藏）
     if mode != "exam_ready":
@@ -313,7 +319,7 @@ def _draw_action_panel(surf, fm, fs, mode, choices, log, prompt, tvalue, rect, t
             ch_surfs  = [fb.render(ch, True, WHITE) for ch in clean_label]
             txt_total = sum(s.get_width() for s in ch_surfs)
             x_cur     = cx_btn - txt_total // 2
-            label_y   = cy_btn + r + 12
+            label_y   = cy_btn + r + 16
 
             if hover:
                 # hover → 標籤靜止，不做波浪
@@ -391,6 +397,19 @@ def _draw_action_panel(surf, fm, fs, mode, choices, log, prompt, tvalue, rect, t
                 _cd_s    = fb.render(_cd_str, True, (220, 100, 60))
                 surf.blit(_cd_s, (_sp_cx + _sp_ar // 2 - _cd_s.get_width() // 2,
                                   _sp_cy + _sp_ar // 2 - _cd_s.get_height() // 2))
+            # 熬夜次數計數器（右下角常駐）
+            elif _sn == "熬夜" and _allnighter_count[0] > 0:
+                _cnt_str = f"{_allnighter_count[0]}/5"
+                _cnt_col = (230, 80, 50) if _allnighter_count[0] >= 4 else (220, 160, 60)
+                _cnt_s   = fb.render(_cnt_str, True, _cnt_col)
+                _cnt_bx  = _sp_cx + _sp_ar // 2 - _cnt_s.get_width() // 2
+                _cnt_by  = _sp_cy + _sp_ar // 2 - _cnt_s.get_height() // 2
+                # 小黑底板增加可讀性
+                _cnt_bg  = pygame.Surface((_cnt_s.get_width() + 4, _cnt_s.get_height() + 2),
+                                          pygame.SRCALPHA)
+                _cnt_bg.fill((0, 0, 0, 160))
+                surf.blit(_cnt_bg, (_cnt_bx - 2, _cnt_by - 1))
+                surf.blit(_cnt_s,  (_cnt_bx, _cnt_by))
 
             # 波浪標籤（與主按鈕相同邏輯）
             _sp_clean   = _sn
@@ -403,7 +422,7 @@ def _draw_action_panel(surf, fm, fs, mode, choices, log, prompt, tvalue, rect, t
                              for ch in _sp_clean]
             _sp_txt_total = sum(s.get_width() for s in _sp_ch_surfs)
             _sp_x_cur     = _sp_cx - _sp_txt_total // 2
-            _sp_label_y   = _sp_cy + _BUMP_R + 8
+            _sp_label_y   = _sp_cy + _BUMP_R + 12
 
             if _sp_hover:
                 for _ch_s in _sp_ch_surfs:
@@ -537,8 +556,8 @@ def _draw_action_panel(surf, fm, fs, mode, choices, log, prompt, tvalue, rect, t
         # 劇情文字（自動換行）
         wrapped = _wrap(text, fm, content_rect.width - PAD * 2)
         for ln in wrapped:
-            surf.blit(fm.render(ln, True, WHITE),
-                      (content_rect.x + PAD, text_top))
+            _render_mixed(surf, fm, ln, WHITE,
+                          content_rect.x + PAD, text_top)
             text_top += fm.get_height() + 4
 
         # ▼ 點擊繼續（右下角，0.5 Hz 閃爍）
@@ -752,23 +771,21 @@ def _draw_grade_panel(surf: pygame.Surface, fm, fmic, player, x_offset: int = 0)
     row_h     = content_h // len(active_rows)
     row_y     = div_y + 8
 
+    fb = _font_bold[0] or fm   # size-17（佔比標籤，比 fmic 更易閱讀）
+
     for label, key, weight in active_rows:
         val = player.grades.get(key, 0.0)
 
-        # 科目名（左）+ 佔比（右）
-        lbl_s = fb_lg.render(label, True, WHITE)        # 粗體科目名
-        wt_s  = fmic.render(weight, True, (130, 90, 55))
-        surf.blit(lbl_s, (sx + PAD, row_y))
-        surf.blit(wt_s,  (sx + PW - PAD - wt_s.get_width(),
-                           row_y + (fb_lg.get_height() - wt_s.get_height()) // 2))
+        # 第一行：科目名（左）+ 分數（右），同行排列
+        lbl_s   = fb_lg.render(label, True, WHITE)
+        col     = GREEN if val >= 80 else (YELLOW if val >= 60 else RED)
+        score_s = fb_lg.render(f"{val:.1f}", True, col)
+        surf.blit(lbl_s,   (sx + PAD, row_y))
+        surf.blit(score_s, (sx + PW - PAD - score_s.get_width(), row_y))
 
-        # 分數
-        col       = GREEN if val >= 80 else (YELLOW if val >= 60 else RED)
-        score_str = f"{val:.1f}"
-        score_s   = fb_lg.render(score_str, True, col)
-        surf.blit(score_s,
-                  (sx + (PW - score_s.get_width()) // 2,
-                   row_y + fb_lg.get_height() + 3))
+        # 第二行：佔比（size-17，適當放大、偏左縮排）
+        wt_s = fb.render(weight, True, (160, 110, 65))
+        surf.blit(wt_s, (sx + PAD + 2, row_y + fb_lg.get_height() + 2))
 
         row_y += row_h
 
