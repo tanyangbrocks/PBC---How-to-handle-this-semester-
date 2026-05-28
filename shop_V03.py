@@ -19,7 +19,7 @@ class Shop:
             {
                 "id": "coffee",
                 "name": "咖啡",
-                "price": 10,
+                "price": 25,
                 "desc": "恢復 10 點體力，但睡過頭觸發機率增加 10%。",
                 "stamina_restore": 10,
                 "allnighter_risk": 0.10,
@@ -27,7 +27,7 @@ class Shop:
             {
                 "id": "snack",
                 "name": "點心",
-                "price": 10,
+                "price": 40,
                 "desc": "恢復 5 點體力，自我滿足度 +10。",
                 "stamina_restore": 5,
                 "satisfaction_gain": 10,
@@ -44,7 +44,7 @@ class Shop:
             {
                 "id": "energy_drink_bplus",
                 "name": "爆力打B+",
-                "price": 100,
+                "price": 200,
                 "desc": "恢復 30 點體力，並獲得「激勵」狀態（4週）。",
                 "stamina_restore": 30,
                 "status": "激勵",

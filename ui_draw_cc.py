@@ -1091,6 +1091,35 @@ def _update_slot_state(now):
                 else:
                     _slot_sfx_pending[0] = "talent_none"
 
+def _render_mixed(fc, fb, text: str, color) -> "pygame.Surface":
+    """
+    逐字渲染 text：每個字先查 fc 的字形 advance；
+    若 advance == 0（字型缺少該字形），改用 fb 渲染。
+    回傳所有字元水平拼接後的 Surface。
+    """
+    _FORCE_FB = {"貓"}   # 強制使用備用字型（fb_lg）的字元集
+
+    if not text:
+        return fc.render("", True, color)
+    ch_surfs = []
+    for ch in text:
+        if ch in _FORCE_FB:
+            ch_surfs.append(fb.render(ch, True, color))
+            continue
+        metrics = fc.metrics(ch)
+        # metrics 回傳 [(minx,maxx,miny,maxy,advance),...] ；advance==0 代表缺字形
+        missing = (not metrics) or (metrics[0] is None) or (metrics[0][4] == 0)
+        ch_surfs.append((fb if missing else fc).render(ch, True, color))
+    total_w = sum(s.get_width() for s in ch_surfs)
+    max_h   = max(s.get_height() for s in ch_surfs)
+    out = pygame.Surface((max(total_w, 1), max_h), pygame.SRCALPHA)
+    x = 0
+    for s in ch_surfs:
+        out.blit(s, (x, (max_h - s.get_height()) // 2))
+        x += s.get_width()
+    return out
+
+
 def _draw_cc_slot_machine(surf, fm, fs, mpos):
     """拉霸機天賦動畫畫面，回傳「繼續」按鈕 Rect 或 None（尚未完成時）。"""
     fb_lg = _font_bold_lg[0] or fm
@@ -1189,7 +1218,7 @@ def _draw_cc_slot_machine(surf, fm, fs, mpos):
                 if row > 0:
                     pygame.draw.line(surf, (210, 185, 145),
                                      (dr.x + 12, ty), (dr.x + dr.width - 12, ty))
-                nt = fc_spin.render(name, True, TITLE)
+                nt = _render_mixed(fc_spin, fb_lg, name, TITLE)
                 surf.blit(nt, (dr.x + (dr.width - nt.get_width()) // 2,
                                ty + (TILE_H - nt.get_height()) // 2))
             surf.set_clip(None)
@@ -1222,16 +1251,17 @@ def _draw_cc_slot_machine(surf, fm, fs, mpos):
                 pygame.draw.rect(surf, YELLOW, dr, 2, border_radius=16)
             name     = result.get("name", "無天賦") if result else "無天賦"
             # 深棕文字在淺色底上清晰可讀
+            # 逐字混合渲染：Creative.ttc 有的字用 fc_done，缺字形則改用 fb_lg
             name_col = TITLE if is_talent else WHITE
-            nt       = fc_done.render(name, True, name_col)
+            nt       = _render_mixed(fc_done, fb_lg, name, name_col)
             # ── 垂直 + 水平置中 ─────────────────────────────────
             if is_talent:
                 desc_lines = _wrap(result.get("desc", ""), fs, cw - 20)
                 lh      = fs.get_height() + 4
-                block_h = fc_done.get_height() + 12 + len(desc_lines) * lh
+                block_h = nt.get_height() + 12 + len(desc_lines) * lh
                 name_y  = dr.y + (dr.height - block_h) // 2
                 surf.blit(nt, (dr.x + (dr.width - nt.get_width()) // 2, name_y))
-                desc_y = name_y + fc_done.get_height() + 12
+                desc_y = name_y + nt.get_height() + 12
                 for li, dl in enumerate(desc_lines):
                     dt = fs.render(dl, True, WHITE)
                     surf.blit(dt, (dr.x + (dr.width - dt.get_width()) // 2,
