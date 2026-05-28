@@ -869,18 +869,20 @@ def _draw_start(surf, fm, fl, mpos):
     surf.blit(t1, (btn_cx - t1.get_width() // 2, btn_cy - lh - 2))
     surf.blit(t2, (btn_cx - t2.get_width() // 2, btn_cy + 2))
 
-    # ── DEV 跳關按鈕（右下角小按鈕，隨時可移除）──────────────
-    fb      = _font_bold[0] or fm
-    DEV_W, DEV_H = 68, 26
-    dev_x   = WIN_W - DEV_W - 14
-    dev_y   = WIN_H - DEV_H - 14
-    dev_r   = pygame.Rect(dev_x, dev_y, DEV_W, DEV_H)
-    dev_hov = dev_r.collidepoint(mpos)
-    dev_bg  = (120, 60, 175) if dev_hov else (75, 38, 120)
-    pygame.draw.rect(surf, dev_bg, dev_r, border_radius=6)
-    dev_t   = fb.render("DEV", True, (220, 195, 255))
-    surf.blit(dev_t, (dev_x + (DEV_W - dev_t.get_width())  // 2,
-                      dev_y + (DEV_H - dev_t.get_height()) // 2))
+    # ── [DEV_BTN DISABLED] DEV 跳關按鈕（目前已隱藏）──────────
+    # 還原：取消下方 7 行的 # 號，並把下面 return 中的 None 改回 dev_r，
+    #       再將 main.py 的 DEBUG 改回 True。
+    # fb      = _font_bold[0] or fm
+    # DEV_W, DEV_H = 68, 26
+    # dev_x   = WIN_W - DEV_W - 14
+    # dev_y   = WIN_H - DEV_H - 14
+    # dev_r   = pygame.Rect(dev_x, dev_y, DEV_W, DEV_H)
+    # dev_hov = dev_r.collidepoint(mpos)
+    # dev_bg  = (120, 60, 175) if dev_hov else (75, 38, 120)
+    # pygame.draw.rect(surf, dev_bg, dev_r, border_radius=6)
+    # dev_t   = fb.render("DEV", True, (220, 195, 255))
+    # surf.blit(dev_t, (dev_x + (DEV_W - dev_t.get_width())  // 2,
+    #                   dev_y + (DEV_H - dev_t.get_height()) // 2))
 
     # ── 遊戲說明按鈕（開始按鈕下方）──────────────────────────
     GD_W, GD_H = 100, 32
@@ -896,8 +898,9 @@ def _draw_start(surf, fm, fl, mpos):
                      gd_y + (GD_H - gd_t.get_height()) // 2))
 
     # 回傳外接方形 Rect（供 collidepoint 命中判定使用）
+    # [DEV_BTN DISABLED] 還原時將 None 改回 dev_r
     return (pygame.Rect(btn_cx - BTN_R, btn_cy - BTN_R, BTN_R * 2, BTN_R * 2),
-            dev_r, gd_r)
+            None, gd_r)
 
 # ── 結算畫面計時常數 ──────────────────────────────────────────
 _EFADE_MS   = 600    # 淡出 / 淡入各 600ms

@@ -18,8 +18,12 @@ from event_system import EventSystem
 from skill_system import SkillSystem
 from shop_V03 import Shop
 
-# ── DEV 模式開關（改成 False 或刪除此段即可停用跳關按鈕功能）────
-DEBUG = True
+# ── DEV 模式開關 ────────────────────────────────────────────────
+# 目前已關閉。還原方法：
+#   1. 將下方 DEBUG 改回 True
+#   2. 在 ui_draw_fx.py 找 "[DEV_BTN DISABLED]" 區塊，取消繪製程式碼的註解，
+#      並將同函式的 return 裡 None 改回 dev_r
+DEBUG = False
 
 
 def game_main():
