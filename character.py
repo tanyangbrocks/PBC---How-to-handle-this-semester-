@@ -55,7 +55,7 @@ EXTRA_EVENTS = [
         "desc":        "時間 -2，金錢＋300，每週觸發",
         "time_cost":   2,
         "money_delta": 300,
-        "intel_req":   75,
+        "intel_req":   60,
         "exclusive":   ["part_time"],
         "popup_color": (200, 50, 50),
     },

@@ -861,14 +861,15 @@ class TurnEngine:
 
     def _roll_skip_effects(self, player) -> list:
         """翹課的固定 + 隨機後果，回傳供行動結果彈窗顯示的字串列表。
-        固定：自我滿足度 -5。
+        固定：自我滿足度 -8 ~ -10（隨機）。
         隨機：(100 - 運氣)% 機率課堂參與度 -5，否則 -3。
         """
         msgs = []
 
-        # 固定：自我滿足度 -5
-        player.change_satisfaction(-5)
-        msgs.append("自我滿足度 -5")
+        # 隨機：自我滿足度 -8 ~ -10
+        sat_loss = random.randint(8, 10)
+        player.change_satisfaction(-sat_loss)
+        msgs.append(f"自我滿足度 -{sat_loss}")
 
         # 隨機：依運氣決定參與度扣點
         bad_prob = max(0.0, (100 - player.luck)) / 100
@@ -877,7 +878,7 @@ class TurnEngine:
         player.revealed_grades.add("參與度")
         msgs.append(f"課堂參與度 -{deduct}")
 
-        notify(f"  📕 翹課後果：自我滿足度 -5，課堂參與度 -{deduct}。")
+        notify(f"  📕 翹課後果：自我滿足度 -{sat_loss}，課堂參與度 -{deduct}。")
         return msgs
 
     # ============================================================
