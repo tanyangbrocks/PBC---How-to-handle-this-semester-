@@ -1110,6 +1110,21 @@ def _draw_cc_slot_machine(surf, fm, fs, mpos):
     else:
         shake_dx = shake_dy = 0
 
+    # ── Creative 字型（天賦名稱）──────────────────────────────
+    _CREATIVE_PATH = os.path.join(os.path.dirname(__file__), "asset", "fonts", "Creative.ttc")
+    for _ck, _sz in [("creative_26b", 26), ("creative_22", 22)]:
+        if _ck not in _extra_fonts:
+            try:
+                _f = pygame.font.Font(_CREATIVE_PATH, _sz)
+                if _ck == "creative_26b":
+                    _f.set_bold(True)
+                _extra_fonts[_ck] = _f
+            except Exception:
+                _extra_fonts[_ck] = None
+    # done 階段：26px 粗體；spinning 階段：22px（維持 tile 容納性）
+    fc_done = _extra_fonts.get("creative_26b") or fb_lg
+    fc_spin = _extra_fonts.get("creative_22") or fb_lg
+
     # ── 佈局 ──────────────────────────────────────────────────
     cw, ch     = 210, 230
     TILE_H     = _SLOT_TILE_H
@@ -1174,7 +1189,7 @@ def _draw_cc_slot_machine(surf, fm, fs, mpos):
                 if row > 0:
                     pygame.draw.line(surf, (210, 185, 145),
                                      (dr.x + 12, ty), (dr.x + dr.width - 12, ty))
-                nt = fb_lg.render(name, True, TITLE)
+                nt = fc_spin.render(name, True, TITLE)
                 surf.blit(nt, (dr.x + (dr.width - nt.get_width()) // 2,
                                ty + (TILE_H - nt.get_height()) // 2))
             surf.set_clip(None)
@@ -1208,15 +1223,15 @@ def _draw_cc_slot_machine(surf, fm, fs, mpos):
             name     = result.get("name", "無天賦") if result else "無天賦"
             # 深棕文字在淺色底上清晰可讀
             name_col = TITLE if is_talent else WHITE
-            nt       = fb_lg.render(name, True, name_col)
+            nt       = fc_done.render(name, True, name_col)
             # ── 垂直 + 水平置中 ─────────────────────────────────
             if is_talent:
                 desc_lines = _wrap(result.get("desc", ""), fs, cw - 20)
                 lh      = fs.get_height() + 4
-                block_h = fb_lg.get_height() + 12 + len(desc_lines) * lh
+                block_h = fc_done.get_height() + 12 + len(desc_lines) * lh
                 name_y  = dr.y + (dr.height - block_h) // 2
                 surf.blit(nt, (dr.x + (dr.width - nt.get_width()) // 2, name_y))
-                desc_y = name_y + fb_lg.get_height() + 12
+                desc_y = name_y + fc_done.get_height() + 12
                 for li, dl in enumerate(desc_lines):
                     dt = fs.render(dl, True, WHITE)
                     surf.blit(dt, (dr.x + (dr.width - dt.get_width()) // 2,
