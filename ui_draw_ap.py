@@ -242,6 +242,7 @@ def _draw_action_panel(surf, fm, fs, mode, choices, log, prompt, tvalue, rect, t
 
     content_rect = pygame.Rect(pr.x, content_top, pr.width, pr.height - TAB_H)
     content_rects = []
+    _cc_btn_cache["sp_disabled_rects"] = []   # 每幀重置（供點擊無效按鈕播音效偵測）
 
     # ── 內容區：依模式切換 ────────────────────────────────────
 
@@ -362,12 +363,16 @@ def _draw_action_panel(surf, fm, fs, mode, choices, log, prompt, tvalue, rect, t
                                       _sp_col, _sp_hover and not _disabled,
                                       key=(_sp_cx, _sp_cy + 9000))  # 避免 key 衝突
 
-            # 圖示文字（粗體字元放圓心）
-            _sp_icon_str = _SPECIAL_ICONS.get(_sn, _sn[0])
-            _sp_icon_col = (160, 160, 170) if _disabled else PANEL
-            _sp_icon_s   = fb.render(_sp_icon_str, True, _sp_icon_col)
-            surf.blit(_sp_icon_s, (_sp_cx - _sp_icon_s.get_width() // 2,
-                                   _sp_cy - _sp_icon_s.get_height() // 2))
+            # 圖示（webp icon，圓形裁切）
+            _draw_action_icon(surf, _sp_cx, _sp_cy, _sp_ar, _sn)
+            # icon 蓋住 _premium_circle 的邊框，補畫一圈
+            _sp_bdr = (105, 105, 115) if _disabled else tuple(min(255, int(c * 1.20 + 30)) for c in BTN_N)
+            pygame.draw.circle(surf, _sp_bdr, (_sp_cx, _sp_cy), _sp_ar, 2)
+            # 停用時疊半透明灰膜使 icon 變暗
+            if _disabled:
+                _dim = pygame.Surface((_sp_ar * 2, _sp_ar * 2), pygame.SRCALPHA)
+                pygame.draw.circle(_dim, (130, 130, 140, 140), (_sp_ar, _sp_ar), _sp_ar)
+                surf.blit(_dim, (_sp_cx - _sp_ar, _sp_cy - _sp_ar))
 
             # hover 光暈
             if _sp_hover:
@@ -421,11 +426,13 @@ def _draw_action_panel(surf, fm, fs, mode, choices, log, prompt, tvalue, rect, t
                     surf.blit(_ch_s, (_sp_x_cur, _sp_label_y))
                     _sp_x_cur += _ch_s.get_width()
 
-            # 點擊判定（停用時不加入）
+            # 點擊判定（停用時不加入 content_rects，但保留 rect 供無效點擊音效偵測）
+            _sp_brect = pygame.Rect(_sp_cx - _BUMP_R - 8, _sp_cy - _BUMP_R - 8,
+                                    (_BUMP_R + 8) * 2, (_BUMP_R + 8) * 2)
             if not _disabled:
-                _sp_brect = pygame.Rect(_sp_cx - _BUMP_R - 8, _sp_cy - _BUMP_R - 8,
-                                        (_BUMP_R + 8) * 2, (_BUMP_R + 8) * 2)
                 content_rects.append((_sp_brect, -(_si + 1)))
+            else:
+                _cc_btn_cache["sp_disabled_rects"].append(_sp_brect)
 
     elif mode == "choices" and not is_std_action:
         # ── 非標準選項：上方顯示最新 log（題目文字），下方按鈕作答 ──
@@ -446,8 +453,8 @@ def _draw_action_panel(surf, fm, fs, mode, choices, log, prompt, tvalue, rect, t
             row = i // 2
             br    = pygame.Rect(px + col * (bw + 12), py + row * (bh + 8), bw, bh)
             hover = br.collidepoint(mpos)
-            dr    = _premium_btn(surf, br, BTN_N, hover, radius=12)
-            lt    = fb.render(label, True, PANEL)
+            dr    = _premium_btn(surf, br, (238, 210, 170), hover, radius=12)
+            lt    = fb.render(label, True, WHITE)
             surf.blit(lt, (dr.x + (dr.width  - lt.get_width())  // 2,
                            dr.y + (dr.height - lt.get_height()) // 2))
             content_rects.append((br, i + 1))
@@ -468,7 +475,10 @@ def _draw_action_panel(surf, fm, fs, mode, choices, log, prompt, tvalue, rect, t
         for i, (label, val) in enumerate([(_yn_labels[1], False), (_yn_labels[0], True)]):
             br    = pygame.Rect(pr.x + 14 + i * (BTN_W2 + BTN_SP), btn_y, BTN_W2, BTN_H2)
             hover = br.collidepoint(mpos)
-            col_b = BTN_N if val else DARK_GRAY
+            if val:
+                col_b = _yn_yes_color[0] if _yn_yes_color[0] is not None else BTN_N
+            else:
+                col_b = _yn_no_color[0]  if _yn_no_color[0]  is not None else DARK_GRAY
             dr    = _premium_btn(surf, br, col_b, hover, radius=12)
             lt    = fb_lg.render(label, True, PANEL)
             surf.blit(lt, (dr.x + (dr.width  - lt.get_width())  // 2,

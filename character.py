@@ -33,7 +33,7 @@ TALENTS = [
     {"id": 5, "name": "社交達人",   "prob": 5,  "desc": "可用時間+4",                    "base_time": 4},
     {"id": 6, "name": "夜貓子",     "prob": 5,  "desc": "熬夜行動時間×1.5",             "night_owl_mult": 1.5},
     {"id": 7, "name": "路痴",       "prob": 5,  "desc": "時間-1，能力點+5",              "base_time": -1, "base_pts_bonus": 5},
-    {"id": 8, "name": "抵抗力低下", "prob": 5,  "desc": "滿足感<70時易生病，能力點+15", "sick_threshold": 70, "base_pts_bonus": 15},
+    {"id": 8, "name": "抵抗力低下", "prob": 5,  "desc": "更易生病，能力點+15", "sick_threshold": 70, "base_pts_bonus": 15},
     {"id": 0, "name": "無天賦",     "prob": 64, "desc": ""},
 ]
 
@@ -42,6 +42,7 @@ EXTRA_EVENTS = [
     {
         "id":          "part_time",
         "name":        "打工",
+        "desc":        "時間 -3，金錢＋250，每週觸發",
         "time_cost":   3,
         "money_delta": 250,
         "intel_req":   0,
@@ -51,6 +52,7 @@ EXTRA_EVENTS = [
     {
         "id":          "tutoring",
         "name":        "家教",
+        "desc":        "時間 -2，金錢＋300，每週觸發",
         "time_cost":   2,
         "money_delta": 300,
         "intel_req":   75,
@@ -60,6 +62,7 @@ EXTRA_EVENTS = [
     {
         "id":              "club",
         "name":            "參加社團",
+        "desc":            "時間 -2，金錢 - 225，\n滿足感 + 20，每週觸發",
         "time_cost":       2,
         "money_delta":     -225,
         "satisfaction_delta": 20,
@@ -72,7 +75,7 @@ EXTRA_EVENTS = [
 DRAWBACKS = [
     {"id": 1, "name": "路痴",       "desc": "遲到機率 +20%，換取 10 點",      "penalty": "late_chance",   "value": 0.2,  "bonus_pts": 10},
     {"id": 2, "name": "容易生病",   "desc": "生病機率 +15%，換取 15 點",      "penalty": "sick_chance",   "value": 0.15, "bonus_pts": 15},
-    {"id": 3, "name": "購物狂",     "desc": "每週自動花費 50 元，換取 10 點", "penalty": "weekly_cost",   "value": 50,   "bonus_pts": 10},
+    {"id": 3, "name": "購物狂",     "desc": "每週消耗 50 元，換取 10 點",    "penalty": "weekly_cost",   "value": 50,   "bonus_pts": 10},
 ]
 
 

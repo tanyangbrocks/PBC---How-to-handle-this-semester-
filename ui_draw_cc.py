@@ -11,6 +11,9 @@ from ui_const import *
 from ui_state  import *
 from ui_draw_base import *
 
+# 拉霸機每格高度（同 _draw_cc_slot_machine 內的 TILE_H，此處提出供 _update_slot_state 使用）
+_SLOT_TILE_H = 62
+
 def _cc_ptcl_new(full_screen: bool = False) -> dict:
     """生成一顆紫色螢光粒子（orb 光球 或 wisp 光絮）。"""
     kind = "orb" if random.random() < 0.55 else "wisp"
@@ -185,7 +188,7 @@ def _draw_cc_title(surf: pygame.Surface, text: str,
     OUTLINE_COL = (18,  8, 45)
     OUTLINE_OFF = 2
 
-    _CREATIVE_PATH = r"C:\Users\譚揚勳\AppData\Local\Microsoft\Windows\Fonts\Creative.ttc"
+    _CREATIVE_PATH = os.path.join(os.path.dirname(__file__), "asset", "fonts", "Creative.ttc")
     _ck = "creative_34b"
     if _ck not in _extra_fonts:
         try:
@@ -390,7 +393,7 @@ def _draw_cc_dept(surf, fm, fs, options, mpos):
         ry        = grid_y + row * (ch + gap_y)
         r         = pygame.Rect(rx, ry, cw, ch)
         hover     = r.collidepoint(mpos)
-        dr        = _premium_btn(surf, r, BTN_N, hover, radius=14)
+        dr        = _premium_btn(surf, r, (255, 248, 238), hover, radius=16)
         t         = fb_lg.render(opt, True, WHITE)
         surf.blit(t, (dr.x + (dr.width  - t.get_width())  // 2,
                       dr.y + (dr.height - t.get_height()) // 2))
@@ -800,15 +803,15 @@ def _draw_cc_extra_events(surf, fm, fs, mpos):
 
 def _draw_cc_summary(surf, fm, fs, mpos, game_mode=False):
     """
-    玩家資訊一覽卡片。
-    game_mode=False: CC 結束確認，有「進入本學期」「重新創建角色」兩按鈕，
-                     回傳 (start_btn_rect, restart_btn_rect)。
-    game_mode=True : 遊戲中查閱，有「關閉」按鈕，回傳 (close_btn_rect, None)。
+    玩家資訊一覽卡片（分區佈局版）。
+    game_mode=False: CC 結束確認，回傳 (start_btn_rect, restart_btn_rect)。
+    game_mode=True : 遊戲中查閱，回傳 (close_btn_rect, None)。
     """
     fb    = _font_bold[0]    or fs
     fb_lg = _font_bold_lg[0] or fm
     data  = _cc_summary_data[0]
 
+    # ── 背景 ────────────────────────────────────────────────────
     if game_mode:
         ov = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
         ov.fill((0, 0, 0, 160))
@@ -816,11 +819,10 @@ def _draw_cc_summary(surf, fm, fs, mpos, game_mode=False):
     else:
         _draw_cc_bg(surf)
 
-    # ── 卡片外框 ─────────────────────────────────────────────────
+    # ── 外卡片 ──────────────────────────────────────────────────
     cw = 700; ch = 500
     cx = (WIN_W - cw) // 2; cy = (WIN_H - ch) // 2
 
-    # 陰影
     sh = pygame.Surface((cw + 8, ch + 8), pygame.SRCALPHA)
     pygame.draw.rect(sh, (0, 0, 0, 55), (0, 0, cw + 8, ch + 8), border_radius=20)
     surf.blit(sh, (cx + 4, cy + 4))
@@ -830,155 +832,194 @@ def _draw_cc_summary(surf, fm, fs, mpos, game_mode=False):
     surf.blit(card_s, (cx, cy))
     pygame.draw.rect(surf, CYAN, pygame.Rect(cx, cy, cw, ch), 2, border_radius=18)
 
-    # ── 內容 ────────────────────────────────────────────────────
-    pad = 28
-    px = cx + pad; pw = cw - pad * 2
-    py = cy + 16
+    # ── 標題 ────────────────────────────────────────────────────
+    ts = fb_lg.render("玩家資訊一覽", True, TITLE)
+    surf.blit(ts, (cx + (cw - ts.get_width()) // 2, cy + 14))
+    pygame.draw.line(surf, (210, 185, 155),
+                     (cx + 20, cy + 46), (cx + cw - 20, cy + 46), 1)
 
-    # 標題
-    title_s = fb_lg.render("玩家資訊一覽", True, TITLE)
-    surf.blit(title_s, (cx + (cw - title_s.get_width()) // 2, py))
-    py += title_s.get_height() + 8
-    pygame.draw.line(surf, (210, 185, 155), (px, py), (px + pw, py), 1)
-    py += 10
+    # ── 共用 helpers ─────────────────────────────────────────────
+    _IC_BG  = (240, 218, 190, 210)
+    _IC_BDR = (195, 165, 125)
+    _IC_R   = 12
+    GAP     = 10
 
-    # 基本資料
-    de_name  = data.get("de_level", {}).get("name", "")
-    info_str = f"姓名：{data.get('name', '')}　　學院：{data.get('department', '')}　　年級：{de_name}"
-    surf.blit(fm.render(info_str, True, WHITE), (px, py))
-    py += fm.get_height() + 12
+    def _inner_card(rect):
+        s = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
+        pygame.draw.rect(s, _IC_BG, (0, 0, rect.width, rect.height),
+                         border_radius=_IC_R)
+        surf.blit(s, rect.topleft)
+        pygame.draw.rect(surf, _IC_BDR, rect, 1, border_radius=_IC_R)
 
-    # 能力值
-    surf.blit(fb.render("【能力值】", True, TITLE), (px, py))
-    py += fb.get_height() + 5
+    def _small_chip(rect, text, font, bg, fg):
+        pygame.draw.rect(surf, bg, rect, border_radius=8)
+        t = font.render(text, True, fg)
+        surf.blit(t, (rect.x + (rect.width  - t.get_width())  // 2,
+                      rect.y + (rect.height - t.get_height()) // 2))
+
+    def _section_card(rect, title, items, row_fn):
+        """子卡片：標題列 + 列表（無背景框）。row_fn(item) -> (text, color)"""
+        lbl = fb.render(title, True, TITLE)
+        surf.blit(lbl, (rect.x + 10, rect.y + 8))
+        iy = rect.y + 8 + lbl.get_height() + 5
+        if items:
+            for item in items:
+                text, col = row_fn(item)
+                if iy + fs.get_height() > rect.bottom - 6:
+                    break
+                surf.blit(fs.render(text, True, col), (rect.x + 12, iy))
+                iy += fs.get_height() + 3
+        else:
+            surf.blit(fs.render("（無）", True, GRAY), (rect.x + 12, iy))
+
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # 上方區  cy+60 ~ cy+210  (h=150)
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    UP_Y = cy + 60;  UP_H = 150
+    L_W  = 290
+
+    # ── 左卡（頭像 + 學院 / 年級 + 姓名 chip）────────────────────
+    l_rect = pygame.Rect(cx + 20, UP_Y, L_W, UP_H)
+
+    portrait_r = 44
+    p_cx = cx + 20 + 16 + portrait_r
+    p_cy = UP_Y + 15 + portrait_r
+
+    prefix = _portrait_prefix[0]
+    head_s = _portrait_head_load(prefix) if prefix else None
+    if head_s is not None:
+        d = portrait_r * 2
+        surf.blit(pygame.transform.smoothscale(head_s, (d, d)),
+                  (p_cx - portrait_r, p_cy - portrait_r))
+    else:
+        pygame.draw.circle(surf, (200, 90, 90),  (p_cx, p_cy), portrait_r)
+        pygame.draw.circle(surf, (230, 140, 110), (p_cx, p_cy), portrait_r, 3)
+
+    tag_x = p_cx + portrait_r + 14
+    # 學院（純文字）
+    dept_s = fb.render(data.get("department", ""), True, TITLE)
+    surf.blit(dept_s, (tag_x, UP_Y + 26))
+    # 年級（純文字）
+    de_s = fb.render(data.get("de_level", {}).get("name", ""), True, TITLE)
+    surf.blit(de_s, (tag_x, UP_Y + 26 + dept_s.get_height() + 12))
+
+    # 姓名（純文字，左下角）
+    name_str = data.get("name", "")
+    nm_s = fb.render(name_str, True, TITLE)
+    surf.blit(nm_s, (cx + 20 + 14, UP_Y + UP_H - nm_s.get_height() - 14))
+
+    # ── 右卡（能力值 2 × 2 chips）────────────────────────────────
+    R_X = cx + 20 + L_W + GAP
+    R_W = cw - 20 - L_W - GAP - 20        # = 360
 
     raw_sta = data.get("stamina", 0)
-    raw_int = data.get("intel", 0)
-    raw_lck = data.get("luck", 0)
-    money   = data.get("money", 0)
+    raw_int = data.get("intel",   0)
+    raw_lck = data.get("luck",    0)
+    money   = data.get("money",   0)
     ct      = data.get("combined_talent", {})
     dl      = data.get("de_level", {})
 
     if not game_mode:
-        t_sta = ct.get("stamina", 0)
-        t_int = ct.get("intel", 0)
-        t_lck = ct.get("luck", 0)
-        d_int = dl.get("intel", 0)
-        d_lck = dl.get("luck", 0)
-        sta_f = raw_sta + t_sta
-        int_f = raw_int + t_int + d_int
-        lck_f = raw_lck + t_lck + d_lck
-
-        def _bstr(raw, tb, db=0):
-            parts = [f"分配 {raw}"]
-            if tb: parts.append(f"天賦 {'+' if tb > 0 else ''}{tb}")
-            if db: parts.append(f"年級 +{db}")
-            return "（" + "，".join(parts) + "）" if len(parts) > 1 else ""
-
-        sta_str = f"體力：{sta_f}{_bstr(raw_sta, t_sta)}"
-        int_str = f"智力：{int_f}{_bstr(raw_int, t_int, d_int)}"
-        lck_str = f"運氣：{lck_f}{_bstr(raw_lck, t_lck, d_lck)}"
+        sta_v = raw_sta + ct.get("stamina", 0)
+        int_v = raw_int + ct.get("intel",   0) + dl.get("intel", 0)
+        lck_v = raw_lck + ct.get("luck",    0) + dl.get("luck",  0)
     else:
-        sta_str = f"體力：{raw_sta}"
-        int_str = f"智力：{raw_int}"
-        lck_str = f"運氣：{raw_lck}"
+        sta_v = raw_sta; int_v = raw_int; lck_v = raw_lck
 
-    half = pw // 2
-    surf.blit(fs.render(sta_str, True, WHITE), (px, py))
-    surf.blit(fs.render(int_str, True, WHITE), (px + half, py))
-    py += fs.get_height() + 4
-    surf.blit(fs.render(lck_str, True, WHITE), (px, py))
-    surf.blit(fs.render(f"金錢：{money}", True, YELLOW), (px + half, py))
-    py += fs.get_height() + 12
+    # 能力值純文字（兩欄）
+    _sv_y1 = UP_Y + 38
+    _sv_y2 = _sv_y1 + fb.get_height() + 18
+    _sv_c1 = R_X + 20
+    _sv_c2 = R_X + R_W // 2 + 10
 
-    # 天賦
-    surf.blit(fb.render("【天賦】", True, TITLE), (px, py))
-    py += fb.get_height() + 5
+    for _sx, _sy, _lbl, _val, _vcol in [
+        (_sv_c1, _sv_y1, "體力", sta_v, WHITE),
+        (_sv_c2, _sv_y1, "智力", int_v, WHITE),
+        (_sv_c1, _sv_y2, "運氣", lck_v, WHITE),
+        (_sv_c2, _sv_y2, "金錢", money, YELLOW),
+    ]:
+        _ls = fs.render(f"{_lbl}：", True, GRAY)
+        _vs = fb.render(str(_val),  True, _vcol)
+        surf.blit(_ls, (_sx, _sy))
+        surf.blit(_vs, (_sx + _ls.get_width(), _sy))
 
-    slots = data.get("slot_results", [])
-    for i, t in enumerate(slots):
-        is_null = t.get("name") == "無天賦"
-        col = GRAY if is_null else WHITE
-        desc = t.get("desc", "")
-        line = f"槽 {i + 1}：{t.get('name', '')}"
-        if desc:
-            line += f"  —  {desc}"
-        surf.blit(fs.render(line, True, col), (px + 10, py))
-        py += fs.get_height() + 3
-    if not slots:
-        surf.blit(fs.render("（無）", True, GRAY), (px + 10, py))
-        py += fs.get_height() + 3
-    py += 8
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # 中間區  cy+220 ~ cy+328  (h=108)  天賦 | 負面特質
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    MID_Y  = cy + 220;  MID_H  = 108
+    HALF_W = (cw - 20 - 20 - GAP) // 2    # = 325
 
-    # 負面特質
-    surf.blit(fb.render("【負面特質】", True, TITLE), (px, py))
-    py += fb.get_height() + 5
+    slots     = data.get("slot_results", [])
+    drawbacks = data.get("drawbacks",    [])
 
-    drawbacks = data.get("drawbacks", [])
-    if drawbacks:
-        for db in drawbacks:
-            surf.blit(fs.render(f"{db['name']}  —  {db['desc']}", True, RED),
-                      (px + 10, py))
-            py += fs.get_height() + 3
-    else:
-        surf.blit(fs.render("（無）", True, GRAY), (px + 10, py))
-        py += fs.get_height() + 3
-    py += 8
+    _indexed_slots = [dict({"_i": i + 1}, **t) for i, t in enumerate(slots)]
+    _section_card(
+        pygame.Rect(cx + 20, MID_Y, HALF_W, MID_H),
+        "天賦", _indexed_slots,
+        lambda t: (
+            f"槽{t['_i']}：{t.get('name', '')}" +
+            (f"：{t.get('desc', '')}" if t.get("desc") else ""),
+            GRAY if t.get("name") == "無天賦" else WHITE,
+        )
+    )
+    _section_card(
+        pygame.Rect(cx + 20 + HALF_W + GAP, MID_Y, HALF_W, MID_H),
+        "負面特質", drawbacks,
+        lambda db: (
+            db.get("name", "") + ("：" + db.get("desc", "") if db.get("desc") else ""),
+            RED,
+        )
+    )
 
-    # 額外事件
-    surf.blit(fb.render("【額外事件】", True, TITLE), (px, py))
-    py += fb.get_height() + 5
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # 下方區  cy+338 ~ cy+460  (h=122)  額外事件 | 按鈕
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    BOT_Y = cy + 338;  BOT_H = 122
 
-    ev_ids  = data.get("extra_ev_ids", [])
+    ev_ids  = data.get("extra_ev_ids",  [])
     ev_map  = {e["id"]: e for e in data.get("extra_ev_data", [])}
-    if ev_ids:
-        for eid in ev_ids:
-            ev = ev_map.get(eid)
-            if not ev:
-                continue
-            tc = ev.get("time_cost", 0)
+    ev_list = []
+    for eid in ev_ids:
+        ev = ev_map.get(eid)
+        if not ev:
+            continue
+        desc = ev.get("desc", "")
+        if not desc:
+            tc = ev.get("time_cost",   0)
             md = ev.get("money_delta", 0)
             parts = []
-            if tc > 0: parts.append(f"每週時間 -{tc}")
+            if tc > 0:  parts.append(f"每週時間 -{tc}")
             if md != 0: parts.append(f"每週金錢 {'+' if md >= 0 else ''}{md}")
-            line = ev["name"]
-            if parts:
-                line += "  —  " + "，".join(parts)
-            surf.blit(fs.render(line, True, WHITE), (px + 10, py))
-            py += fs.get_height() + 3
-    else:
-        surf.blit(fs.render("（無）", True, GRAY), (px + 10, py))
-        py += fs.get_height() + 3
+            desc = "，".join(parts)
+        full_txt = ev["name"] + ("：" + desc if desc else "")
+        for line in full_txt.split("\n"):
+            ev_list.append({"_txt": line})
 
-    # ── 按鈕區 ────────────────────────────────────────────────
-    btn_y = cy + ch - 68
-    pygame.draw.line(surf, (210, 185, 155), (px, btn_y), (px + pw, btn_y), 1)
-    btn_y += 14
+    _section_card(
+        pygame.Rect(cx + 20, BOT_Y, HALF_W, BOT_H),
+        "額外事件", ev_list,
+        lambda e: (e["_txt"], WHITE)
+    )
+
+    # ── 按鈕 ─────────────────────────────────────────────────────
+    BTN_X = cx + 20 + HALF_W + GAP
+    BTN_W = HALF_W
+
+    def _summ_btn(rect, label, bg):
+        dr = _premium_btn(surf, rect, bg, rect.collidepoint(mpos), radius=12)
+        t  = fb_lg.render(label, True, PANEL)
+        surf.blit(t, (dr.x + (dr.width  - t.get_width())  // 2,
+                      dr.y + (dr.height - t.get_height()) // 2))
 
     if game_mode:
-        close_r = pygame.Rect(cx + cw - pad - 130, btn_y, 130, 40)
-        hover   = close_r.collidepoint(mpos)
-        dr      = _premium_btn(surf, close_r, BTN_N, hover, radius=12)
-        ct_s    = fb_lg.render("關閉", True, PANEL)
-        surf.blit(ct_s, (dr.x + (dr.width - ct_s.get_width()) // 2,
-                         dr.y + (dr.height - ct_s.get_height()) // 2))
+        close_r = pygame.Rect(BTN_X, BOT_Y + (BOT_H - 44) // 2, BTN_W, 44)
+        _summ_btn(close_r, "關閉", BTN_N)
         return close_r, None
     else:
-        start_r   = pygame.Rect(cx + cw - pad - 140, btn_y, 140, 40)
-        restart_r = pygame.Rect(start_r.x - 18 - 160, btn_y, 160, 40)
-
-        h_s = start_r.collidepoint(mpos)
-        dr_s = _premium_btn(surf, start_r, BTN_N, h_s, radius=12)
-        t_s  = fb_lg.render("進入本學期", True, PANEL)
-        surf.blit(t_s, (dr_s.x + (dr_s.width - t_s.get_width()) // 2,
-                        dr_s.y + (dr_s.height - t_s.get_height()) // 2))
-
-        h_r = restart_r.collidepoint(mpos)
-        dr_r = _premium_btn(surf, restart_r, (115, 75, 40), h_r, radius=12)
-        t_r  = fb_lg.render("重新創建角色", True, PANEL)
-        surf.blit(t_r, (dr_r.x + (dr_r.width - t_r.get_width()) // 2,
-                        dr_r.y + (dr_r.height - t_r.get_height()) // 2))
-
+        restart_r = pygame.Rect(BTN_X, BOT_Y + 14,          BTN_W, 44)
+        start_r   = pygame.Rect(BTN_X, BOT_Y + 14 + 44 + 14, BTN_W, 44)
+        _summ_btn(restart_r, "重新創建角色", (115, 75, 40))
+        _summ_btn(start_r,   "進入本學期",   BTN_N)
         return start_r, restart_r
 
 def _spawn_confetti():
@@ -1012,6 +1053,20 @@ def _update_confetti(surf):
             keep.append(p)
     _cc_confetti[:] = keep
 
+def _calc_slot_target(i: int) -> int:
+    """計算第 i 槽的捲動終點（px），使結果天賦剛好停在卡片垂直中央。
+    推導：card_h=230, TILE_H=62
+      center_row = (230//2 + 0) // 62 = 1
+      => first_tile_idx = (result_idx - 1) % n_pool
+      => target = (3*n_pool + first_tile_idx) * TILE_H
+    """
+    n    = len(_SLOT_SPIN_NAMES)
+    res  = _slot_results[i]
+    name = res.get("name", "") if res else ""
+    ridx = _SLOT_SPIN_NAMES.index(name) if name in _SLOT_SPIN_NAMES else 0
+    ftidx = (ridx - 1) % n
+    return (3 * n + ftidx) * _SLOT_TILE_H
+
 def _update_slot_state(now):
     """每幀推進拉霸機動畫狀態。"""
     for i in range(3):
@@ -1021,6 +1076,7 @@ def _update_slot_state(now):
                     and now - _slot_stop_t[i - 1] >= _SLOT_DELAY_MS:
                 _slot_phase[i]   = "spinning"
                 _slot_start_t[i] = now
+                _slot_target_offsets[i] = _calc_slot_target(i)
         elif phase == "spinning":
             if now - _slot_start_t[i] >= _SLOT_SPIN_MS:
                 _slot_phase[i]  = "done"
@@ -1051,6 +1107,7 @@ def _draw_cc_slot_machine(surf, fm, fs, mpos):
 
     # ── 佈局 ──────────────────────────────────────────────────
     cw, ch     = 210, 230
+    TILE_H     = _SLOT_TILE_H
     gap        = 22
     title_h    = fm.get_height() + 22
     TITLE_GAP  = 28
@@ -1071,33 +1128,67 @@ def _draw_cc_slot_machine(surf, fm, fs, mpos):
         phase = _slot_phase[i]
 
         if phase == "idle":
-            dr = _premium_btn(surf, r, (60, 40, 20), False, radius=16)
-            q  = fb_lg.render("?", True, GRAY)
+            dr = _premium_btn(surf, r, (255, 245, 225), False, radius=16)
+            pygame.draw.rect(surf, (200, 175, 135), dr, 2, border_radius=16)
+            q  = fb_lg.render("?", True, TITLE)
             surf.blit(q, (dr.x + (dr.width - q.get_width()) // 2,
                           dr.y + (dr.height - q.get_height()) // 2))
 
         elif phase == "spinning":
-            dr = _premium_btn(surf, r, (82, 52, 22), False, radius=16)
-            pygame.draw.rect(surf, YELLOW, dr, 2, border_radius=16)
-            elapsed = now - _slot_start_t[i]
-            t_frac  = min(1.0, elapsed / _SLOT_SPIN_MS)
-            # 後段減速：interval 從 70ms 拉長到 260ms
-            interval = int(70 + t_frac ** 2 * 190) if t_frac < 0.75 else int(70 + 0.75 ** 2 * 190)
-            name_idx = (elapsed // max(1, interval)) % len(_SLOT_SPIN_NAMES)
-            nt = fb_lg.render(_SLOT_SPIN_NAMES[name_idx], True, WHITE)
-            ny = dr.y + (dr.height - nt.get_height()) // 2
-            surf.blit(nt, (dr.x + (dr.width - nt.get_width()) // 2, ny))
-            # 速度感模糊條
-            for off, alpha in ((-32, 30), (-16, 55), (16, 55), (32, 30)):
-                ghost = pygame.Surface((cw - 16, fb_lg.get_height()), pygame.SRCALPHA)
-                ghost.fill((255, 200, 100, alpha))
-                surf.blit(ghost, (dr.x + 8, ny + off))
+            dr       = _premium_btn(surf, r, (255, 250, 240), False, radius=16)
+
+            elapsed  = now - _slot_start_t[i]
+            t_frac   = min(1.0, elapsed / _SLOT_SPIN_MS)
+            ease     = 1 - (1 - t_frac) ** 4          # ease-out quart
+            offset   = int(_slot_target_offsets[i] * ease)
+
+            n_pool         = len(_SLOT_SPIN_NAMES)
+            first_tile_idx = (offset // TILE_H) % n_pool
+            pixel_shift    = offset % TILE_H
+            center_row     = (dr.height // 2 + pixel_shift) // TILE_H
+
+            surf.set_clip(dr)
+            n_draw = dr.height // TILE_H + 2
+            for row in range(n_draw):
+                ty   = dr.y - pixel_shift + row * TILE_H
+                if ty >= dr.bottom:
+                    break
+                name = _SLOT_SPIN_NAMES[(first_tile_idx + row) % n_pool]
+                if row == center_row:
+                    hl = pygame.Surface((dr.width - 4, TILE_H), pygame.SRCALPHA)
+                    hl.fill((255, 205, 80, 100))
+                    surf.blit(hl, (dr.x + 2, ty))
+                if row > 0:
+                    pygame.draw.line(surf, (210, 185, 145),
+                                     (dr.x + 12, ty), (dr.x + dr.width - 12, ty))
+                nt = fb_lg.render(name, True, TITLE)
+                surf.blit(nt, (dr.x + (dr.width - nt.get_width()) // 2,
+                               ty + (TILE_H - nt.get_height()) // 2))
+            surf.set_clip(None)
+
+            # ── 上下漸層遮罩（景深感）─────────────────────────────
+            fade_h = 44
+            fk = ("slot_fade_top", dr.width, fade_h)
+            if fk not in _grads:
+                fg = pygame.Surface((dr.width, fade_h), pygame.SRCALPHA)
+                for j in range(fade_h):
+                    a = int(230 * ((fade_h - j) / fade_h) ** 2)
+                    pygame.draw.line(fg, (255, 250, 240, a),
+                                     (0, j), (dr.width - 1, j))
+                _grads[fk] = fg
+            surf.blit(_grads[fk], (dr.x, dr.y))
+            fk2 = ("slot_fade_bot", dr.width, fade_h)
+            if fk2 not in _grads:
+                _grads[fk2] = pygame.transform.flip(_grads[fk], False, True)
+            surf.blit(_grads[fk2], (dr.x, dr.y + dr.height - fade_h))
+
+            pygame.draw.rect(surf, (200, 165, 85), dr, 2, border_radius=16)
 
         elif phase == "done":
             result    = _slot_results[i]
             is_talent = result and result.get("name") != "無天賦"
             # 背景調淡：有天賦用暖金琥珀，無天賦用暖灰棕（皆可讀深色文字）
-            bg_col    = (215, 165, 88) if is_talent else (170, 130, 90)
+            bg_col    = (215, 165, 88) if is_talent else (210, 185, 155)
             dr        = _premium_btn(surf, r, bg_col, False, radius=16)
             if is_talent:
                 pygame.draw.rect(surf, YELLOW, dr, 2, border_radius=16)

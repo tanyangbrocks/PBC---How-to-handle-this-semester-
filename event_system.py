@@ -15,7 +15,7 @@
 
 import random
 from character import Character
-from ui import notify, ask_ok, trigger_screen_shake
+from ui import notify, ask_ok, trigger_screen_shake, play_event_sfx, start_notify_capture, stop_notify_capture
 
 
 # ── 主事件資料庫（全學期，加權隨機）─────────────────────────────
@@ -28,8 +28,9 @@ EVENTS = [
         "trigger_condition": lambda p: True,
         "desc":     (
             "路上遇到一個老奶奶要過馬路，你就順手扶了一下。\n"
-            "結果她掏出名片——有 50% 機率是董事會的人……"
+            "結果她掏出名片——"
         ),
+        "btn_label": "然後呢？",
         "effect":   lambda p: _grandma_effect(p),
     },
     {
@@ -77,7 +78,7 @@ PHASE_EVENTS = [
         "id":       "add_drop_fail",
         "name":     "加簽失敗",
         "prob":     0.20,   # 原機率；roll_event_after_action 內自動減半
-        "week_range": (2, 3),
+        "week_range": (1, 3),
         "is_positive": False,
         "desc":     "等了整整兩週，教授直接把加簽單退回來了。課表就這樣，認了。",
         "effect":   lambda p: _add_drop_fail_effect(p),
@@ -151,11 +152,11 @@ SPECIAL_EVENTS = [
 
 def _grandma_effect(player: Character):
     if random.random() < 0.5:
-        notify("  ✨ 那個老奶奶竟然是董事會的！參與度 +5，賺到了。")
-        player.grades["參與度"] = min(100, player.grades["參與度"] + 5)
+        player.money += 200
+        notify("✨ 老奶奶竟是董事會的人！金錢 +200")
     else:
-        notify("  😊 老奶奶一直跟你道謝，心情莫名好了起來。滿足感 +5。")
         player.change_satisfaction(5)
+        notify("😊 老奶奶一直道謝，心情好起來。自我滿足感 +5")
 
 def _flat_tire_effect(player: Character):
     repair_cost = random.randint(100, 300)
@@ -285,8 +286,13 @@ class EventSystem:
                 popup_text = "💤 熬夜代價：【睡過頭】\n昨晚熬夜太晚，今天完全爬不起來！"
                 notify(popup_text)
                 trigger_screen_shake()
+                play_event_sfx(False)
                 ask_ok(popup_text)
+                start_notify_capture()
                 _oversleep_effect(player)
+                captured = stop_notify_capture()
+                if captured:
+                    ask_ok("📋 效果：【睡過頭】\n" + "\n".join(captured))
                 self.events_this_week += 1
             self.allnighter_risk = 0.0
 
@@ -370,8 +376,13 @@ class EventSystem:
             popup_text = "⚡ 強制事件：【宿醉發作】\n昨晚喝太多，今天整個人不對勁。"
             notify(popup_text)
             trigger_screen_shake()
+            play_event_sfx(False)
             ask_ok(popup_text)
+            start_notify_capture()
             _hangover_effect(player)
+            captured = stop_notify_capture()
+            if captured:
+                ask_ok("📋 效果：【宿醉發作】\n" + "\n".join(captured))
             return
 
         prefix = "💥 特殊事件" if event_type == "special" else "⚡ 突發事件"
@@ -379,9 +390,15 @@ class EventSystem:
         notify(f"\n{prefix}：【{event['name']}】")
         notify(f"  {event['desc']}")
         trigger_screen_shake()
-        ask_ok(popup_text)
+        play_event_sfx(event.get("is_positive", False))
+        ask_ok(popup_text, event.get("btn_label", "確認"))
 
+        start_notify_capture()
         result = event["effect"](player)
+        captured = stop_notify_capture()
+        if captured:
+            ask_ok(f"📋 效果：【{event['name']}】\n" + "\n".join(captured))
+
         if result == "TRIGGER_HANGOVER":
             self.pending_hangover = True
         elif result == "TRIGGER_GREEN_HAT_DEBUFF":

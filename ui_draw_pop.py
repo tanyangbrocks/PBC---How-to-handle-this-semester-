@@ -251,7 +251,7 @@ def _draw_event_ok_popup(surf: pygame.Surface, fm, fs, mpos) -> list:
     br    = pygame.Rect(btn_x, btn_y, BTN_W, BTN_H)
     hover = br.collidepoint(mpos)
     dr    = _premium_btn(surf, br, BTN_N, hover, radius=12)
-    ct    = fb_lg.render("確認", True, PANEL)
+    ct    = fb_lg.render(_event_ok_btn_label[0], True, PANEL)
     surf.blit(ct, (dr.x + (dr.width  - ct.get_width())  // 2,
                    dr.y + (dr.height - ct.get_height()) // 2))
 
@@ -271,7 +271,7 @@ def _draw_subj_popup(surf, fm, fs, mpos):
     surf.blit(ov, (0, 0))
 
     n       = len(_subj_popup_opts)
-    bw      = 300          # 按鈕寬度
+    bw      = 460          # 按鈕寬度
     bh      = 46           # 按鈕高度
     gap     = 10           # 按鈕間距
     pad_x   = 40           # 左右內距
@@ -291,11 +291,11 @@ def _draw_subj_popup(surf, fm, fs, mpos):
 
     # ── 視窗背景 ──────────────────────────────────────────────
     box = pygame.Rect(px, py, total_w, total_h)
-    pygame.draw.rect(surf, (38, 24, 14), box, border_radius=18)
-    pygame.draw.rect(surf, CYAN,         box, 2, border_radius=18)
+    pygame.draw.rect(surf, (255, 244, 228), box, border_radius=18)
+    pygame.draw.rect(surf, CYAN,            box, 2, border_radius=18)
 
     # ── 標題 ──────────────────────────────────────────────────
-    ttx = fb_lg.render(_subj_popup_title[0], True, PANEL)
+    ttx = fb_lg.render(_subj_popup_title[0], True, WHITE)
     surf.blit(ttx, (px + (total_w - ttx.get_width()) // 2, py + pad_top))
 
     # 標題下分隔線
@@ -310,8 +310,8 @@ def _draw_subj_popup(surf, fm, fs, mpos):
     for i, label in enumerate(_subj_popup_opts):
         br    = pygame.Rect(bx, by0 + i * (bh + gap), bw, bh)
         hover = br.collidepoint(mpos)
-        dr    = _premium_btn(surf, br, BTN_N, hover, radius=12)
-        lt    = fb.render(label, True, PANEL)
+        dr    = _premium_btn(surf, br, (255, 248, 238), hover, radius=12)
+        lt    = fb.render(label, True, WHITE)
         surf.blit(lt, (dr.x + (dr.width  - lt.get_width())  // 2,
                        dr.y + (dr.height - lt.get_height()) // 2))
         btn_list.append((br, i + 1))
@@ -332,7 +332,7 @@ def _draw_withdrawal_popup(surf, fm, fs, mpos):
     surf.blit(ov, (0, 0))
 
     n       = len(_withdrawal_popup_opts)
-    bw      = 480          # 按鈕寬度（比科目彈窗寬，容納說明文字）
+    bw      = 640          # 按鈕寬度（比科目彈窗寬，容納說明文字）
     bh      = 72           # 按鈕高度（含兩行文字）
     gap     = 10
     pad_x   = 40
@@ -352,12 +352,12 @@ def _draw_withdrawal_popup(surf, fm, fs, mpos):
 
     # ── 視窗背景 ──────────────────────────────────────────────
     box = pygame.Rect(px, py, total_w, total_h)
-    pygame.draw.rect(surf, (38, 24, 14), box, border_radius=18)
-    pygame.draw.rect(surf, CYAN,         box, 2, border_radius=18)
+    pygame.draw.rect(surf, (255, 244, 228), box, border_radius=18)
+    pygame.draw.rect(surf, CYAN,            box, 2, border_radius=18)
 
     # ── 標題 ──────────────────────────────────────────────────
     POPUP_TITLE = "好課值得一修再修，請選擇你的停修科目"
-    ttx = fb_lg.render(POPUP_TITLE, True, PANEL)
+    ttx = fb_lg.render(POPUP_TITLE, True, WHITE)
     surf.blit(ttx, (px + (total_w - ttx.get_width()) // 2, py + pad_top))
 
     # 標題下分隔線
@@ -372,13 +372,13 @@ def _draw_withdrawal_popup(surf, fm, fs, mpos):
     for i, (course, desc) in enumerate(_withdrawal_popup_opts):
         br    = pygame.Rect(bx, by0 + i * (bh + gap), bw, bh)
         hover = br.collidepoint(mpos)
-        dr    = _premium_btn(surf, br, BTN_N, hover, radius=12)
+        dr    = _premium_btn(surf, br, (255, 248, 238), hover, radius=12)
         # 課程名稱（粗體，上行）
-        nt     = fb.render(course, True, PANEL)
+        nt     = fb.render(course, True, WHITE)
         name_y = dr.y + (bh - fb.get_height() - fs.get_height() - 4) // 2
         surf.blit(nt, (dr.x + 16, name_y))
         # 說明文字（小字，下行）
-        dt = fs.render(desc, True, (230, 210, 185))
+        dt = fs.render(desc, True, GRAY)
         surf.blit(dt, (dr.x + 16, name_y + fb.get_height() + 4))
         btn_list.append((br, course))
 
@@ -425,11 +425,11 @@ def _draw_skip_class_popup(surf, fm, fs, mpos):
 
     # ── 視窗背景 ──────────────────────────────────────────────
     box = pygame.Rect(px, py, total_w, total_h)
-    pygame.draw.rect(surf, (38, 24, 14), box, border_radius=18)
-    pygame.draw.rect(surf, CYAN,         box, 2, border_radius=18)
+    pygame.draw.rect(surf, (255, 244, 228), box, border_radius=18)
+    pygame.draw.rect(surf, CYAN,            box, 2, border_radius=18)
 
     # ── 標題 ──────────────────────────────────────────────────
-    ttx = fb_lg.render("選擇要翹的課", True, PANEL)
+    ttx = fb_lg.render("選擇要翹的課", True, WHITE)
     surf.blit(ttx, (px + (total_w - ttx.get_width()) // 2, py + pad_top))
 
     line_y = py + pad_top + title_h + 6
@@ -485,8 +485,8 @@ def _draw_skip_class_popup(surf, fm, fs, mpos):
         else:
             # ── 正常可點擊卡片 ────────────────────────────────
             hover = cr.collidepoint(mpos)
-            _premium_btn(surf, cr, BTN_N, hover, radius=10)
-            ct = fb.render(course, True, PANEL)
+            _premium_btn(surf, cr, (255, 248, 238), hover, radius=10)
+            ct = fb.render(course, True, WHITE)
             surf.blit(ct, (cr.x + (cr.width  - ct.get_width())  // 2,
                            cr.y + (cr.height - ct.get_height()) // 2))
             btn_list.append((cr, course))
@@ -623,54 +623,172 @@ def _draw_modal_overlay(surf):
     overlay.fill((80, 50, 20, 110))   # 暖棕半透明遮罩（比純黑更有溫度）
     surf.blit(overlay, (0, 0))
 
+def _tt_parse_time(t_str: str):
+    """
+    解析 'HH:MM–HH:MM' 格式（支援 en-dash / em-dash / 連字號）。
+    回傳 (start_minutes, end_minutes)；失敗回傳 (None, None)。
+    """
+    for sep in ('–', '—', '-'):
+        if sep in t_str:
+            parts = t_str.split(sep, 1)
+            def _m(s):
+                s = s.strip()
+                if ':' in s:
+                    h, m = s.split(':', 1)
+                    return int(h) * 60 + int(m)
+                return int(s) * 60
+            try:
+                return _m(parts[0]), _m(parts[1])
+            except (ValueError, IndexError):
+                pass
+    return None, None
+
+
+# 課程固定色對照（暖色系，配合遊戲棕橘主調）
+_TT_COURSE_COLORS = {
+    "個體經濟學下": (210, 155,  58),
+    "統計學":       (108, 162,  86),
+    "商管程式設計": (190, 103,  76),
+    "社會學甲下":   ( 92, 136, 180),
+    "會計學（二）": (176, 106, 126),
+    "哲學概論":     (148, 118, 182),
+    "全球品牌管理": (168, 140,  75),
+    "政治學二":     (155, 105,  80),
+    "看電影學愛情": (185, 125, 155),
+}
+_TT_DEFAULT_COLOR = (198, 136, 76)
+
+
 def _draw_modal_timetable(surf, fm, fs, courses, mpos):
     """
-    課表彈出 modal。
+    格狀週課表 modal（仿 sheet.webp 佈局，遊戲暖色調）。
     courses: [{"name":str, "day":str, "time":str, "credits":int}, ...]
     回傳「確認」按鈕 Rect。
     """
     _draw_modal_overlay(surf)
-    cw, ch = 560, min(120 + len(courses) * 34 + 70, WIN_H - 80)
+
+    # ── 卡片尺寸與位置 ───────────────────────────────────────────
+    cw, ch = 760, 620
     cx = (WIN_W - cw) // 2
     cy = (WIN_H - ch) // 2
     card = pygame.Rect(cx, cy, cw, ch)
-    _soft_shadow(surf, card, radius=20, alpha=80, offset=(4, 8), spread=8)
-    pygame.draw.rect(surf, PANEL, card, border_radius=20)
-    pygame.draw.rect(surf, CYAN, card, 2, border_radius=20)
+    _soft_shadow(surf, card, radius=18, alpha=80, offset=(4, 8), spread=8)
+    pygame.draw.rect(surf, PANEL, card, border_radius=18)
+    pygame.draw.rect(surf, CYAN,  card, 2,  border_radius=18)
 
-    # 標題
-    title = fm.render("本週課表", True, TITLE)
-    surf.blit(title, (cx + (cw - title.get_width()) // 2, cy + 18))
+    # ── 標題 ────────────────────────────────────────────────────
+    fb = _font_bold[0] or fm
+    title_s = fb.render("本週課表", True, TITLE)
+    surf.blit(title_s, (cx + (cw - title_s.get_width()) // 2, cy + 12))
+    pygame.draw.line(surf, (195, 163, 123),
+                     (cx + 16, cy + 44), (cx + cw - 16, cy + 44), 1)
 
-    # 分隔線
-    pygame.draw.line(surf, GRAY,
-                     (cx + 20, cy + 52), (cx + cw - 20, cy + 52), 1)
+    # ── 格狀區域參數 ─────────────────────────────────────────────
+    TIME_COL_W = 46          # 左側時間標籤欄寬
+    PAD_L      = 14          # 卡片內左 padding
+    PAD_R      = 14          # 卡片內右 padding
+    HEADER_H   = 26          # 星期標頭列高
+    BTN_H_RSV  = 54          # 底部按鈕預留高度
 
-    # 欄位標頭
-    col_x = [cx + 20, cx + 100, cx + 210, cx + 330, cx + 430]
-    headers = ["", "課程名稱", "時間", "學分", ""]
-    # 簡化為三欄：星期 / 課名 / 時間+學分
-    col_x2 = [cx + 20, cx + 90, cx + 280, cx + 420]
-    hdr_labels = ["星期", "課程名稱", "上課時間", "學分"]
-    for i, h in enumerate(hdr_labels):
-        ht = fs.render(h, True, YELLOW)
-        surf.blit(ht, (col_x2[i], cy + 58))
+    DAYS     = ["週一", "週二", "週三", "週四", "週五"]
+    N_DAYS   = len(DAYS)
+    START_H  = 8             # 08:00 起
+    END_H    = 23            # 23:00 止
+    N_HOURS  = END_H - START_H  # 15 小時
 
-    # 課程列表
-    row_y = cy + 82
+    # 格子區左邊界 X / 上邊界 Y
+    GRID_X0 = cx + PAD_L + TIME_COL_W + 3
+    GRID_Y0 = cy + 50 + HEADER_H
+    GRID_W  = cw - PAD_L - TIME_COL_W - 3 - PAD_R
+    GRID_H  = ch - 50 - HEADER_H - BTN_H_RSV - 4
+
+    COL_W   = GRID_W // N_DAYS
+    ROW_H   = GRID_H / N_HOURS          # float，精確定位用
+
+    # ── 格子區背景（羊皮紙色）───────────────────────────────────
+    bg_s = pygame.Surface((TIME_COL_W + 3 + GRID_W, HEADER_H + GRID_H),
+                           pygame.SRCALPHA)
+    pygame.draw.rect(bg_s, (250, 241, 224, 255),
+                     (0, 0, TIME_COL_W + 3 + GRID_W, HEADER_H + GRID_H),
+                     border_radius=8)
+    surf.blit(bg_s, (cx + PAD_L, cy + 50))
+
+    # ── 星期標頭 ────────────────────────────────────────────────
+    for di, day in enumerate(DAYS):
+        col_cx = GRID_X0 + di * COL_W + COL_W // 2
+        dt = fs.render(day, True, YELLOW)
+        surf.blit(dt, (col_cx - dt.get_width() // 2,
+                       cy + 50 + (HEADER_H - dt.get_height()) // 2))
+
+    # 標頭底部分隔線
+    pygame.draw.line(surf, (195, 163, 123),
+                     (cx + PAD_L, GRID_Y0),
+                     (GRID_X0 + GRID_W, GRID_Y0), 1)
+
+    # ── 水平格線 + 時間標籤 ──────────────────────────────────────
+    for hi in range(N_HOURS + 1):
+        gy   = GRID_Y0 + int(hi * ROW_H)
+        hour = START_H + hi
+        lc   = (195, 163, 123) if hi == 0 or hi == N_HOURS else (215, 190, 158)
+        pygame.draw.line(surf, lc,
+                         (cx + PAD_L, gy), (GRID_X0 + GRID_W, gy), 1)
+        if hi < N_HOURS:
+            tl = fs.render(f"{hour:02d}:00", True, GRAY)
+            surf.blit(tl, (cx + PAD_L + (TIME_COL_W - tl.get_width()) // 2,
+                           gy + 3))
+
+    # ── 垂直格線（各 day 欄之間）────────────────────────────────
+    for di in range(N_DAYS + 1):
+        lx = GRID_X0 + di * COL_W
+        lc = (195, 163, 123) if di == 0 or di == N_DAYS else (215, 190, 158)
+        pygame.draw.line(surf, lc,
+                         (lx, GRID_Y0), (lx, GRID_Y0 + GRID_H), 1)
+
+    # ── 課程色塊 ─────────────────────────────────────────────────
+    day_map   = {d: i for i, d in enumerate(DAYS)}
+    total_min = N_HOURS * 60
+
     for course in courses:
-        day_t  = fs.render(course.get("day", ""), True, WHITE)
-        name_t = fs.render(course.get("name", ""), True, WHITE)
-        time_t = fs.render(course.get("time", ""), True, GRAY)
-        cred_t = fs.render(str(course.get("credits", "")), True, GREEN)
-        surf.blit(day_t,  (col_x2[0], row_y))
-        surf.blit(name_t, (col_x2[1], row_y))
-        surf.blit(time_t, (col_x2[2], row_y))
-        surf.blit(cred_t, (col_x2[3], row_y))
-        row_y += 34
+        di = day_map.get(course.get("day", ""))
+        if di is None:
+            continue
 
-    # 確認按鈕
-    ok    = pygame.Rect(cx + (cw - 140) // 2, cy + ch - 56, 140, 44)
+        s_min, e_min = _tt_parse_time(course.get("time", ""))
+        if s_min is None:
+            continue
+
+        # 裁剪至顯示範圍
+        s_min = max(s_min, START_H * 60)
+        e_min = min(e_min, END_H   * 60)
+        if e_min <= s_min:
+            continue
+
+        off_s = s_min - START_H * 60
+        off_e = e_min - START_H * 60
+
+        bx = GRID_X0 + di * COL_W + 2
+        by = GRID_Y0 + int(off_s / total_min * GRID_H)
+        bw = COL_W - 4
+        bh = max(14, int((off_e - off_s) / total_min * GRID_H) - 1)
+
+        col3 = _TT_COURSE_COLORS.get(course.get("name", ""), _TT_DEFAULT_COLOR)
+
+        # 圓角色塊（半透明）
+        blk = pygame.Surface((bw, bh), pygame.SRCALPHA)
+        pygame.draw.rect(blk, (*col3, 195), (0, 0, bw, bh), border_radius=5)
+        light = tuple(min(255, c + 55) for c in col3)
+        pygame.draw.rect(blk, (*light, 215), (0, 0, bw, bh), 1, border_radius=5)
+        surf.blit(blk, (bx, by))
+
+        # 課名（置中，空間不足時略過）
+        name = course.get("name", "")
+        nt   = fs.render(name, True, (255, 255, 255))
+        if nt.get_width() <= bw - 4 and bh >= nt.get_height() + 2:
+            surf.blit(nt, (bx + (bw - nt.get_width())  // 2,
+                           by + (bh - nt.get_height()) // 2))
+
+    # ── 確認按鈕 ────────────────────────────────────────────────
+    ok    = pygame.Rect(cx + (cw - 140) // 2, cy + ch - 50, 140, 44)
     hover = ok.collidepoint(mpos)
     dr    = _premium_btn(surf, ok, BTN_N, hover, radius=14)
     t     = fm.render("確認", True, WHITE)

@@ -8,13 +8,17 @@
 # ============================================================
 
 import threading
+import random
 
 import ui
-from character import Character
+from character import Character, TALENTS, DRAWBACKS, DE_LEVELS
 from turn_engine import TurnEngine
 from event_system import EventSystem
 from skill_system import SkillSystem
 from shop_V03 import Shop
+
+# ── DEV 模式開關（改成 False 或刪除此段即可停用跳關按鈕功能）────
+DEBUG = True
 
 
 def game_main():
@@ -34,6 +38,47 @@ def game_main():
         ui.notify("  歡迎來到《如何渡過這學期？》")
         # print("=" * 50)  # 因套用pygame而調整
         ui.notify("=" * 50)
+
+        # ── DEV 跳關：全隨機角色直接跳至最終結算 ────────────────
+        if DEBUG and ui.was_debug_skip():
+            _de  = random.choice(DE_LEVELS)
+            _tal = random.choice(TALENTS)
+            _dbs = random.sample(DRAWBACKS, random.randint(0, len(DRAWBACKS)))
+            player = Character(
+                name             = "DEV",
+                department       = random.choice(["管理學院", "文學院", "理學院", "工學院"]),
+                stamina          = random.randint(10, 80),
+                intel            = random.randint(10, 80),
+                luck             = random.randint(10, 80),
+                money            = random.randint(0, 800),
+                talent           = _tal,
+                drawbacks        = _dbs,
+                de_level         = _de,
+                portrait_prefix  = random.choice(["b1", "g1"]),
+                slot_results     = [_tal, random.choice(TALENTS), random.choice(TALENTS)],
+            )
+            for _k in player.grades:
+                player.grades[_k] = random.uniform(20, 100)
+            player.satisfaction = random.randint(30, 100)
+            ui.set_player(player)
+            event_sys = EventSystem(player)
+            skill_sys = SkillSystem(player)
+            shop      = Shop(player, event_sys=event_sys)
+            engine    = TurnEngine(player=player, event_sys=event_sys,
+                                   skill_sys=skill_sys, shop=shop)
+            ui.notify(f"\n{'─'*50}")
+            ui.notify("  第 16 週")
+            ui.notify(f"{'─'*50}")
+            ui.set_player(player)
+            ui.set_week(16)
+            ui.trigger_ripple()
+            game_over = engine.run_week(16)
+            if not game_over:
+                engine.final_settlement()
+            ui.notify_end()
+            ui.wait_restart()
+            ui.reset_ui()
+            continue
 
         # ── 步驟 1：建立角色 ──────────────────────────────────
         player = Character.create_new()

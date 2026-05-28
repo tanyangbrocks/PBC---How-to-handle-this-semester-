@@ -76,6 +76,10 @@ _EVT_SHAKE_MS  = 480      # 震動總時長（ms）
 
 _EVT_SHAKE_AMP = 14       # 最大震動幅度（px）
 
+_STAMP_SHAKE_MS  = 180    # 印章晃動時長（ms）
+
+_STAMP_SHAKE_AMP = 6      # 印章晃動幅度（px）
+
 _ACTION_FLASH_MS = 300    # 整段閃爍時長（ms）
 
 # ── 拉霸機天賦動畫狀態 ───────────────────────────────────────────
@@ -139,7 +143,7 @@ _WEEK_BGM: dict = {
     13: "Music-Storm.mp3",
     14: "Music-Storm.mp3",
     15: "Music-Lunar_Boss.mp3",
-    16: None,   # 待定
+    16: "Terraria Calamity Soundtrack  Scourge of The Universe (Devourer of Gods' Theme) Extended - Tritrons138 (youtube) (mp3cut.net).mp3",
 }
 
 # ── 遊戲背景 crossfade ─────────────────────────────────────────
@@ -248,9 +252,9 @@ _ACTION_INFO = {
     "好好休息": ("恢復體力 6", "自我滿足度 +8"),
     "幫助朋友": ("消耗體力 2", "自我滿足度 +12"),
     # 特殊行動
-    "熬夜": ("體力 -10, 時間 +2", "睡過頭機率 ↑10%    滿足感 -5"),
-    "翹課": ("體力 +10, 時間 +1", "錯過小考/點名機率：(100-運氣)%"),
-    "進食": ("金錢 -50, 體力 +10", "獲得飽腹狀態（3 個時間格）"),
+    "熬夜": ("體力 -10, 時間 +2", "更容易睡過頭    滿足感 -5"),
+    "翹課": ("體力 +10, 時間 +1", "可能會有不好的影響"),
+    "進食": ("金錢 -50, 體力 +10", "獲得飽腹狀態"),
 }
 
 # ── 行動按鈕 Icon ──────────────────────────────────────────────
@@ -261,6 +265,9 @@ _ACTION_ICON_FILES = {
     "打工賺錢": "work_icon.webp",
     "好好休息": "rest_icon.webp",
     "幫助朋友": "friend_icon.webp",
+    "熬夜":     "night_icon.webp",
+    "翹課":     "escape_icon.webp",
+    "進食":     "eat_icon.webp",
 }
 
 # ── 側邊資訊面板常數 ──────────────────────────────────────────

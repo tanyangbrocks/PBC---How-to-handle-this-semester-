@@ -32,10 +32,13 @@ _choices   = []       # 選項標籤列表
 _prompt    = [""]     # yn / text 提示文字
 
 _yn_labels       = ["是", "否"]   # yn 模式的按鈕文字（可自定義）
+_yn_yes_color    = [None]         # yes 按鈕顏色 override（None = 預設 BTN_N）
+_yn_no_color     = [None]         # no  按鈕顏色 override（None = 預設 DARK_GRAY）
 
 _yn_show_ctx     = [True]         # yn 模式是否附帶 log 背景（預設 True）
 
 _event_ok_text   = [""]           # event_ok 模式：彈窗全文（title\nbody）
+_event_ok_btn_label = ["確認"]    # event_ok 模式：確認按鈕文字
 
 _event_ok_popup_rects: list = []  # event_ok 模式：確認按鈕 rect 清單
 
@@ -125,7 +128,8 @@ _special_disabled: dict = {}   # {行動名: 倒數格數} 停用中的特殊行
 _action_flash_t0 = [0]    # 閃爍觸發時間戳（ms，0 = 未啟用）
 
 # ── 音效 ────────────────────────────────────────────────────
-_sfx: dict = {}   # name -> pygame.mixer.Sound（run_ui 啟動後載入）
+_sfx: dict = {}          # name -> pygame.mixer.Sound（run_ui 啟動後載入）
+_event_ch = [None]       # 保留給突發事件音效的專用 channel，防止被其他音效搶占
 
 # ── 動畫 / 視覺特效狀態 ────────────────────────────────────────
 _anim_hover:   dict = {}   # (cx,cy) -> float 0..1  hover 進度
@@ -142,6 +146,8 @@ _phase         = ["start"]
 _start_event   = threading.Event()   # 玩家點擊「開始遊戲」後被 set
 
 _restart_event = threading.Event()   # 玩家點擊「再來一次」後被 set
+
+_debug_skip_event = threading.Event()  # DEV 按鈕觸發：跳至最終結算
 
 # ── 角色創建專屬狀態（_phase == "char_create" 時使用）────────
 _cc_mode        = [""]          # "name"|"dept"|"drawbacks"|"stats"|"talent"
@@ -175,6 +181,8 @@ _slot_phase   : list = ["idle","idle","idle"]  # "idle"|"spinning"|"done"
 _slot_stop_t  : list = [0, 0, 0]           # 各槽停止旋轉的 ticks
 
 _slot_start_t : list = [0, 0, 0]           # 各槽開始旋轉的 ticks
+
+_slot_target_offsets : list = [0, 0, 0]   # 各槽捲動目標 px（確保結果停在中央）
 
 _cc_confetti  : list = []                  # 彩帶粒子列表
 
@@ -218,7 +226,11 @@ _modal_data  = [None]   # modal 要顯示的資料
 _modal_event = threading.Event()
 
 # ── 道具店 UI 狀態 ───────────────────────────────────────────
+_notify_capture_buf: list = []   # notify 捕捉緩衝（遊戲執行緒專用）
+_notify_capturing   = [False]   # 是否處於捕捉模式
+
 _shop_items      = []     # 商品列表（由 open_shop_ui 填入）
+_shop_event_sys  = [None] # EventSystem 參照（由 open_shop_ui 填入，用於 allnighter_risk）
 
 _shop_hover_idx  = [-1]   # 目前被 hover 的商品索引（-1 = 無）
 
@@ -308,6 +320,17 @@ _grads: dict = {}
 _cc_btn_cache: dict = {}
 
 _action_icon_srcs: dict = {}   # label -> pygame.Surface（懶載入原始圖）
+
+# ── 結算畫面狀態 ─────────────────────────────────────────────
+_settlement_data  = [None]        # {"grades": dict, "final_score": float, "comment": str}
+
+_end_sub          = ["fade_out_1"] # 目前子階段
+
+_end_t0           = [0]            # 子階段開始時間戳（ms）
+
+_end_stamps_shown = [0]            # 已觸發震動 + 音效的 stamp 數量
+
+_stamp_shake_t0   = [0]            # 印章晃動觸發時間戳（ms，0=未啟用）
 
 
 # 明確宣告所有名稱可被 import * 匯出（含 _ 前綴）

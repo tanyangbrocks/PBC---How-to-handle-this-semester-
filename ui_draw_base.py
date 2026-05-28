@@ -57,6 +57,23 @@ def _get_evt_shake_offset() -> tuple:
     rng = random.Random(elapsed // 14)   # ~70fps 下每幀不同
     return rng.randint(-amp, amp), rng.randint(-amp, amp)
 
+def _get_stamp_shake_offset() -> tuple:
+    """回傳印章晃動的 (dx, dy) 位移量（px）。輕柔短暫，結束後自動清除。"""
+    t0 = _stamp_shake_t0[0]
+    if t0 == 0:
+        return 0, 0
+    elapsed = pygame.time.get_ticks() - t0
+    if elapsed >= _STAMP_SHAKE_MS:
+        _stamp_shake_t0[0] = 0
+        return 0, 0
+    decay = (1.0 - elapsed / _STAMP_SHAKE_MS) ** 1.5
+    amp   = int(_STAMP_SHAKE_AMP * decay)
+    if amp < 1:
+        _stamp_shake_t0[0] = 0
+        return 0, 0
+    rng = random.Random(elapsed // 14)
+    return rng.randint(-amp, amp), rng.randint(-amp, amp)
+
 def _get_font(size: int):
     """優先微軟正黑體，再依序嘗試其他能渲染中文的系統字型。"""
     candidates = [
@@ -542,7 +559,11 @@ def _apply_shop_purchase(idx: int) -> None:
     """
     pygame 主執行緒直接套用購買效果。
     遊戲執行緒此時阻塞於 _shop_exit_event，無競爭讀寫風險。
+    注意：此模組沒有 import notify()，改用 _cmd_q.put 直接推訊息。
     """
+    def _msg(text: str):
+        _cmd_q.put(("msg", text))
+
     item   = _shop_items[idx]
     player = _player[0]
     if player is None:
@@ -556,21 +577,27 @@ def _apply_shop_purchase(idx: int) -> None:
 
     if "stamina_restore" in item:
         player.restore_stamina(item["stamina_restore"])
-        notify(f"  ✨ 恢復了 {item['stamina_restore']} 點體力！")
+        _msg(f"  ✨ 恢復了 {item['stamina_restore']} 點體力！")
     if "intel_gain" in item:
         player.intel += item["intel_gain"]
-        notify(f"  📖 智力提升了 {item['intel_gain']} 點！")
+        _msg(f"  📖 智力提升了 {item['intel_gain']} 點！")
     if "satisfaction_gain" in item:
         player.satisfaction = max(0, min(100,
             player.satisfaction + item["satisfaction_gain"]))
-        notify(f"  🎮 滿足感提升了 {item['satisfaction_gain']} 點！")
+        _msg(f"  🎮 滿足感提升了 {item['satisfaction_gain']} 點！")
     if "luck_gain" in item:
         player.luck += item["luck_gain"]
-        notify(f"  🍀 運氣提升了 {item['luck_gain']} 點！")
+        _msg(f"  🍀 運氣提升了 {item['luck_gain']} 點！")
     if "status" in item:
         player.status_effects[item["status"]] = item["duration"]
-        notify(f"  ➕ 獲得狀態：【{item['status']}】（持續 {item['duration']} 週）")
+        _msg(f"  ➕ 獲得狀態：【{item['status']}】（持續 {item['duration']} 週）")
+    if "allnighter_risk" in item:
+        es = _shop_event_sys[0]
+        if es is not None:
+            es.set_allnighter_risk(item["allnighter_risk"])
+            _msg(f"  ⚠️ 睡過頭觸發機率增加 {int(item['allnighter_risk'] * 100)}%！")
 
+    _play_sfx("cash")
     _shop_msg[0]      = f"✅ 購買了【{item['name']}】！剩餘 ${player.money} 元"
     _shop_msg_time[0] = pygame.time.get_ticks()
 

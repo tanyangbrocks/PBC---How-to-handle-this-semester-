@@ -706,7 +706,7 @@ def _draw_start(surf, fm, fl, mpos):
     OUTLINE_OFF = 2                # 描邊厚度（px）
 
     # — 字型：優先 Creative.ttc 84px 粗體，否則 fallback 到 fl —
-    _CREATIVE_PATH = r"C:\Users\譚揚勳\AppData\Local\Microsoft\Windows\Fonts\Creative.ttc"
+    _CREATIVE_PATH = os.path.join(os.path.dirname(__file__), "asset", "fonts", "Creative.ttc")
     _ck = "creative_84b"
     if _ck not in _extra_fonts:
         try:
@@ -869,34 +869,304 @@ def _draw_start(surf, fm, fl, mpos):
     surf.blit(t1, (btn_cx - t1.get_width() // 2, btn_cy - lh - 2))
     surf.blit(t2, (btn_cx - t2.get_width() // 2, btn_cy + 2))
 
-    # 回傳外接方形 Rect（供 collidepoint 命中判定使用）
-    return pygame.Rect(btn_cx - BTN_R, btn_cy - BTN_R, BTN_R * 2, BTN_R * 2)
+    # ── DEV 跳關按鈕（右下角小按鈕，隨時可移除）──────────────
+    fb      = _font_bold[0] or fm
+    DEV_W, DEV_H = 68, 26
+    dev_x   = WIN_W - DEV_W - 14
+    dev_y   = WIN_H - DEV_H - 14
+    dev_r   = pygame.Rect(dev_x, dev_y, DEV_W, DEV_H)
+    dev_hov = dev_r.collidepoint(mpos)
+    dev_bg  = (120, 60, 175) if dev_hov else (75, 38, 120)
+    pygame.draw.rect(surf, dev_bg, dev_r, border_radius=6)
+    dev_t   = fb.render("DEV", True, (220, 195, 255))
+    surf.blit(dev_t, (dev_x + (DEV_W - dev_t.get_width())  // 2,
+                      dev_y + (DEV_H - dev_t.get_height()) // 2))
 
-def _draw_end(surf, fm, fs, lr, mpos):
-    """結束畫面：保留 log（可看最終成績）+ 再來一次按鈕。"""
+    # 回傳外接方形 Rect（供 collidepoint 命中判定使用）
+    return pygame.Rect(btn_cx - BTN_R, btn_cy - BTN_R, BTN_R * 2, BTN_R * 2), dev_r
+
+# ── 結算畫面計時常數 ──────────────────────────────────────────
+_EFADE_MS   = 600    # 淡出 / 淡入各 600ms
+_EANIM_MS   = 2000   # 過場動畫 2 秒
+_ESTAMP_INT = 500    # 各成績項目間隔 ms
+_EPOP_MS    = 280    # stamp pop 動畫時長 ms
+_ECOMMENT   = 600    # 最後一項後延遲顯示評語
+_EBTN_DELAY = 300    # 評語後延遲顯示按鈕
+
+# 成績項目：(顯示標籤, 比例文字, grades dict 鍵)
+_REPORT_ROWS = [
+    ("參與度", "10%", "參與度"),
+    ("作　業", "20%", "作業"),
+    ("小　考", "10%", "小考"),
+    ("期　中", "30%", "期中"),
+    ("期　末", "30%", "期末"),
+]
+_N_STAMPS = len(_REPORT_ROWS) + 2   # 5 行 + 1 總分 + 1 自我滿意度 = 7 個 stamp
+
+# 再來一次按鈕：米灰色
+_END_BTN_COL = (196, 178, 155)
+
+
+def _draw_end(surf, fm, fs, mpos):
+    """
+    結束畫面總控。
+    sub-phases: fade_out_1 → fade_in_1 → anim → fade_out_2 → fade_in_2 → report
+    """
+    ms      = pygame.time.get_ticks()
+
+    # ── Sub-phase 自動推進 ─────────────────────────────────────
+    for _ in range(6):   # 最多連續推進 6 步（理論上每幀只推 1 步）
+        sub     = _end_sub[0]
+        elapsed = max(0, ms - _end_t0[0])
+        if   sub == "fade_out_1" and elapsed >= _EFADE_MS:
+            _end_sub[0] = "fade_in_1";  _end_t0[0] = ms
+        elif sub == "fade_in_1"  and elapsed >= _EFADE_MS:
+            _end_sub[0] = "anim";       _end_t0[0] = ms
+        elif sub == "anim"       and elapsed >= _EANIM_MS:
+            _end_sub[0] = "fade_out_2"; _end_t0[0] = ms
+        elif sub == "fade_out_2" and elapsed >= _EFADE_MS:
+            _end_sub[0] = "fade_in_2";  _end_t0[0] = ms
+        elif sub == "fade_in_2"  and elapsed >= _EFADE_MS:
+            _end_sub[0] = "report";     _end_t0[0] = ms
+        else:
+            break
+
+    sub     = _end_sub[0]
+    elapsed = max(0, ms - _end_t0[0])
+    data    = _settlement_data[0]
+
+    # ── 淡出 / 淡入白幕 ────────────────────────────────────────
+    if sub in ("fade_out_1", "fade_in_1", "fade_out_2", "fade_in_2"):
+        if "start" in _grads:
+            surf.blit(_grads["start"], (0, 0))
+        else:
+            surf.fill(BG)
+        t = min(1.0, elapsed / _EFADE_MS)
+        alpha = int(255 * t) if "out" in sub else int(255 * (1.0 - t))
+        ov = pygame.Surface((WIN_W, WIN_H))
+        ov.fill((255, 255, 255))
+        ov.set_alpha(alpha)
+        surf.blit(ov, (0, 0))
+        return None
+
+    # ── 過場動畫（佔位） ─────────────────────────────────────────
+    if sub == "anim":
+        _draw_end_anim(surf, fm, fs, elapsed)
+        return None
+
+    # ── 成績單 ───────────────────────────────────────────────────
+    if sub == "report":
+        return _draw_end_report(surf, fm, fs, mpos, data, ms, elapsed)
+
+    return None
+
+
+def _draw_end_anim(surf, fm, fs, elapsed):
+    """過場動畫：旋轉光圈 + 文字「計算成績中」。"""
     if "start" in _grads:
         surf.blit(_grads["start"], (0, 0))
     else:
         surf.fill(BG)
-    # 沿用 log 區，讓玩家還能看到最終成績
-    _draw_log(surf, fs, _log, _scroll[0], lr)
-    # 下方面板
-    ir = pygame.Rect(0, lr.y + lr.height, WIN_W, WIN_H - lr.y - lr.height)
-    if "input" in _grads:
-        surf.blit(_grads["input"], ir.topleft)
-    else:
-        pygame.draw.rect(surf, PANEL, ir)
-    pygame.draw.rect(surf, CYAN, ir, 2, border_radius=10)
-    title = fm.render("學期結束！感謝遊玩《如何渡過這學期？》", True, YELLOW)
-    surf.blit(title, ((WIN_W - title.get_width()) // 2, ir.y + 14))
-    # 按鈕
-    btn   = pygame.Rect((WIN_W - 220) // 2, ir.y + 60, 220, 50)
-    hover = btn.collidepoint(mpos)
-    dr    = _premium_btn(surf, btn, BTN_N, hover, radius=16)
-    t     = fm.render("再來一次", True, WHITE)
-    surf.blit(t, (dr.x + (dr.width  - t.get_width())  // 2,
-                  dr.y + (dr.height - t.get_height()) // 2))
-    return btn
+
+    cx, cy = WIN_W // 2, WIN_H // 2
+    fb     = _font_bold[0] or fm
+
+    # 外光圈（緩慢脈動）
+    pulse  = 0.5 + 0.5 * math.sin(elapsed * 0.0025)
+    halo_s = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
+    pygame.draw.circle(halo_s, (*BTN_N, int(70 * pulse)),  (cx, cy), 80, 14)
+    pygame.draw.circle(halo_s, (*BTN_N, int(35 * pulse)),  (cx, cy), 108, 5)
+    surf.blit(halo_s, (0, 0))
+
+    # 旋轉點環（8 顆）
+    dot_s = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
+    for i in range(8):
+        ang = elapsed * 0.0025 + i * math.tau / 8
+        px  = cx + int(math.cos(ang) * 52)
+        py  = cy + int(math.sin(ang) * 52)
+        alp = 90 + int(155 * (i / 8))
+        pygame.draw.circle(dot_s, (*BTN_N, alp), (px, py), 6)
+    surf.blit(dot_s, (0, 0))
+
+    # 「計算成績中」+ 動態點
+    dots    = "．" * (int(elapsed / 500) % 4)
+    text_s  = fb.render("計算成績中" + dots, True, TITLE)
+    surf.blit(text_s, (cx - text_s.get_width() // 2, cy + 72))
+
+
+def _draw_end_report(surf, fm, fs, mpos, data, ms, elapsed):
+    """成績單：stamp 動畫 + 評語 + 再來一次圓形按鈕。"""
+    fb    = _font_bold[0]    or fm
+    fb_lg = _font_bold_lg[0] or fm
+    fb_xl = _font_bold_xl[0] or fm
+
+    grades      = (data or {}).get("grades",      {})
+    final_score = (data or {}).get("final_score",  0.0)
+    comment     = (data or {}).get("comment",      "")
+
+    # ── 新出現的 stamp → 觸發晃動 + 音效 ─────────────────────
+    should_show = min(_N_STAMPS, int(elapsed // _ESTAMP_INT))
+    if should_show > _end_stamps_shown[0]:
+        _stamp_shake_t0[0] = ms
+        _play_sfx("ui_click")
+        _end_stamps_shown[0] = should_show
+
+    # ── 背景羊皮紙 + 主卡片 ────────────────────────────────────
+    surf.fill((248, 238, 220))
+
+    CARD_X, CARD_Y, CARD_W, CARD_H = 100, 12, 760, 590
+    card_r = pygame.Rect(CARD_X, CARD_Y, CARD_W, CARD_H)
+    card_s = pygame.Surface((CARD_W, CARD_H), pygame.SRCALPHA)
+    pygame.draw.rect(card_s, (255, 250, 240, 255), (0, 0, CARD_W, CARD_H), border_radius=14)
+    surf.blit(card_s, card_r.topleft)
+    pygame.draw.rect(surf, (165, 135, 95), card_r, 2, border_radius=14)
+
+    cx = CARD_X + CARD_W // 2
+
+    # ── 標題 ────────────────────────────────────────────────────
+    title_s = fb_xl.render("成　績　單", True, TITLE)
+    title_y = CARD_Y + 16
+    surf.blit(title_s, (cx - title_s.get_width() // 2, title_y))
+
+    sub_s = fs.render("本學期綜合成績", True, GRAY)
+    sub_y = title_y + title_s.get_height() + 4
+    surf.blit(sub_s, (cx - sub_s.get_width() // 2, sub_y))
+
+    div_y = sub_y + sub_s.get_height() + 8
+    pygame.draw.line(surf, (180, 148, 108),
+                     (CARD_X + 20, div_y), (CARD_X + CARD_W - 20, div_y), 1)
+
+    # ── 成績行 ─────────────────────────────────────────────────
+    ROW_H  = 60
+    row_y0 = div_y + 10
+    lx     = CARD_X + 28
+    rx     = CARD_X + CARD_W - 28
+
+    for i, (label, pct, key) in enumerate(_REPORT_ROWS):
+        if i >= should_show:
+            break
+
+        score  = grades.get(key, 0.0)
+        age    = elapsed - i * _ESTAMP_INT
+        row_cy = row_y0 + i * ROW_H + ROW_H // 2
+
+        lbl_s   = fb.render(f"{label}  ({pct})", True, TITLE)
+        score_s = fb_lg.render(f"{score:.1f}", True, TITLE)
+
+        # Pop scale 1.35 → 1.0 over _EPOP_MS
+        if 0 < age < _EPOP_MS:
+            sc = 1.0 + 0.35 * (1.0 - age / _EPOP_MS)
+            lbl_s   = pygame.transform.smoothscale(lbl_s,
+                (max(1, int(lbl_s.get_width()   * sc)),
+                 max(1, int(lbl_s.get_height()  * sc))))
+            score_s = pygame.transform.smoothscale(score_s,
+                (max(1, int(score_s.get_width() * sc)),
+                 max(1, int(score_s.get_height()* sc))))
+
+        surf.blit(lbl_s,   (lx, row_cy - lbl_s.get_height()   // 2))
+        surf.blit(score_s, (rx - score_s.get_width(),
+                             row_cy - score_s.get_height() // 2))
+
+    # ── 總分行 ─────────────────────────────────────────────────
+    total_div_y = row_y0 + len(_REPORT_ROWS) * ROW_H - 4
+    total_cy    = row_y0 + len(_REPORT_ROWS) * ROW_H + ROW_H // 2
+
+    if should_show >= len(_REPORT_ROWS) + 1:
+        pygame.draw.line(surf, (180, 148, 108),
+                         (CARD_X + 20, total_div_y),
+                         (CARD_X + CARD_W - 20, total_div_y), 1)
+
+        age_t      = elapsed - len(_REPORT_ROWS) * _ESTAMP_INT
+        score_col  = GREEN if final_score >= 60 else RED
+        lbl_t      = fb_lg.render("加權總分", True, TITLE)
+        score_t    = fb_xl.render(f"{final_score:.1f} 分", True, score_col)
+
+        if 0 < age_t < _EPOP_MS:
+            sc = 1.0 + 0.35 * (1.0 - age_t / _EPOP_MS)
+            lbl_t   = pygame.transform.smoothscale(lbl_t,
+                (max(1, int(lbl_t.get_width()   * sc)),
+                 max(1, int(lbl_t.get_height()  * sc))))
+            score_t = pygame.transform.smoothscale(score_t,
+                (max(1, int(score_t.get_width() * sc)),
+                 max(1, int(score_t.get_height()* sc))))
+
+        surf.blit(lbl_t,   (lx, total_cy - lbl_t.get_height()   // 2))
+        surf.blit(score_t, (rx - score_t.get_width(),
+                             total_cy - score_t.get_height() // 2))
+
+    # ── 最終自我滿意度行 ────────────────────────────────────────
+    sat_div_y = row_y0 + (len(_REPORT_ROWS) + 1) * ROW_H - 4
+    sat_cy    = row_y0 + (len(_REPORT_ROWS) + 1) * ROW_H + ROW_H // 2
+    satisfaction = int((data or {}).get("satisfaction", 0))
+
+    if should_show >= _N_STAMPS:
+        pygame.draw.line(surf, (180, 148, 108),
+                         (CARD_X + 20, sat_div_y),
+                         (CARD_X + CARD_W - 20, sat_div_y), 1)
+
+        age_s     = elapsed - (len(_REPORT_ROWS) + 1) * _ESTAMP_INT
+        sat_col   = GREEN if satisfaction >= 60 else RED
+        lbl_s2    = fb.render("自我滿意度", True, TITLE)
+        score_s2  = fb_lg.render(f"{satisfaction} 分", True, sat_col)
+
+        if 0 < age_s < _EPOP_MS:
+            sc = 1.0 + 0.35 * (1.0 - age_s / _EPOP_MS)
+            lbl_s2  = pygame.transform.smoothscale(lbl_s2,
+                (max(1, int(lbl_s2.get_width()  * sc)),
+                 max(1, int(lbl_s2.get_height() * sc))))
+            score_s2 = pygame.transform.smoothscale(score_s2,
+                (max(1, int(score_s2.get_width()  * sc)),
+                 max(1, int(score_s2.get_height() * sc))))
+
+        surf.blit(lbl_s2,  (lx, sat_cy - lbl_s2.get_height()  // 2))
+        surf.blit(score_s2, (rx - score_s2.get_width(),
+                              sat_cy - score_s2.get_height() // 2))
+
+    # ── 評語 ───────────────────────────────────────────────────
+    comment_show_t = _N_STAMPS * _ESTAMP_INT + _ECOMMENT
+    if elapsed >= comment_show_t and comment:
+        cmt_s = fb_lg.render(comment, True, TITLE)
+        cmt_y = sat_cy + ROW_H // 2 + 6
+        surf.blit(cmt_s, (cx - cmt_s.get_width() // 2, cmt_y))
+
+    # ── 再來一次 圓形按鈕（米灰色，同開始畫面設計） ───────────────
+    btn_rect = None
+    btn_show_t = comment_show_t + _EBTN_DELAY
+
+    if elapsed >= btn_show_t:
+        BTN_R  = 50
+        btn_cx = WIN_W // 2
+        btn_cy = CARD_Y + CARD_H + (WIN_H - CARD_Y - CARD_H) // 2
+
+        _bdx  = mpos[0] - btn_cx
+        _bdy  = mpos[1] - btn_cy
+        hover = (_bdx * _bdx + _bdy * _bdy) <= BTN_R * BTN_R
+
+        # 光環
+        halo_sf = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
+        pygame.draw.circle(halo_sf, (*_END_BTN_COL, 40),  (btn_cx, btn_cy), BTN_R + 16, 14)
+        pygame.draw.circle(halo_sf, (*_END_BTN_COL, 18),  (btn_cx, btn_cy), BTN_R + 32, 6)
+        ang0 = (ms * 0.001) * math.tau
+        for i in range(16):
+            ang = ang0 + i * math.tau / 16
+            px  = btn_cx + int(math.cos(ang) * (BTN_R + 22))
+            py  = btn_cy + int(math.sin(ang) * (BTN_R + 22))
+            alp = max(0, min(255, 155 + int(90 * math.sin(ang * 2 + ms * 0.0015))))
+            pygame.draw.circle(halo_sf, (*_END_BTN_COL, alp), (px, py), 3)
+        surf.blit(halo_sf, (0, 0))
+
+        _soft_shadow_circle(surf, btn_cx, btn_cy, BTN_R, alpha=55)
+        _premium_circle(surf, btn_cx, btn_cy, BTN_R, _END_BTN_COL, hover, key=("end_btn",))
+
+        t1 = fb.render("再來", True, (255, 255, 255))
+        t2 = fb.render("一次", True, (255, 255, 255))
+        lh = t1.get_height()
+        surf.blit(t1, (btn_cx - t1.get_width() // 2, btn_cy - lh - 2))
+        surf.blit(t2, (btn_cx - t2.get_width() // 2, btn_cy + 2))
+
+        btn_rect = pygame.Rect(btn_cx - BTN_R, btn_cy - BTN_R, BTN_R * 2, BTN_R * 2)
+
+    return btn_rect
 
 
 # 明確宣告所有名稱可被 import * 匯出（含 _ 前綴）

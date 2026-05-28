@@ -3626,8 +3626,8 @@ def _draw_action_panel(surf, fm, fs, mode, choices, log, prompt, tvalue, rect, t
             row = i // 2
             br    = pygame.Rect(px + col * (bw + 12), py + row * (bh + 8), bw, bh)
             hover = br.collidepoint(mpos)
-            dr    = _premium_btn(surf, br, BTN_N, hover, radius=12)
-            lt    = fb.render(label, True, PANEL)
+            dr    = _premium_btn(surf, br, (238, 210, 170), hover, radius=12)
+            lt    = fb.render(label, True, WHITE)
             surf.blit(lt, (dr.x + (dr.width  - lt.get_width())  // 2,
                            dr.y + (dr.height - lt.get_height()) // 2))
             content_rects.append((br, i + 1))
@@ -4437,8 +4437,21 @@ def _draw_start(surf, fm, fl, mpos):
     surf.blit(t1, (btn_cx - t1.get_width() // 2, btn_cy - lh - 2))
     surf.blit(t2, (btn_cx - t2.get_width() // 2, btn_cy + 2))
 
-    # 回傳外接方形 Rect（供 collidepoint 命中判定使用）
-    return pygame.Rect(btn_cx - BTN_R, btn_cy - BTN_R, BTN_R * 2, BTN_R * 2)
+    # ── DEV 跳關按鈕（右下角小按鈕，隨時可移除）──────────────
+    fb      = _font_bold[0] or fm
+    DEV_W, DEV_H = 68, 26
+    dev_x   = WIN_W - DEV_W - 14
+    dev_y   = WIN_H - DEV_H - 14
+    dev_r   = pygame.Rect(dev_x, dev_y, DEV_W, DEV_H)
+    dev_hov = dev_r.collidepoint(mpos)
+    dev_bg  = (120, 60, 175) if dev_hov else (75, 38, 120)
+    pygame.draw.rect(surf, dev_bg, dev_r, border_radius=6)
+    dev_t   = fb.render("DEV", True, (220, 195, 255))
+    surf.blit(dev_t, (dev_x + (DEV_W - dev_t.get_width())  // 2,
+                      dev_y + (DEV_H - dev_t.get_height()) // 2))
+
+    # 回傳 (開始按鈕 Rect, DEV 按鈕 Rect)（供 collidepoint 命中判定使用）
+    return pygame.Rect(btn_cx - BTN_R, btn_cy - BTN_R, BTN_R * 2, BTN_R * 2), dev_r
 
 def _draw_end(surf, fm, fs, lr, mpos):
     """結束畫面：保留 log（可看最終成績）+ 再來一次按鈕。"""

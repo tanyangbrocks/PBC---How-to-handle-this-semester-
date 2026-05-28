@@ -22,6 +22,20 @@ from ui_draw_ap   import *
 def notify(msg: str):
     """取代 print()：把訊息推入 UI 訊息區。"""
     _cmd_q.put(("msg", str(msg)))
+    if _notify_capturing[0]:
+        _notify_capture_buf.append(str(msg))
+
+def start_notify_capture() -> None:
+    """開始捕捉後續 notify 訊息（同時仍會推入 log）。遊戲執行緒專用。"""
+    _notify_capture_buf.clear()
+    _notify_capturing[0] = True
+
+def stop_notify_capture() -> list:
+    """停止捕捉，回傳已捕捉的訊息列表（去除前後空白與空行）。"""
+    _notify_capturing[0] = False
+    result = [m.strip() for m in _notify_capture_buf if m.strip()]
+    _notify_capture_buf.clear()
+    return result
 
 def set_player(player):
     """把角色物件傳給 UI，讓狀態欄即時更新。"""
@@ -73,20 +87,22 @@ def ask_text(prompt: str, default: str = "") -> str:
     return _reply_val[0]
 
 def ask_yn(prompt: str,
-           yes_label: str = "是",
-           no_label:  str = "否",
-           show_ctx:  bool = True) -> bool:
+           yes_label:  str = "是",
+           no_label:   str = "否",
+           show_ctx:   bool = True,
+           yes_color=None,
+           no_color=None) -> bool:
     """取代 y/N 型的 input()：顯示自定義標籤按鈕，回傳 True / False。
     show_ctx=False 時不附帶 log 背景，只顯示 prompt 本身。"""
-    _cmd_q.put(("yn", prompt, yes_label, no_label, show_ctx))
+    _cmd_q.put(("yn", prompt, yes_label, no_label, show_ctx, yes_color, no_color))
     _reply_event.clear()
     _reply_event.wait()
     return _reply_val[0]
 
-def ask_ok(text: str) -> None:
-    """顯示突發事件通知彈窗（單一「確認」按鈕），block 直到玩家確認。
+def ask_ok(text: str, btn_label: str = "確認") -> None:
+    """顯示突發事件通知彈窗（單一按鈕），block 直到玩家確認。
     text 格式：「前綴：【事件名】\\n描述文字」"""
-    _cmd_q.put(("event_ok", text))
+    _cmd_q.put(("event_ok", text, btn_label))
     _reply_event.clear()
     _reply_event.wait()
 
@@ -124,6 +140,10 @@ def notify_end():
     """遊戲結束後呼叫：切換到結束畫面。"""
     _cmd_q.put(("phase", "end"))
 
+def set_settlement_data(data: dict) -> None:
+    """傳入期末結算資料（grades / final_score / comment）供成績單畫面使用。"""
+    _cmd_q.put(("settlement_data", data))
+
 def wait_restart():
     """阻塞直到玩家點擊「再來一次」。"""
     _restart_event.clear()
@@ -148,6 +168,28 @@ def trigger_time_overflow_warning():
 def trigger_screen_shake() -> None:
     """觸發全螢幕短暫劇烈晃動效果（突發事件出現時）。非阻塞。"""
     _cmd_q.put(("screen_shake",))
+
+def play_event_sfx(is_positive: bool) -> None:
+    """突發事件觸發時播放對應音效（可從遊戲執行緒直接呼叫）。"""
+    if is_positive:
+        snd = _sfx.get("event_good")
+        ch  = _event_ch[0]
+        if snd and ch:
+            try:
+                ch.play(snd)   # 專用保留頻道，不會被其他音效搶占
+            except Exception:
+                pass
+        else:
+            _play_sfx("event_good")
+    else:
+        _play_sfx("event_bad")
+
+def was_debug_skip() -> bool:
+    """若本次開始是透過 DEV 跳關按鈕觸發，回傳 True 並清除旗標。"""
+    if _debug_skip_event.is_set():
+        _debug_skip_event.clear()
+        return True
+    return False
 
 def set_roll_call(course: str) -> None:
     """設定本週點名科目，在成績面板左側顯示警示便利貼。非阻塞。"""
@@ -290,13 +332,14 @@ def notify_grade_report(items: list):
     _modal_event.clear()
     _modal_event.wait()
 
-def open_shop_ui(items: list) -> None:
+def open_shop_ui(items: list, event_sys=None) -> None:
     """
     開啟道具店圖形化介面，阻塞遊戲執行緒直到玩家離開商店。
     購買邏輯由 pygame 主執行緒的事件處理器直接套用（遊戲執行緒此時已暫停）。
     """
     _shop_items.clear()
     _shop_items.extend(items)
+    _shop_event_sys[0]  = event_sys
     _shop_hover_idx[0]  = -1
     _shop_msg[0]        = ""
     _shop_msg_time[0]   = 0
@@ -495,6 +538,8 @@ def run_ui():
     # ── 初始化音效 ────────────────────────────────────────────
     try:
         pygame.mixer.init()
+        pygame.mixer.set_reserved(1)          # channel 0 保留給突發事件正面音效
+        _event_ch[0] = pygame.mixer.Channel(0)
         _se_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                "asset", "audio", "se")
         def _ld(fn):
@@ -507,13 +552,75 @@ def run_ui():
         _sfx["action"]      = _ld("attack1.mp3")
         _sfx["ui_click"]    = _ld("poka.mp3")
         _sfx["back"]        = _ld("universfield-interface-03-277552.mp3")
-        _sfx["damage6"]     = _ld("damage6.wav")
+        _sfx["damage6"]     = _ld("damage6.mp3")
+        _sfx["cash"]        = _ld("cash.mp3")
+        _sfx["hover"]       = _ld("liecio-menu-buttom-190020 (1) (mp3cut.net).mp3")
+        _sfx["event_good"]  = _ld("freesound_community-good-6081.mp3")
+        _sfx["event_bad"]   = _ld("u_3bsnvt0dsu-spin-fail-295088.mp3")
     except Exception:
         pass
 
     screen = pygame.display.set_mode((WIN_W, WIN_H))
     pygame.display.set_caption("如何渡過這學期？")
     clock  = pygame.time.Clock()
+
+    # ── 自訂游標（pen_mouse.webp）────────────────────────────────
+    pygame.mouse.set_visible(False)
+    _cursor_normal   = None
+    _cursor_pressed  = None
+    _cursor_glow_pad = 0
+    _cursor_gball    = None   # 筆尖奶茶色光球 Surface
+    _cursor_gball_r  = 0      # 光球在 Surface 中的中心偏移量
+
+    def _build_cursor_with_glow(src):
+        """回傳 (composite_surf, pad)。
+        composite 中心即原圖，四周有白色柔光暈；pad 為光暈擴張 px 數。"""
+        pad  = 8
+        w, h = src.get_size()
+        comp = pygame.Surface((w + pad * 2, h + pad * 2), pygame.SRCALPHA)
+        # 白色版：保留原始 alpha，RGB 全設為白
+        white = src.copy()
+        white.fill((255, 255, 255), special_flags=pygame.BLEND_RGB_MAX)
+        # 三層光暈（由外而內：漸放大 + 降低 alpha）
+        for expand, glow_a in [(6, 18), (4, 40), (2, 65)]:
+            gw, gh = w + expand * 2, h + expand * 2
+            glow_layer = pygame.transform.smoothscale(white, (gw, gh))
+            # 將 glow_layer 的 alpha 壓縮為 glow_a / 255
+            a_mask = pygame.Surface((gw, gh), pygame.SRCALPHA)
+            a_mask.fill((255, 255, 255, glow_a))
+            glow_layer.blit(a_mask, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+            comp.blit(glow_layer, (pad - expand, pad - expand))
+        # 原圖疊在最上層
+        comp.blit(src, (pad, pad))
+        return comp, pad
+
+    try:
+        _cur_raw = pygame.image.load(
+            os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                         "asset", "picture", "small_object", "pen_mouse.webp")
+        ).convert_alpha()
+        _cur_h   = min(_cur_raw.get_height(), 40)
+        _cur_w   = int(_cur_raw.get_width() * _cur_h / _cur_raw.get_height())
+        _cur_base = pygame.transform.smoothscale(_cur_raw, (_cur_w, _cur_h))
+        _cursor_normal,  _cursor_glow_pad = _build_cursor_with_glow(_cur_base)
+        # 按下版：先染奶茶色，再包光暈
+        _cur_press = _cur_base.copy()
+        _cur_press.fill((200, 155, 110), special_flags=pygame.BLEND_RGB_MULT)
+        _cursor_pressed, _ = _build_cursor_with_glow(_cur_press)
+        # ── 筆尖奶茶色光球（預建，永久顯示於筆尖） ──────────────
+        _gb_r  = 20                       # 光球半徑（px）
+        _gb_d  = _gb_r * 2 + 2
+        _cursor_gball   = pygame.Surface((_gb_d, _gb_d), pygame.SRCALPHA)
+        _cursor_gball_r = _gb_r + 1       # Surface 內的中心座標
+        _mt = (215, 170, 118)             # 奶茶色
+        for _gr, _ga in [(_gb_r,       12),
+                         (int(_gb_r * 0.72), 30),
+                         (int(_gb_r * 0.48), 58),
+                         (int(_gb_r * 0.28), 95)]:
+            pygame.draw.circle(_cursor_gball, (*_mt, _ga),
+                               (_cursor_gball_r, _cursor_gball_r), _gr)
+    except Exception:
+        pass
 
     fl = _get_font(40)   # 開始 / 結束畫面標題大字
     fm = _get_font(22)
@@ -603,6 +710,7 @@ def run_ui():
         return (pos[0] - _fs_off[0], pos[1] - _fs_off[1])
 
     running = True
+    _prev_hov_btns: set = set()   # 上一幀 hover 中的按鈕 key 集合（用於首次進入偵測）
     while running:
         mpos = _tpos(pygame.mouse.get_pos())
         # 道具店按鈕是否可點擊：只有在行動選單中且選項包含道具店時才亮起
@@ -637,17 +745,21 @@ def run_ui():
                 _choices.extend(cmd[1])
                 _mode[0] = "choices"
             elif tag == "yn":
-                _prompt[0]      = cmd[1]
-                _yn_labels[0]   = cmd[2] if len(cmd) > 2 else "是"
-                _yn_labels[1]   = cmd[3] if len(cmd) > 3 else "否"
-                _yn_show_ctx[0] = cmd[4] if len(cmd) > 4 else True
+                _prompt[0]       = cmd[1]
+                _yn_labels[0]    = cmd[2] if len(cmd) > 2 else "是"
+                _yn_labels[1]    = cmd[3] if len(cmd) > 3 else "否"
+                _yn_show_ctx[0]  = cmd[4] if len(cmd) > 4 else True
+                _yn_yes_color[0] = cmd[5] if len(cmd) > 5 else None
+                _yn_no_color[0]  = cmd[6] if len(cmd) > 6 else None
                 _mode[0] = "yn"
             elif tag == "event_ok":
                 _event_ok_text[0]         = cmd[1]
+                _event_ok_btn_label[0]    = cmd[2] if len(cmd) > 2 else "確認"
                 _event_ok_border_color[0] = None
                 _mode[0]                  = "event_ok"
             elif tag == "event_ok_col":
                 _event_ok_text[0]         = cmd[1]
+                _event_ok_btn_label[0]    = "確認"
                 _event_ok_border_color[0] = cmd[2]
                 _mode[0]                  = "event_ok"
             elif tag == "text":
@@ -655,6 +767,8 @@ def run_ui():
                 _tvalue[0] = cmd[2] if len(cmd) > 2 else ""
                 _mode[0] = "text"
                 pygame.key.start_text_input()  # Windows IME 必須主動開啟
+            elif tag == "settlement_data":
+                _settlement_data[0] = cmd[1]
             elif tag == "phase":
                 _phase[0] = cmd[1]
                 if cmd[1] == "shop":          # 道具店：觸發由上而下滑入
@@ -664,6 +778,10 @@ def run_ui():
                     _request_bgm("Music-Aether.mp3")
                 elif cmd[1] == "end":
                     _request_bgm(None)
+                    _end_sub[0]          = "fade_out_1"
+                    _end_t0[0]           = pygame.time.get_ticks()
+                    _end_stamps_shown[0] = 0
+                    _stamp_shake_t0[0]   = 0
                 elif cmd[1] == "game" and _weather_type[0] is None:
                     _weather_reset()   # 首次進入遊戲階段時確保天氣已初始化
             elif tag == "ripple":
@@ -682,6 +800,7 @@ def run_ui():
                 _tvalue[0] = ""
                 _scroll[0] = 0
                 _composing[0] = ""
+                _settlement_data[0] = None
                 _request_bgm("Music-Morning_Rain.mp3")
             elif tag == "cc_name":
                 _cc_mode[0]      = "name"
@@ -723,7 +842,12 @@ def run_ui():
                 _cc_confetti.clear()
                 _cc_shake_end[0] = 0
                 _cc_mode[0]      = "slot"
-                # 第一槽立刻開始旋轉
+                # 第一槽立刻開始旋轉，並預算目標 offset
+                _n_sp = len(_SLOT_SPIN_NAMES)
+                _r0   = results[0]
+                _nm0  = _r0.get("name", "") if _r0 else ""
+                _ri0  = _SLOT_SPIN_NAMES.index(_nm0) if _nm0 in _SLOT_SPIN_NAMES else 0
+                _slot_target_offsets[0] = (3 * _n_sp + (_ri0 - 1) % _n_sp) * 62
                 _slot_phase[0]    = "spinning"
                 _slot_start_t[0]  = pygame.time.get_ticks()
             elif tag == "cc_summary":
@@ -801,6 +925,7 @@ def run_ui():
 
         btn_rects      = []
         start_btn      = None
+        _debug_btn     = None
         end_btn        = None
         end_week_btn   = None
         shop_btn_rect  = None
@@ -809,7 +934,7 @@ def run_ui():
         shop_exit_btn  = None
 
         if _phase[0] == "start":
-            start_btn = _draw_start(screen, fm, fl, mpos)
+            start_btn, _debug_btn = _draw_start(screen, fm, fl, mpos)
         elif _phase[0] == "shop":
             # ── 計算道具店滑動偏移 ──────────────────────────────
             _sdir = _shop_slide_dir[0]
@@ -846,7 +971,7 @@ def run_ui():
                 shop_buy_rects, shop_exit_btn = _draw_shop(
                     screen, fm, fs, fl, _shop_items, _player[0], mpos)
         elif _phase[0] == "end":
-            end_btn = _draw_end(screen, fm, fs, lr, mpos)
+            end_btn = _draw_end(screen, fm, fs, mpos)
         elif _phase[0] == "char_create":
             cm = _cc_mode[0]
             if cm == "name":
@@ -953,8 +1078,15 @@ def run_ui():
             # 底部行動面板：中央彈窗已啟用時改用空白選項，避免重複顯示
             _panel_mode    = "choices" if _cp_active else _mode[0]
             _panel_choices = []        if _cp_active else _choices
+            # 全螢幕科目／翹課／停修彈窗開啟時，隱藏底部 log 避免透出雜訊
+            _popup_hides_log = (
+                _subj_popup_active[0]
+                or _skip_popup_active[0]
+                or _withdrawal_popup_active[0]
+            )
             btn_rects, end_week_btn = _draw_action_panel(
-                screen, fm, fs, _panel_mode, _panel_choices, _log,
+                screen, fm, fs, _panel_mode, _panel_choices,
+                [] if _popup_hides_log else _log,
                 _prompt, _tvalue, ar, _time_units[0], mpos)
             # 考前壓力特效（邊框顫抖 + 底色微微泛紅）：疊在所有面板之上、彈窗之下
             _draw_exam_stress_fx(screen)
@@ -1050,6 +1182,30 @@ def run_ui():
             screen.fill((0, 0, 0))
             screen.blit(_shk_copy, (_sdx, _sdy))
 
+        # ── 印章晃動（成績單專用，幅度較輕）────────────────────
+        _ssx, _ssy = _get_stamp_shake_offset()
+        if _ssx != 0 or _ssy != 0:
+            _shk_copy2 = screen.copy()
+            screen.fill((248, 238, 220))
+            screen.blit(_shk_copy2, (_ssx, _ssy))
+
+        # ── 按鈕 hover 音效（首次進入時播放一次）────────────────
+        _curr_hov_btns = {k for k, v in _anim_hover.items() if v > 0}
+        if _curr_hov_btns - _prev_hov_btns:
+            _play_sfx("hover")
+        _prev_hov_btns = _curr_hov_btns
+
+        # ── 自訂游標（所有層最頂端，不受震動偏移影響）──────────
+        if _cursor_normal is not None:
+            _cur_img = _cursor_pressed if pygame.mouse.get_pressed()[0] else _cursor_normal
+            # 筆尖奶茶色光球（畫在游標之下，中心對齊筆尖）
+            if _cursor_gball is not None:
+                screen.blit(_cursor_gball,
+                            (mpos[0] - _cursor_gball_r,
+                             mpos[1] - _cursor_gball_r))
+            screen.blit(_cur_img, (mpos[0] - _cursor_glow_pad,
+                                   mpos[1] - _cur_img.get_height() + _cursor_glow_pad))
+
         pygame.display.flip()
 
         # ── pygame 事件 ───────────────────────────────────────
@@ -1133,6 +1289,11 @@ def run_ui():
                         _click_reg[(start_btn.centerx, start_btn.centery)] = pygame.time.get_ticks()
                         _phase[0] = "game"
                         _start_event.set()
+                    elif _debug_btn and _debug_btn.collidepoint(_tpos(ev.pos)):
+                        _play_sfx("ui_click")
+                        _phase[0] = "game"
+                        _debug_skip_event.set()
+                        _start_event.set()
                 elif _phase[0] == "shop":
                     # 離開按鈕：僅在靜止狀態（非動畫中）才響應
                     if (shop_exit_btn and shop_exit_btn.collidepoint(_tpos(ev.pos))
@@ -1197,6 +1358,7 @@ def run_ui():
                                 _mode[0] = None
                                 _event_ok_popup_rects.clear()
                                 _event_ok_border_color[0] = None
+                                _event_ok_btn_label[0]    = "確認"
                                 _reply_event.set()
                                 break
                         continue   # 彈窗開啟時阻擋所有點擊
@@ -1331,6 +1493,12 @@ def run_ui():
                                 _mode[0] = None
                                 _exam_ready_label[0] = ""
                                 _reply_event.set()
+
+                    # 若點到停用中的特殊行動按鈕（cooldown 中），播放 damage6
+                    for _dsr in (_cc_btn_cache.get("sp_disabled_rects") or []):
+                        if _dsr.collidepoint(_tpos(ev.pos)):
+                            _play_sfx("damage6")
+                            break
 
             elif ev.type == pygame.MOUSEWHEEL:
                 # 道具店商品格捲動（向上滾 = 往下看更多商品）

@@ -15,12 +15,12 @@ from character import Character
 from event_system import EventSystem
 from skill_system import SkillSystem
 from shop_V03 import Shop
-from ui import notify, ask_yn, ask_choice, ask_text, set_player, \
+from ui import notify, ask_ok, ask_yn, ask_choice, ask_text, set_player, \
                notify_timetable, notify_grade_report, set_time, show_action_result, \
                ask_subject_popup, trigger_time_overflow_warning, tell_story, \
                show_extra_event_popup, ask_exam_start, set_roll_call, clear_roll_call, \
                set_roll_call_attended, set_roll_call_xed, set_special_disabled, \
-               ask_skip_class_popup, ask_withdrawal_popup
+               ask_skip_class_popup, ask_withdrawal_popup, set_settlement_data
 
 
 # ── 點名事件觸發週次 ─────────────────────────────────────────────
@@ -165,10 +165,11 @@ class TurnEngine:
             self.event_sys.roll_green_hat(week)   # 被戴綠帽：週末獨立觸發
 
         self.event_sys.tick_debuffs()             # 週末 debuff 計時（所有週）
+        game_over = player.is_game_over()         # 在週末結語回復滿足感前先擷取
         self._end_of_week_reflection(week)
         player.tick_status_effects()
 
-        return player.is_game_over()
+        return game_over
 
     # ============================================================
     # 普通週
@@ -316,32 +317,16 @@ class TurnEngine:
                 trigger_time_overflow_warning()   # 震動 + damage6
                 confirm = ask_yn(
                     "本週時間已耗盡",
-                    yes_label="強行繼續",
+                    yes_label="稍等一下",
                     no_label="結束本週",
                     show_ctx=False,
+                    yes_color=(212, 182, 148),   # DARK_GRAY — 原「結束本週」米沙色
+                    no_color=(215, 68, 62),       # RED
                 )
                 if not confirm:
                     break
-                # 玩家確認強行繼續：執行動作後立刻結束本週（時間不顯示負數）
-                if action["stamina_cost"] > player.stamina:
-                    confirm2 = ask_yn(
-                        f"體力剩餘 {player.stamina} 點，執行此行動可能會導致生病！",
-                        yes_label="仍要執行",
-                        no_label="還是算了",
-                        show_ctx=False,
-                    )
-                    if not confirm2:
-                        continue
-                _chosen_subj = self._execute_action(action)
-                if action["id"] == "attend_class":
-                    attended_class = True
-                    if _chosen_subj:
-                        attended_this_week.add(_chosen_subj)
-                    # 點名週：若本週點名課已上 → 綠勾（且未被翹掉）
-                    if roll_call_course and not roll_call_skipped:
-                        if roll_call_course in attended_this_week:
-                            set_roll_call_attended(True)
-                self.event_sys.roll_event_after_action(week)   # 行動後突發事件
+                # 玩家選擇「稍等一下」：關閉視窗，不執行行動，回到行動選單
+                continue
                 # 普通行動消耗一格時間 → 飽腹倒數
                 if full_timer > 0:
                     full_timer -= 1
@@ -396,6 +381,9 @@ class TurnEngine:
                     notify(f"⚠️  【{roll_call_course}】翹課缺席！課堂參與度 -10。")
                 else:
                     notify(f"⚠️  【{roll_call_course}】點名缺席！課堂參與度 -10。")
+                ask_ok(
+                    f"⚠️ 你沒有去【{roll_call_course}】點名，被扣出席分！\n課堂參與度 -10"
+                )
             clear_roll_call()
 
     # ============================================================
@@ -404,13 +392,15 @@ class TurnEngine:
 
     # 固定課表資料（第一週展示）
     _WEEK1_TIMETABLE = [
-        {"day": "週一", "name": "統計學",       "time": "08:10–09:00", "credits": 3},
-        {"day": "週一", "name": "管理學",       "time": "10:20–12:10", "credits": 3},
-        {"day": "週二", "name": "商管程式設計", "time": "13:20–16:20", "credits": 3},
-        {"day": "週三", "name": "統計學",       "time": "08:10–09:00", "credits": 0},
-        {"day": "週三", "name": "會計學",       "time": "10:20–12:10", "credits": 3},
-        {"day": "週四", "name": "經濟學",       "time": "09:10–12:10", "credits": 4},
-        {"day": "週五", "name": "管理學",       "time": "13:20–15:10", "credits": 0},
+        {"day": "週一", "name": "個體經濟學下", "time": "09:10–12:10", "credits": 3},
+        {"day": "週一", "name": "統計學",       "time": "15:10–18:10", "credits": 3},
+        {"day": "週一", "name": "商管程式設計", "time": "19:10–22:10", "credits": 3},
+        {"day": "週二", "name": "社會學甲下",   "time": "09:10–12:10", "credits": 3},
+        {"day": "週二", "name": "會計學（二）", "time": "15:10–18:10", "credits": 3},
+        {"day": "週三", "name": "哲學概論",     "time": "10:10–12:10", "credits": 2},
+        {"day": "週三", "name": "全球品牌管理", "time": "15:10–18:10", "credits": 3},
+        {"day": "週五", "name": "政治學二",     "time": "13:10–16:10", "credits": 3},
+        {"day": "週四", "name": "看電影學愛情", "time": "19:10–22:10", "credits": 2},
     ]
 
     # 第二週加簽課程選項
@@ -1008,48 +998,31 @@ class TurnEngine:
         notify(f"  本週狀態：{outcome_text}")
         player.change_satisfaction(satisfaction_change)
 
+        # ── 劇情對話框：玩家點擊後才進入下週 ──────────────────
+        story_lines = []
+        if quote:
+            story_lines.append(f"「{quote}」")
+        story_lines.append(f"「{outcome_text}」")
+        tell_story(story_lines)
+
     def final_settlement(self):
         player      = self.player
         final_score = player.calculate_final_score()
 
-        # print("\n" + "=" * 50)  # 因套用pygame而調整
-        notify("\n" + "=" * 50)
-        # print("  🎓 學期結束！最終成績結算")  # 因套用pygame而調整
-        notify("  🎓 學期結束！最終成績結算")
-        # print("=" * 50)  # 因套用pygame而調整
-        notify("=" * 50)
-        # print(f"  參與度 (10%)：{player.grades['參與度']:.1f}")  # 因套用pygame而調整
-        notify(f"  參與度 (10%)：{player.grades['參與度']:.1f}")
-        # print(f"  作業   (20%)：{player.grades['作業']:.1f}")  # 因套用pygame而調整
-        notify(f"  作業   (20%)：{player.grades['作業']:.1f}")
-        # print(f"  小考   (10%)：{player.grades['小考']:.1f}")  # 因套用pygame而調整
-        notify(f"  小考   (10%)：{player.grades['小考']:.1f}")
-        # print(f"  期中   (30%)：{player.grades['期中']:.1f}")  # 因套用pygame而調整
-        notify(f"  期中   (30%)：{player.grades['期中']:.1f}")
-        # print(f"  期末   (30%)：{player.grades['期末']:.1f}")  # 因套用pygame而調整
-        notify(f"  期末   (30%)：{player.grades['期末']:.1f}")
-        # print("  ─────────────────")  # 因套用pygame而調整
-        notify("  ─────────────────")
-        # print(f"  加權總分：{final_score:.1f} 分")  # 因套用pygame而調整
-        notify(f"  加權總分：{final_score:.1f} 分")
-        notify("")
-
+        # ── 決定評語 ────────────────────────────────────────────
         if final_score >= 80 and player.satisfaction >= 70:
-            # print("  🌟 平衡型結局：成績漂亮，身心狀態也維持得很好。")  # 因套用pygame而調整
-            notify("  🌟 平衡型結局：成績漂亮，身心狀態也維持得很好。")
+            comment = "平衡型結局：成績漂亮，身心狀態也維持得很好。"
         elif final_score >= 60 and player.satisfaction >= 60:
-            # print("  🎉 及格快樂結局：你成功渡過了這學期，可以放暑假了！")  # 因套用pygame而調整
-            notify("  🎉 及格快樂結局：你成功渡過了這學期，可以放暑假了！")
+            comment = "及格快樂結局：你成功渡過了這學期，可以放暑假了！"
         elif final_score >= 60 and player.satisfaction < 60:
-            # print("  🫠 成績過了但身心崩潰：你及格了，但也快沒電了。")  # 因套用pygame而調整
-            notify("  🫠 成績過了但身心崩潰：你及格了，但也快沒電了。")
+            comment = "成績過了但身心崩潰：你及格了，但也快沒電了。"
         else:
-            # print("  💸 很遺憾……成績未達及格，明年準備重修吧。")  # 因套用pygame而調整
-            notify("  💸 很遺憾……成績未達及格，明年準備重修吧。")
+            comment = "很遺憾……成績未達及格，明年準備重修吧。"
 
-        # print(f"\n  最終自我滿足度：{player.satisfaction}")  # 因套用pygame而調整
-        notify(f"\n  最終自我滿足度：{player.satisfaction}")
-        # print(f"  剩餘金錢：{player.money} 元")  # 因套用pygame而調整
-        notify(f"  剩餘金錢：{player.money} 元")
-        # print("=" * 50)  # 因套用pygame而調整
-        notify("=" * 50)
+        # ── 傳送結算資料給 UI（成績單畫面使用）────────────────
+        set_settlement_data({
+            "grades":       dict(player.grades),
+            "final_score":  final_score,
+            "satisfaction": player.satisfaction,
+            "comment":      comment,
+        })
