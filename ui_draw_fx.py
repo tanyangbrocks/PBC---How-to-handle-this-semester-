@@ -632,7 +632,7 @@ def _draw_character_art(surf, rect):
     rect 為整個立繪區的 Rect（STATUS_H..STATUS_H+CHAR_H, 全寬）。
     """
     key = _get_portrait_key()
-    _portrait_switch(key, rect.width, rect.height)
+    _portrait_switch(key, rect.width, int(rect.height * PORTRAIT_DISPLAY_H_FACTOR))
 
     now = pygame.time.get_ticks()
     if _portrait_fade_t0[0] > 0:
@@ -646,7 +646,7 @@ def _draw_character_art(surf, rect):
         pw = p_surf.get_width()
         ph = p_surf.get_height()
         px = rect.x + (rect.width - pw) // 2
-        py = rect.y + rect.height - ph   # 底部對齊
+        py = rect.y + PORTRAIT_TOP_PAD   # 頂部對齊，頭部距頂 15px
         if alpha < 255:
             tmp = p_surf.copy()
             tmp.set_alpha(alpha)
@@ -882,8 +882,22 @@ def _draw_start(surf, fm, fl, mpos):
     surf.blit(dev_t, (dev_x + (DEV_W - dev_t.get_width())  // 2,
                       dev_y + (DEV_H - dev_t.get_height()) // 2))
 
+    # ── 遊戲說明按鈕（開始按鈕下方）──────────────────────────
+    GD_W, GD_H = 100, 32
+    gd_x   = btn_cx - GD_W // 2
+    gd_y   = btn_cy + BTN_R + 18 + int(_fy)
+    gd_r   = pygame.Rect(gd_x, gd_y, GD_W, GD_H)
+    gd_hov = gd_r.collidepoint(mpos)
+    gd_bg  = (100, 78, 160) if gd_hov else (58, 44, 100)
+    pygame.draw.rect(surf, gd_bg, gd_r, border_radius=10)
+    pygame.draw.rect(surf, (140, 110, 210), gd_r, 1, border_radius=10)
+    gd_t   = fb.render("遊戲說明", True, (230, 215, 255))
+    surf.blit(gd_t, (gd_x + (GD_W - gd_t.get_width())  // 2,
+                     gd_y + (GD_H - gd_t.get_height()) // 2))
+
     # 回傳外接方形 Rect（供 collidepoint 命中判定使用）
-    return pygame.Rect(btn_cx - BTN_R, btn_cy - BTN_R, BTN_R * 2, BTN_R * 2), dev_r
+    return (pygame.Rect(btn_cx - BTN_R, btn_cy - BTN_R, BTN_R * 2, BTN_R * 2),
+            dev_r, gd_r)
 
 # ── 結算畫面計時常數 ──────────────────────────────────────────
 _EFADE_MS   = 600    # 淡出 / 淡入各 600ms
@@ -1052,6 +1066,8 @@ def _draw_end_report(surf, fm, fs, mpos, data, ms, elapsed):
     final_score = (data or {}).get("final_score",  0.0)
     comment     = (data or {}).get("comment",      "")
 
+    comment_show_t = _N_STAMPS * _ESTAMP_INT + _ECOMMENT   # 評語出現時間點（提前計算供背景使用）
+
     # ── 新出現的 stamp → 觸發晃動 + 音效 ─────────────────────
     should_show = min(_N_STAMPS, int(elapsed // _ESTAMP_INT))
     if should_show > _end_stamps_shown[0]:
@@ -1059,8 +1075,51 @@ def _draw_end_report(surf, fm, fs, mpos, data, ms, elapsed):
         _play_sfx("stamp_hit")
         _end_stamps_shown[0] = should_show
 
-    # ── 背景羊皮紙 + 主卡片 ────────────────────────────────────
-    surf.fill((248, 238, 220))
+    # ── 背景（評語出現前：羊皮紙；出現後：漸變到結局影片）──────
+    _FADE_BG_MS = 1200  # 背景淡入時間（ms）
+
+    if elapsed >= comment_show_t and comment and _end_bg_fade_t0[0] == 0:
+        if comment.startswith("平衡型結局"):
+            _end_bg_key[0] = "best"
+        elif comment.startswith("及格快樂結局"):
+            _end_bg_key[0] = "next"
+        elif comment.startswith("成績過了但身心崩潰"):
+            _end_bg_key[0] = "break"
+        else:
+            _end_bg_key[0] = "lose"
+        _end_bg_fade_t0[0] = ms
+
+    if _end_bg_fade_t0[0] > 0:
+        key = _end_bg_key[0]
+        cap = _end_bg_caps.get(key) if key else None
+        if cap is not None:
+            import cv2
+            mspf = 1000.0 / max(_end_bg_fps_map.get(key, 30.0), 1.0)
+            if _end_bg_surf[0] is None or ms - _end_bg_last[0] >= mspf:
+                ret, frame = cap.read()
+                if ret:
+                    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    fh, fw    = frame_rgb.shape[:2]
+                    vsf       = pygame.surfarray.make_surface(frame_rgb.transpose(1, 0, 2))
+                    if fw != WIN_W or fh != WIN_H:
+                        vsf = pygame.transform.scale(vsf, (WIN_W, WIN_H))
+                    _end_bg_surf[0] = vsf
+                    _end_bg_last[0] = ms
+                else:
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, 0)  # 循環播放
+
+        if _end_bg_surf[0] is not None:
+            surf.blit(_end_bg_surf[0], (0, 0))
+            fade_elapsed = max(0, ms - _end_bg_fade_t0[0])
+            t  = min(1.0, fade_elapsed / _FADE_BG_MS)
+            ov = pygame.Surface((WIN_W, WIN_H))
+            ov.fill((248, 238, 220))
+            ov.set_alpha(int(255 * (1.0 - t)))
+            surf.blit(ov, (0, 0))
+        else:
+            surf.fill((248, 238, 220))
+    else:
+        surf.fill((248, 238, 220))
 
     CARD_X, CARD_Y, CARD_W, CARD_H = 100, 12, 760, 590
     card_r = pygame.Rect(CARD_X, CARD_Y, CARD_W, CARD_H)
@@ -1171,7 +1230,6 @@ def _draw_end_report(surf, fm, fs, mpos, data, ms, elapsed):
                               sat_cy - score_s2.get_height() // 2))
 
     # ── 評語 ───────────────────────────────────────────────────
-    comment_show_t = _N_STAMPS * _ESTAMP_INT + _ECOMMENT
     if elapsed >= comment_show_t and comment:
         cmt_s = fb_lg.render(comment, True, TITLE)
         cmt_y = sat_cy + ROW_H // 2 + 6
