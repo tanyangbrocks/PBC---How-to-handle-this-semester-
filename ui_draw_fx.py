@@ -1288,9 +1288,8 @@ _GO_FADE_MS      = 600    # 淡出 / 淡入各 600ms
 _GO_WAIT_BTN     = 1000   # 背景出現後幾 ms 才顯示按鈕
 _GO_TEXT_FALL_MS = 2400   # 遺憾文字從頂端滑入所需時間（ms，cubic ease-out）
 
-def _build_go_silhouette() -> "pygame.Surface | None":
-    """將當前立繪 Surface 轉為純黑剪影（保留 alpha）。"""
-    p = _portrait_curr[0]
+def _build_go_silhouette(p: pygame.Surface) -> "pygame.Surface | None":
+    """將立繪 Surface 轉為純黑剪影（保留 alpha）。"""
     if p is None:
         return None
     sil = pygame.Surface(p.get_size(), pygame.SRCALPHA)
@@ -1300,20 +1299,32 @@ def _build_go_silhouette() -> "pygame.Surface | None":
     return sil
 
 def _draw_go_silhouette_with_noise(surf: pygame.Surface, rect: pygame.Rect) -> None:
-    """繪製人物黑色剪影，並在剪影內部疊加細緻雜訊（靜電感）。"""
-    p = _portrait_curr[0]
-    if p is None:
+    """繪製人物黑色剪影（原始比例、居中），並在剪影內部疊加細緻雜訊（靜電感）。"""
+    key = _get_portrait_key()
+    if not key:
         return
+
+    # 使用原始立繪（非 2.2x 放大版），等比縮放至立繪區
+    orig = _portrait_orig_load(key)
+    if orig is None:
+        return
+    ow, oh = orig.get_size()
+    scale  = min(rect.height / oh, rect.width / ow)
+    nw, nh = max(1, int(ow * scale)), max(1, int(oh * scale))
+
+    # 快取剪影（尺寸變動時重建）
     sil = _go_silhouette[0]
-    if sil is None:
-        sil = _build_go_silhouette()
+    if sil is None or sil.get_size() != (nw, nh):
+        p   = pygame.transform.smoothscale(orig, (nw, nh))
+        sil = _build_go_silhouette(p)
         _go_silhouette[0] = sil
     if sil is None:
         return
 
     pw, ph = sil.get_width(), sil.get_height()
+    # 水平 + 垂直居中
     blit_x = rect.x + (rect.width  - pw) // 2
-    blit_y = rect.y +  rect.height - ph       # 底部對齊（同遊戲立繪）
+    blit_y = rect.y + (rect.height - ph) // 2
 
     # 每幀重生雜訊（每 80ms 換一批 → 靜電閃動感）
     draw_sil = sil.copy()
