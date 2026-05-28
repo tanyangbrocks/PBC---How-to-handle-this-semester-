@@ -223,8 +223,9 @@ def _draw_event_ok_popup(surf: pygame.Surface, fm, fs, mpos) -> list:
     # 標題文字（居中，亮米色）
     hdr_ty = py + (HDR_H - len(title_lines) * q_lh_lg) // 2
     for line in title_lines:
-        ts = fb_lg.render(line, True, (255, 232, 190))
-        surf.blit(ts, (px + (popup_w - ts.get_width()) // 2, hdr_ty))
+        line_w = _measure_mixed(fb_lg, line)
+        _render_mixed(surf, fb_lg, line, (255, 232, 190),
+                      px + (popup_w - line_w) // 2, hdr_ty)
         hdr_ty += q_lh_lg
 
     # ── 邊框（可自定義顏色，用於額外事件彈窗）────────────────────
@@ -239,8 +240,7 @@ def _draw_event_ok_popup(surf: pygame.Surface, fm, fs, mpos) -> list:
     # ── 描述文字 ──────────────────────────────────────────────
     cur_y = py + HDR_H + PAD_TOP
     for line in body_lines:
-        ls = fb.render(line, True, WHITE)
-        surf.blit(ls, (px + PAD_X, cur_y))
+        _render_mixed(surf, fb, line, WHITE, px + PAD_X, cur_y)
         cur_y += q_lh
 
     # ── 分隔線 ────────────────────────────────────────────────
@@ -507,14 +507,12 @@ def _draw_skip_class_popup(surf, fm, fs, mpos):
 
 def _draw_action_popup(surf, fs):
     """
-    在遊戲畫面右側繪製由右而左滑入的行動結果視窗。
+    在遊戲畫面上方繪製由上而下滑入的行動結果視窗（水平置中）。
     特殊前綴：
       "! " → 警示行（紅色，加上小分隔線）
       "---" → 分隔線
     使用 _popup_t0[0] 與 _popup_lines 驅動動畫，由 run_ui 每幀呼叫。
-
-    注意：繪製前設定 clip 至遊戲邊界 (WIN_W, WIN_H)，防止全螢幕模式下
-    Surface 尺寸大於邏輯解析度時，動畫滑出位置超過右邊界並殘留上幀像素。
+    必須在 _draw_choice_popup 之後呼叫，以確保不被考試題目的黑色遮罩覆蓋。
     """
     if _popup_t0[0] == 0 or not _popup_lines:
         return
@@ -565,20 +563,36 @@ def _draw_action_popup(surf, fs):
           + 14)
     # "multi" 行的 r[0] == "multi"，不在 sep/warn_sep 中，正確算 lh ✓
 
-    # ── x 位置動畫 ─────────────────────────────────────────
-    target_x = WIN_W - POPUP_W - 16
-    if elapsed < POPUP_IN_MS:
-        t  = elapsed / POPUP_IN_MS
-        t2 = 1 - (1 - t) ** 3
-        x  = WIN_W - int(t2 * (POPUP_W + 16))
-    elif elapsed > POPUP_DURATION - POPUP_OUT_MS:
-        t  = (elapsed - (POPUP_DURATION - POPUP_OUT_MS)) / POPUP_OUT_MS
-        t2 = t * t
-        x  = target_x + int(t2 * (POPUP_W + 32))
+    # ── 位置動畫（依 direction 選擇）────────────────────────────
+    if _popup_direction[0] == "top":
+        # 由上而下滑入（考試答題回饋）
+        target_y = STATUS_H + 16
+        x        = (WIN_W - POPUP_W) // 2
+        if elapsed < POPUP_IN_MS:
+            t  = elapsed / POPUP_IN_MS
+            t2 = 1 - (1 - t) ** 3
+            y  = -ph + int(t2 * (ph + target_y))
+        elif elapsed > POPUP_DURATION - POPUP_OUT_MS:
+            t  = (elapsed - (POPUP_DURATION - POPUP_OUT_MS)) / POPUP_OUT_MS
+            t2 = t * t
+            y  = target_y - int(t2 * (ph + target_y))
+        else:
+            y  = target_y
     else:
-        x  = target_x
+        # 由右而左滑入（一般行動 / 特殊行動）
+        target_x = WIN_W - POPUP_W - 16
+        y        = STATUS_H + 55
+        if elapsed < POPUP_IN_MS:
+            t  = elapsed / POPUP_IN_MS
+            t2 = 1 - (1 - t) ** 3
+            x  = WIN_W - int(t2 * (POPUP_W + 16))
+        elif elapsed > POPUP_DURATION - POPUP_OUT_MS:
+            t  = (elapsed - (POPUP_DURATION - POPUP_OUT_MS)) / POPUP_OUT_MS
+            t2 = t * t
+            x  = target_x + int(t2 * (POPUP_W + 32))
+        else:
+            x  = target_x
 
-    y     = STATUS_H + (CHAR_H - ph) // 2
     pop_r = pygame.Rect(x, y, POPUP_W, ph)
 
     # ── 繪製面板 ───────────────────────────────────────────
@@ -613,8 +627,7 @@ def _draw_action_popup(surf, fs):
             ty += lh
         else:
             text, col = row
-            lt = fs.render(text, True, col)
-            surf.blit(lt, (pop_r.x + 14, ty))
+            _render_mixed(surf, fs, text, col, pop_r.x + 14, ty)
             ty += lh
 
     # ── 恢復原始 clip（避免影響後續繪製）────────────────────
