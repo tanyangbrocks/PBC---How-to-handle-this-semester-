@@ -239,25 +239,37 @@ class Character:
 
         回傳新增狀態列表：[(name, popup_msg, border_color), ...]
         規則：
-          satisfaction < sick_thr（預設 60）→ 賦予「生病」（2 週，新觸發才加）
-          satisfaction < 80           → 賦予「無力狀態」（條件型，v=0 不倒數）
+          satisfaction < sick_thr（預設 50）→ 賦予「生病」（2 週，新觸發才加）
+          負面特質「容易生病」         → 額外機率（每週獨立擲骰）觸發生病
+          satisfaction < 60           → 賦予「無力狀態」（條件型，v=0 不倒數）
           satisfaction > 80 且未生病  → 賦予「神采奕奕」（1 週，新觸發才加）
           注意：生病時無法被賦予神采奕奕。
         """
         new_statuses = []
-        sick_thr = self.sick_threshold if self.sick_threshold > 0 else 60
+        sick_thr = self.sick_threshold if self.sick_threshold > 0 else 50
 
-        # ── 「生病」：滿足感低於閾值且尚未生病 ────────────────
-        if self.satisfaction < sick_thr and "生病" not in self.status_effects:
+        # 「容易生病」負面特質的額外每週生病機率
+        extra_sick_chance = sum(
+            d["value"] for d in self.drawbacks if d.get("penalty") == "sick_chance"
+        )
+
+        # ── 「生病」：滿足感低於閾值，或「容易生病」機率觸發 ──
+        _sick_by_sat  = self.satisfaction < sick_thr
+        _sick_by_draw = extra_sick_chance > 0 and random.random() < extra_sick_chance
+        if (_sick_by_sat or _sick_by_draw) and "生病" not in self.status_effects:
             self.status_effects["生病"] = 2
+            if _sick_by_draw and not _sick_by_sat:
+                _sick_msg = "😷 體質較弱，這週身體突然出了狀況……行動時間大幅縮水。"
+            else:
+                _sick_msg = "😷 身體出了狀況……本週行動時間大幅縮水，好好休息吧。"
             new_statuses.append((
                 "生病",
-                "😷 身體出了狀況……本週行動時間大幅縮水，好好休息吧。",
+                _sick_msg,
                 (200, 60, 60),
             ))
 
         # ── 「無力狀態」：條件型（v=0 表示不倒數、不自動解除）──
-        if self.satisfaction < 80:
+        if self.satisfaction < 60:
             if "無力狀態" not in self.status_effects:
                 self.status_effects["無力狀態"] = 0   # 0 = 永久跟隨條件
                 new_statuses.append((
@@ -266,7 +278,7 @@ class Character:
                     (160, 95, 40),
                 ))
         else:
-            # 滿足感回升到 80 以上 → 條件不成立，直接解除
+            # 滿足感回升到 60 以上 → 條件不成立，直接解除
             self.status_effects.pop("無力狀態", None)
 
         # ── 「神采奕奕」：滿足感 > 80 且未生病（新觸發才加）──
