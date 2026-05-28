@@ -188,6 +188,12 @@ _cc_confetti  : list = []                  # 彩帶粒子列表
 
 _cc_shake_end  = [0]                       # 震動結束時刻（ticks）
 
+_slot_confetti_pending = [-1]              # 等待噴發彩帶的槽序號（-1 = 無）
+_slot_sfx_pending      = [""]             # 等待播放的天賦音效 key（"" = 無）
+
+# ── 考試題目彈窗 ──────────────────────────────────────────────
+_exam_q_prompt = [""]   # 考試題幹文字（exam_q 模式用，不含 log 背景）
+
 # ── 額外事件選擇狀態 ─────────────────────────────────────────────
 _cc_extra_data  : list = []   # EXTRA_EVENTS 完整資料
 
@@ -324,6 +330,11 @@ _action_icon_srcs: dict = {}   # label -> pygame.Surface（懶載入原始圖）
 # ── 結算畫面狀態 ─────────────────────────────────────────────
 _settlement_data  = [None]        # {"grades": dict, "final_score": float, "comment": str}
 
+# ── Game Over 畫面狀態 ───────────────────────────────────────────────────────
+_go_sub        = ["fade_out"]   # 目前子階段：fade_out | fade_in | show
+_go_t0         = [0]            # 子階段開始 ticks
+_go_silhouette = [None]         # 緩存的人物剪影 Surface
+
 _end_sub          = ["fade_out_1"] # 目前子階段
 
 _end_t0           = [0]            # 子階段開始時間戳（ms）
@@ -331,6 +342,15 @@ _end_t0           = [0]            # 子階段開始時間戳（ms）
 _end_stamps_shown = [0]            # 已觸發震動 + 音效的 stamp 數量
 
 _stamp_shake_t0   = [0]            # 印章晃動觸發時間戳（ms，0=未啟用）
+
+_ending_bgm_triggered = [False]    # 結局 BGM 是否已觸發（每次進入 end 畫面重置）
+
+# ── 結算過場影片 ─────────────────────────────────────────────
+_end_video_cap   = [None]   # cv2.VideoCapture（None = 未載入）
+_end_video_fps   = [30.0]   # 影片 FPS
+_end_video_surf  = [None]   # 當前幀的 pygame.Surface（已縮放至螢幕尺寸）
+_end_video_last  = [0]      # 上次更新幀的時間戳（ms）
+_end_video_done  = [False]  # 影片播完旗標（觸發後推進到 fade_out_2）
 
 
 # 明確宣告所有名稱可被 import * 匯出（含 _ 前綴）

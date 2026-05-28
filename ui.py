@@ -113,6 +113,20 @@ def ask_exam_start(exam_name: str) -> None:
     _cmd_q.put(("exam_ready", exam_name))
     _reply_event.wait()
 
+def ask_exam_question(prompt: str, options: list) -> int:
+    """考試題目選擇彈窗：只顯示題幹與選項，不附帶任何 log 背景。
+    回傳 1-based 選擇編號。"""
+    labels = [opt["name"] if isinstance(opt, dict) else str(opt) for opt in options]
+    _exam_q_prompt[0] = prompt
+    _cmd_q.put(("exam_q", labels))
+    _reply_event.clear()
+    _reply_event.wait()
+    return _reply_val[0]
+
+def play_exam_sfx(correct: bool) -> None:
+    """播放考試答題音效（答對/答錯）。可從遊戲執行緒直接呼叫。"""
+    _play_sfx("exam_correct" if correct else "event_bad")
+
 def tell_story(lines: list) -> None:
     """顯示劇情對話框，每次點擊推進一行，全部結束後解除阻塞。
     lines: list of str 或 {"speaker": str, "text": str}。
@@ -139,6 +153,10 @@ def wait_start():
 def notify_end():
     """遊戲結束後呼叫：切換到結束畫面。"""
     _cmd_q.put(("phase", "end"))
+
+def notify_gameover():
+    """提前 Game Over 時呼叫：切換到 Game Over 畫面（黑幕 → 背景圖 + 剪影）。"""
+    _cmd_q.put(("phase", "gameover"))
 
 def set_settlement_data(data: dict) -> None:
     """傳入期末結算資料（grades / final_score / comment）供成績單畫面使用。"""
@@ -323,12 +341,13 @@ def notify_timetable(courses: list):
     _modal_event.clear()
     _modal_event.wait()
 
-def notify_grade_report(items: list):
+def notify_grade_report(items: list, sfx: str = None):
     """
     顯示成績公告彈出畫面，阻塞直到玩家點確認。
     items: [{"name": "小考一", "score": 75}, ...]
+    sfx:   彈窗出現時立即播放的音效 key（選填）
     """
-    _cmd_q.put(("grade_report", items))
+    _cmd_q.put(("grade_report", items, sfx))
     _modal_event.clear()
     _modal_event.wait()
 
@@ -555,8 +574,17 @@ def run_ui():
         _sfx["damage6"]     = _ld("damage6.mp3")
         _sfx["cash"]        = _ld("cash.mp3")
         _sfx["hover"]       = _ld("liecio-menu-buttom-190020 (1) (mp3cut.net).mp3")
-        _sfx["event_good"]  = _ld("freesound_community-good-6081.mp3")
-        _sfx["event_bad"]   = _ld("u_3bsnvt0dsu-spin-fail-295088.mp3")
+        _sfx["event_good"]   = _ld("freesound_community-good-6081.mp3")
+        _sfx["event_bad"]    = _ld("u_3bsnvt0dsu-spin-fail-295088.mp3")
+        _sfx["midterm_pass"] = _ld("freesound_community-piglevelwin2mp3-14800.mp3")
+        _sfx["midterm_fail"] = _ld("shidenbeatsmusic-no-luck-too-bad-disappointing-sound-effect-112943.mp3")
+        _sfx["grade_reveal"] = _ld("freesound_community-level-win-6416.mp3")
+        _sfx["stamp_hit"]    = _ld("lordsonny-cinematic-hit-159487 (mp3cut.net).mp3")
+        _sfx["game_over"]    = _ld("blendertimer-happy-outro-8110.mp3")
+        _sfx["shop_open"]    = _ld("mubeenstudio-money-counting-machine-sfx-406495.mp3")
+        _sfx["talent_draw"]  = _ld("u_u4pf5h7zip-prop_show-345987.mp3")
+        _sfx["talent_none"]  = _ld("nikin-pop-up-something-160353.mp3")
+        _sfx["exam_correct"] = _ld("updatepelgo-success-221935.mp3")
     except Exception:
         pass
 
@@ -670,6 +698,15 @@ def run_ui():
         _in_ov.fill((255, 238, 212, 215))
         _grads["input"] = _in_ov
 
+    # ── Game Over 背景圖 ───────────────────────────────────────────
+    try:
+        _go_img = _load_cover(
+            os.path.join(_bg_dir, "the_end_background.webp"), WIN_W, WIN_H)
+        if _go_img is not None:
+            _grads["gameover"] = _go_img
+    except Exception:
+        pass
+
     # ── 全螢幕黑邊背景圖（原始尺寸，進入全螢幕時再縮放至螢幕大小）──
     _outside_bg_raw = None
     try:
@@ -694,6 +731,22 @@ def run_ui():
             _cc_video_fps[0] = float(_fps) if _fps and _fps > 0 else 30.0
         else:
             _cap.release()
+    except Exception:
+        pass
+
+    # ── 結算過場影片（MP4）───────────────────────────────────────
+    _end_vid_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                 "asset", "video",
+                                 "15673cd6-bc6e-432b-bf3f-de47ecfe4918_0.mp4")
+    try:
+        import cv2 as _cv2_ev
+        _ev_cap = _cv2_ev.VideoCapture(_end_vid_path)
+        if _ev_cap.isOpened():
+            _end_video_cap[0] = _ev_cap
+            _fps = _ev_cap.get(_cv2_ev.CAP_PROP_FPS)
+            _end_video_fps[0] = float(_fps) if _fps and _fps > 0 else 30.0
+        else:
+            _ev_cap.release()
     except Exception:
         pass
 
@@ -774,14 +827,24 @@ def run_ui():
                 if cmd[1] == "shop":          # 道具店：觸發由上而下滑入
                     _shop_slide_dir[0] = "in"
                     _shop_slide_t0[0]  = pygame.time.get_ticks()
+                    _play_sfx("shop_open")
                 elif cmd[1] == "char_create":
                     _request_bgm("Music-Aether.mp3")
                 elif cmd[1] == "end":
+                    # BGM 在此繼續播放，等到成績單畫面才淡出
+                    _end_sub[0]              = "fade_out_1"
+                    _end_t0[0]               = pygame.time.get_ticks()
+                    _end_stamps_shown[0]     = 0
+                    _stamp_shake_t0[0]       = 0
+                    _ending_bgm_triggered[0] = False
+                    _end_video_done[0]       = False
+                    _end_video_surf[0]       = None
+                elif cmd[1] == "gameover":
                     _request_bgm(None)
-                    _end_sub[0]          = "fade_out_1"
-                    _end_t0[0]           = pygame.time.get_ticks()
-                    _end_stamps_shown[0] = 0
-                    _stamp_shake_t0[0]   = 0
+                    _play_sfx("game_over")
+                    _go_sub[0]        = "fade_out"
+                    _go_t0[0]         = pygame.time.get_ticks()
+                    _go_silhouette[0] = None   # 重置剪影快取
                 elif cmd[1] == "game" and _weather_type[0] is None:
                     _weather_reset()   # 首次進入遊戲階段時確保天氣已初始化
             elif tag == "ripple":
@@ -905,6 +968,8 @@ def run_ui():
             elif tag == "grade_report":
                 _modal[0]      = "grade_report"
                 _modal_data[0] = cmd[1]   # items list
+                if len(cmd) > 2 and cmd[2]:
+                    _play_sfx(cmd[2])
             elif tag == "story":
                 _story_lines.clear()
                 _story_lines.extend(cmd[1])
@@ -916,6 +981,10 @@ def run_ui():
             elif tag == "exam_ready":
                 _exam_ready_label[0] = cmd[1]
                 _mode[0] = "exam_ready"
+            elif tag == "exam_q":
+                _choices.clear()
+                _choices.extend(cmd[1])
+                _mode[0] = "exam_q"
 
         # ── 繪製（依畫面階段切換內容）────────────────────────
         # 全螢幕：先把黑邊區域鋪上背景圖（screen 是 real_screen 的子 Surface，
@@ -927,6 +996,7 @@ def run_ui():
         start_btn      = None
         _debug_btn     = None
         end_btn        = None
+        go_btn         = None
         end_week_btn   = None
         shop_btn_rect  = None
         info_btn_rect  = None
@@ -972,6 +1042,8 @@ def run_ui():
                     screen, fm, fs, fl, _shop_items, _player[0], mpos)
         elif _phase[0] == "end":
             end_btn = _draw_end(screen, fm, fs, mpos)
+        elif _phase[0] == "gameover":
+            go_btn = _draw_gameover(screen, fm, fs, mpos)
         elif _phase[0] == "char_create":
             cm = _cc_mode[0]
             if cm == "name":
@@ -1006,6 +1078,10 @@ def run_ui():
             elif cm == "slot":
                 ok = _draw_cc_slot_machine(screen, fm, fs, mpos)
                 _cc_btn_cache["slot_ok"] = ok
+                # 天賦音效（由 _update_slot_state 設旗標，此處播放後清除）
+                if _slot_sfx_pending[0]:
+                    _play_sfx(_slot_sfx_pending[0])
+                    _slot_sfx_pending[0] = ""
             elif cm == "summary":
                 s_r, r_r = _draw_cc_summary(screen, fm, fs, mpos, game_mode=False)
                 _cc_btn_cache["summary_start"]   = s_r
@@ -1073,16 +1149,18 @@ def run_ui():
             _cp_active = (
                 (_mode[0] == "choices" and bool(_choices)
                  and not all(c in _STANDARD_ACTIONS for c in _choices))
-                or _mode[0] in ("yn", "event_ok")
+                or _mode[0] in ("yn", "event_ok", "exam_q")
             )
             # 底部行動面板：中央彈窗已啟用時改用空白選項，避免重複顯示
             _panel_mode    = "choices" if _cp_active else _mode[0]
             _panel_choices = []        if _cp_active else _choices
-            # 全螢幕科目／翹課／停修彈窗開啟時，隱藏底部 log 避免透出雜訊
+            # 全螢幕科目／翹課／停修彈窗，以及課表/成績公告 modal 開啟時，
+            # 隱藏底部 log 避免透出雜訊（考試答題文案等不應出現在背景）
             _popup_hides_log = (
                 _subj_popup_active[0]
                 or _skip_popup_active[0]
                 or _withdrawal_popup_active[0]
+                or _modal[0] is not None   # 課表 / 成績公告 modal 背景靜音
             )
             btn_rects, end_week_btn = _draw_action_panel(
                 screen, fm, fs, _panel_mode, _panel_choices,
@@ -1090,13 +1168,17 @@ def run_ui():
                 _prompt, _tvalue, ar, _time_units[0], mpos)
             # 考前壓力特效（邊框顫抖 + 底色微微泛紅）：疊在所有面板之上、彈窗之下
             _draw_exam_stress_fx(screen)
+            # 低滿意度黑色暈圈遮罩（中央亮、外圍暗 + 雜訊）
+            _draw_low_sat_vignette(screen, _player[0])
+            # 生病狀態邊緣光暈（紅→藍→綠循環脈動，疊在黑色遮罩之上）
+            _draw_sick_vignette(screen, _player[0])
             # 行動結果彈出視窗（右側由右而左滑入）
             _draw_action_popup(screen, fs)
             # 中央彈出視窗（yn / 非標準選項）
             _draw_cp = (
                 (_mode[0] == "choices" and bool(_choices)
                  and not all(c in _STANDARD_ACTIONS for c in _choices))
-                or _mode[0] == "yn"
+                or _mode[0] in ("yn", "exam_q")
             )
             if _draw_cp:
                 _choice_popup_rects.clear()
@@ -1333,6 +1415,13 @@ def run_ui():
                         _phase[0] = "start"
                         _request_bgm("Music-Morning_Rain.mp3")
                         _restart_event.set()
+                elif _phase[0] == "gameover":
+                    if go_btn and go_btn.collidepoint(_tpos(ev.pos)):
+                        _play_sfx("ui_click")
+                        _click_reg[(go_btn.centerx, go_btn.centery)] = pygame.time.get_ticks()
+                        _phase[0] = "start"
+                        _request_bgm("Music-Morning_Rain.mp3")
+                        _restart_event.set()
                 else:
                     # ── 遊戲中 ────────────────────────────────
 
@@ -1363,11 +1452,11 @@ def run_ui():
                                 break
                         continue   # 彈窗開啟時阻擋所有點擊
 
-                    # 非標準選項 / yn 中央彈窗優先攔截（最高優先）
+                    # 非標準選項 / yn / 考試題目 中央彈窗優先攔截（最高優先）
                     _cp_now = (
                         (_mode[0] == "choices" and bool(_choices)
                          and not all(c in _STANDARD_ACTIONS for c in _choices))
-                        or _mode[0] == "yn"
+                        or _mode[0] in ("yn", "exam_q")
                     )
                     if _cp_now:
                         for (br, val) in _choice_popup_rects:
@@ -1378,6 +1467,13 @@ def run_ui():
                                     _reply_val[0] = val
                                     _mode[0] = None
                                     _choices.clear()
+                                    _reply_event.set()
+                                elif _mode[0] == "exam_q":
+                                    _play_sfx("ui_click")
+                                    _reply_val[0] = val
+                                    _mode[0] = None
+                                    _choices.clear()
+                                    _exam_q_prompt[0] = ""
                                     _reply_event.set()
                                 else:  # yn
                                     _play_sfx("ui_click" if val else "back")

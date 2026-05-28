@@ -922,12 +922,27 @@ def _draw_end(surf, fm, fs, mpos):
             _end_sub[0] = "fade_in_1";  _end_t0[0] = ms
         elif sub == "fade_in_1"  and elapsed >= _EFADE_MS:
             _end_sub[0] = "anim";       _end_t0[0] = ms
-        elif sub == "anim"       and elapsed >= _EANIM_MS:
-            _end_sub[0] = "fade_out_2"; _end_t0[0] = ms
+            # 進入影片動畫前，將影片倒帶回第 0 幀
+            if _end_video_cap[0] is not None:
+                try:
+                    import cv2 as _cv2_ev
+                    _end_video_cap[0].set(_cv2_ev.CAP_PROP_POS_FRAMES, 0)
+                except Exception:
+                    pass
+            _end_video_surf[0] = None
+            _end_video_done[0] = False
+        elif sub == "anim":
+            # 影片播完 或 超過最長等待時間 → 推進至淡出
+            _anim_max = _EANIM_MS if _end_video_cap[0] is None else 30000
+            if _end_video_done[0] or elapsed >= _anim_max:
+                _end_sub[0] = "fade_out_2"; _end_t0[0] = ms
+            else:
+                break   # 影片仍在播放中，等待
         elif sub == "fade_out_2" and elapsed >= _EFADE_MS:
             _end_sub[0] = "fade_in_2";  _end_t0[0] = ms
         elif sub == "fade_in_2"  and elapsed >= _EFADE_MS:
             _end_sub[0] = "report";     _end_t0[0] = ms
+            _request_bgm(None)   # 成績單出現時才淡出背景音樂
         else:
             break
 
@@ -937,7 +952,10 @@ def _draw_end(surf, fm, fs, mpos):
 
     # ── 淡出 / 淡入白幕 ────────────────────────────────────────
     if sub in ("fade_out_1", "fade_in_1", "fade_out_2", "fade_in_2"):
-        if "start" in _grads:
+        # fade_out_2 / fade_in_2：以影片最後一幀為底，讓白色淡出更流暢
+        if sub in ("fade_out_2", "fade_in_2") and _end_video_surf[0] is not None:
+            surf.blit(_end_video_surf[0], (0, 0))
+        elif "start" in _grads:
             surf.blit(_grads["start"], (0, 0))
         else:
             surf.fill(BG)
@@ -962,36 +980,66 @@ def _draw_end(surf, fm, fs, mpos):
 
 
 def _draw_end_anim(surf, fm, fs, elapsed):
-    """過場動畫：旋轉光圈 + 文字「計算成績中」。"""
-    if "start" in _grads:
-        surf.blit(_grads["start"], (0, 0))
+    """過場動畫：播放結算過場影片（無音訊）；cv2 未安裝或影片缺失時退回轉圈動畫。"""
+    cap = _end_video_cap[0]
+
+    if cap is not None:
+        # ── 影片播放 ─────────────────────────────────────────────
+        now = pygame.time.get_ticks()
+        if not _end_video_done[0]:
+            try:
+                import cv2
+                ms_per_frame = 1000.0 / max(_end_video_fps[0], 1.0)
+                if _end_video_surf[0] is None or now - _end_video_last[0] >= ms_per_frame:
+                    ret, frame = cap.read()
+                    if ret:
+                        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                        fh, fw    = frame_rgb.shape[:2]
+                        vsf       = pygame.surfarray.make_surface(
+                                        frame_rgb.transpose(1, 0, 2))
+                        if fw != WIN_W or fh != WIN_H:
+                            vsf = pygame.transform.scale(vsf, (WIN_W, WIN_H))
+                        _end_video_surf[0] = vsf
+                        _end_video_last[0] = now
+                    else:
+                        _end_video_done[0] = True   # 影片播完，等待推進
+            except Exception:
+                _end_video_done[0] = True
+
+        # 繪製當前幀；影片尚未讀到第一幀時以白底填充
+        if _end_video_surf[0] is not None:
+            surf.blit(_end_video_surf[0], (0, 0))
+        else:
+            surf.fill((255, 255, 255))
+
     else:
-        surf.fill(BG)
+        # ── 退回：旋轉光圈 + 文字「計算成績中」（cv2 未安裝或影片未載入）──
+        if "start" in _grads:
+            surf.blit(_grads["start"], (0, 0))
+        else:
+            surf.fill(BG)
 
-    cx, cy = WIN_W // 2, WIN_H // 2
-    fb     = _font_bold[0] or fm
+        cx, cy = WIN_W // 2, WIN_H // 2
+        fb     = _font_bold[0] or fm
 
-    # 外光圈（緩慢脈動）
-    pulse  = 0.5 + 0.5 * math.sin(elapsed * 0.0025)
-    halo_s = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
-    pygame.draw.circle(halo_s, (*BTN_N, int(70 * pulse)),  (cx, cy), 80, 14)
-    pygame.draw.circle(halo_s, (*BTN_N, int(35 * pulse)),  (cx, cy), 108, 5)
-    surf.blit(halo_s, (0, 0))
+        pulse  = 0.5 + 0.5 * math.sin(elapsed * 0.0025)
+        halo_s = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
+        pygame.draw.circle(halo_s, (*BTN_N, int(70 * pulse)),  (cx, cy), 80, 14)
+        pygame.draw.circle(halo_s, (*BTN_N, int(35 * pulse)),  (cx, cy), 108, 5)
+        surf.blit(halo_s, (0, 0))
 
-    # 旋轉點環（8 顆）
-    dot_s = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
-    for i in range(8):
-        ang = elapsed * 0.0025 + i * math.tau / 8
-        px  = cx + int(math.cos(ang) * 52)
-        py  = cy + int(math.sin(ang) * 52)
-        alp = 90 + int(155 * (i / 8))
-        pygame.draw.circle(dot_s, (*BTN_N, alp), (px, py), 6)
-    surf.blit(dot_s, (0, 0))
+        dot_s = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
+        for i in range(8):
+            ang = elapsed * 0.0025 + i * math.tau / 8
+            px  = cx + int(math.cos(ang) * 52)
+            py  = cy + int(math.sin(ang) * 52)
+            alp = 90 + int(155 * (i / 8))
+            pygame.draw.circle(dot_s, (*BTN_N, alp), (px, py), 6)
+        surf.blit(dot_s, (0, 0))
 
-    # 「計算成績中」+ 動態點
-    dots    = "．" * (int(elapsed / 500) % 4)
-    text_s  = fb.render("計算成績中" + dots, True, TITLE)
-    surf.blit(text_s, (cx - text_s.get_width() // 2, cy + 72))
+        dots   = "．" * (int(elapsed / 500) % 4)
+        text_s = fb.render("計算成績中" + dots, True, TITLE)
+        surf.blit(text_s, (cx - text_s.get_width() // 2, cy + 72))
 
 
 def _draw_end_report(surf, fm, fs, mpos, data, ms, elapsed):
@@ -1008,7 +1056,7 @@ def _draw_end_report(surf, fm, fs, mpos, data, ms, elapsed):
     should_show = min(_N_STAMPS, int(elapsed // _ESTAMP_INT))
     if should_show > _end_stamps_shown[0]:
         _stamp_shake_t0[0] = ms
-        _play_sfx("ui_click")
+        _play_sfx("stamp_hit")
         _end_stamps_shown[0] = should_show
 
     # ── 背景羊皮紙 + 主卡片 ────────────────────────────────────
@@ -1129,6 +1177,18 @@ def _draw_end_report(surf, fm, fs, mpos, data, ms, elapsed):
         cmt_y = sat_cy + ROW_H // 2 + 6
         surf.blit(cmt_s, (cx - cmt_s.get_width() // 2, cmt_y))
 
+        # ── 結局 BGM（評語出現的那幀，僅觸發一次）──────────────
+        if not _ending_bgm_triggered[0]:
+            _ending_bgm_triggered[0] = True
+            if comment.startswith("平衡型結局"):
+                _request_bgm("Music-Journey's_End.mp3")
+            elif comment.startswith("及格快樂結局"):
+                _request_bgm("Music-Contest_Winner.mp3")
+            elif comment.startswith("成績過了但身心崩潰"):
+                _request_bgm("blendertimer-the-last-echo-410567 (mp3cut.net).mp3")
+            else:
+                _request_bgm("prettyjohn1-sad-background-music_29sec-489884.mp3")
+
     # ── 再來一次 圓形按鈕（米灰色，同開始畫面設計） ───────────────
     btn_rect = None
     btn_show_t = comment_show_t + _EBTN_DELAY
@@ -1167,6 +1227,221 @@ def _draw_end_report(surf, fm, fs, mpos, data, ms, elapsed):
         btn_rect = pygame.Rect(btn_cx - BTN_R, btn_cy - BTN_R, BTN_R * 2, BTN_R * 2)
 
     return btn_rect
+
+
+# ── Game Over 畫面 ──────────────────────────────────────────────────────────────
+_GO_FADE_MS  = 600    # 淡出 / 淡入各 600ms
+_GO_WAIT_BTN = 3000   # 背景出現後幾 ms 才顯示按鈕
+
+def _build_go_silhouette() -> "pygame.Surface | None":
+    """將當前立繪 Surface 轉為純黑剪影（保留 alpha）。"""
+    p = _portrait_curr[0]
+    if p is None:
+        return None
+    sil = pygame.Surface(p.get_size(), pygame.SRCALPHA)
+    sil.fill((0, 0, 0, 255))
+    # BLEND_RGBA_MIN：RGB 取 min(0, src)=0（保持黑色）；Alpha 取 min(255, src.a)=src.a
+    sil.blit(p, (0, 0), special_flags=pygame.BLEND_RGBA_MIN)
+    return sil
+
+def _draw_go_silhouette_with_noise(surf: pygame.Surface, rect: pygame.Rect) -> None:
+    """繪製人物黑色剪影，並在剪影內部疊加細緻雜訊（靜電感）。"""
+    p = _portrait_curr[0]
+    if p is None:
+        return
+    sil = _go_silhouette[0]
+    if sil is None:
+        sil = _build_go_silhouette()
+        _go_silhouette[0] = sil
+    if sil is None:
+        return
+
+    pw, ph = sil.get_width(), sil.get_height()
+    blit_x = rect.x + (rect.width  - pw) // 2
+    blit_y = rect.y +  rect.height - ph       # 底部對齊（同遊戲立繪）
+
+    # 每幀重生雜訊（每 80ms 換一批 → 靜電閃動感）
+    draw_sil = sil.copy()
+    noise_ov = pygame.Surface((pw, ph))
+    noise_ov.fill((0, 0, 0))
+    rng = random.Random(pygame.time.get_ticks() // 80)
+    for _ in range(1800):
+        nx = rng.randint(0, pw - 1)
+        ny = rng.randint(0, ph - 1)
+        nc = rng.randint(8, 88)
+        sz = rng.randint(1, 2)
+        pygame.draw.rect(noise_ov, (nc, nc, nc), (nx, ny, sz, sz))
+    # BLEND_RGB_ADD：將亮點疊加到黑色剪影上（不影響 alpha，剪影形狀保持）
+    draw_sil.blit(noise_ov, (0, 0), special_flags=pygame.BLEND_RGB_ADD)
+    surf.blit(draw_sil, (blit_x, blit_y))
+
+def _draw_gameover(surf: pygame.Surface, fm, fs, mpos) -> "pygame.Rect | None":
+    """
+    提前 Game Over 畫面。
+    Sub-phases：fade_out（漸黑） → fade_in（背景淡入）→ show（完整畫面）。
+    回傳「再來一次」按鈕 Rect；尚未顯示時回傳 None。
+    """
+    ms      = pygame.time.get_ticks()
+    sub     = _go_sub[0]
+    elapsed = ms - _go_t0[0]
+
+    # ── 自動推進子階段 ──────────────────────────────────────────────
+    if sub == "fade_out" and elapsed >= _GO_FADE_MS:
+        _go_sub[0] = "fade_in"
+        _go_t0[0]  = ms
+        elapsed    = 0
+        sub        = "fade_in"
+    elif sub == "fade_in" and elapsed >= _GO_FADE_MS:
+        _go_sub[0] = "show"
+        _go_t0[0]  = ms
+        elapsed    = 0
+        sub        = "show"
+
+    go_bg = _grads.get("gameover")
+    cr    = pygame.Rect(0, STATUS_H, WIN_W, CHAR_H)   # 立繪區（同遊戲主畫面）
+
+    # ── fade_out：純黑畫面（遊戲內容已消失）─────────────────────────
+    if sub == "fade_out":
+        surf.fill((0, 0, 0))
+        return None
+
+    # ── 背景底圖 ──────────────────────────────────────────────────
+    if go_bg:
+        surf.blit(go_bg, (0, 0))
+    else:
+        surf.fill((30, 20, 15))
+
+    # ── fade_in：黑色遮罩由不透明→透明，背景逐漸顯現 ────────────────
+    if sub == "fade_in":
+        overlay_alpha = int(255 * (1.0 - min(1.0, elapsed / _GO_FADE_MS)))
+        ov = pygame.Surface((WIN_W, WIN_H))
+        ov.fill((0, 0, 0))
+        ov.set_alpha(overlay_alpha)
+        surf.blit(ov, (0, 0))
+        return None
+
+    # ── show：完整 Game Over 畫面 ──────────────────────────────────
+    # 人物黑色剪影 + 內部雜訊
+    _draw_go_silhouette_with_noise(surf, cr)
+
+    # 「再來一次」按鈕（3 秒後才出現）
+    if elapsed < _GO_WAIT_BTN:
+        return None
+
+    BTN_R  = 54
+    btn_cx = WIN_W  // 2
+    btn_cy = WIN_H  - BTN_R - 48
+    br     = pygame.Rect(btn_cx - BTN_R, btn_cy - BTN_R, BTN_R * 2, BTN_R * 2)
+    hover  = br.collidepoint(mpos)
+    _premium_circle(surf, btn_cx, btn_cy, BTN_R, _END_BTN_COL, hover)
+    fb = _font_bold[0] or fm
+    t  = fb.render("再來一次", True, PANEL)
+    surf.blit(t, (btn_cx - t.get_width() // 2, btn_cy - t.get_height() // 2))
+    return br
+
+
+# ── 生病狀態邊緣光暈效果 ────────────────────────────────────────────────────────
+_SICK_COLORS = [
+    (220,  30,  30),   # 紅
+    ( 40,  80, 220),   # 藍
+    ( 40, 180,  60),   # 綠
+]
+_SICK_CYCLE_SEC = 1.5  # 每個顏色持續秒數
+
+def _draw_sick_vignette(surf: pygame.Surface, player) -> None:
+    """
+    生病狀態：螢幕外框以紅→藍→綠循環發光（FPS 低血量邊緣暈光風格）。
+    僅在 player.status_effects 含「生病」時作用。
+    """
+    if player is None or "生病" not in getattr(player, "status_effects", {}):
+        return
+
+    t = pygame.time.get_ticks() / 1000.0
+
+    # ── 顏色循環 ────────────────────────────────────────────────
+    idx = int(t / _SICK_CYCLE_SEC) % len(_SICK_COLORS)
+    r, g, b = _SICK_COLORS[idx]
+
+    # ── 脈動（呼吸感）────────────────────────────────────────────
+    pulse = 0.50 + 0.50 * abs(math.sin(t * math.pi * 1.3))
+
+    # ── 向內漸層光暈（多層半透明矩形，從邊緣向中心淡出）────────────
+    LAYERS = 22
+    DEPTH  = 88      # 向內最深 px
+    MAX_A  = 175     # 最邊緣層的最大 alpha
+
+    ov = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
+    for i in range(LAYERS):
+        ratio  = ((LAYERS - i) / LAYERS) ** 2.0   # 二次方淡出
+        alpha  = int(MAX_A * pulse * ratio)
+        if alpha < 2:
+            break
+        margin = int(DEPTH * i / LAYERS)
+        w_line = max(1, DEPTH // LAYERS + 1)
+        pygame.draw.rect(
+            ov,
+            (r, g, b, alpha),
+            pygame.Rect(margin, margin, WIN_W - 2 * margin, WIN_H - 2 * margin),
+            w_line,
+        )
+
+    surf.blit(ov, (0, 0))
+
+
+# ── 低滿意度黑色暈圈遮罩 ─────────────────────────────────────────────────────────
+_SAT_NOISE_INTERVAL = 80   # ms，雜訊每幾毫秒換一批
+
+def _draw_low_sat_vignette(surf: pygame.Surface, player) -> None:
+    """
+    自我滿意度 < 60 時：螢幕外圍黑色漸層暈圈（中央橢圓最亮，外圍最暗）+ 雜訊特效。
+    sat=60 → 最外層 alpha=30；每 -1 點 +0.5；sat=0 → alpha=60。
+    與生病光暈（_draw_sick_vignette）獨立 blit，兩者不衝突。
+    """
+    if player is None:
+        return
+    sat = getattr(player, "satisfaction", 100)
+    if sat >= 60:
+        return
+
+    max_alpha = min(60, int(30 + (60 - max(sat, 0)) * 0.5))
+
+    ov = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
+    cx, cy = WIN_W // 2, WIN_H // 2
+
+    # ── 橢圓輪廓漸層（外暗內亮）────────────────────────────────
+    LAYERS  = 32
+    BASE_RX = cx + 100          # 最外層橢圓半徑（延伸到螢幕外）
+    BASE_RY = cy + 80
+    MIN_RX  = int(cx * 0.28)    # 最內層（中央亮區半徑）
+    MIN_RY  = int(cy * 0.28)
+    LINE_W  = max(3, (BASE_RX - MIN_RX) // LAYERS + 3)   # 略大於間距，確保無縫銜接
+
+    for i in range(LAYERS):
+        frac  = i / (LAYERS - 1)                    # 0 = 最外, 1 = 最內
+        alpha = int(max_alpha * (1.0 - frac) ** 0.7)
+        if alpha < 1:
+            break
+        rx = max(2, int(BASE_RX - (BASE_RX - MIN_RX) * frac))
+        ry = max(2, int(BASE_RY - (BASE_RY - MIN_RY) * frac))
+        pygame.draw.ellipse(
+            ov,
+            (0, 0, 0, alpha),
+            pygame.Rect(cx - rx, cy - ry, rx * 2, ry * 2),
+            LINE_W,
+        )
+
+    # ── 雜訊：隨機暗點（每 80ms 換一批 → 靜電感）───────────────
+    now = pygame.time.get_ticks()
+    rng = random.Random(now // _SAT_NOISE_INTERVAL)
+    noise_max_a = max(6, max_alpha // 2)
+    for _ in range(130):
+        nx  = rng.randint(0, WIN_W - 2)
+        ny  = rng.randint(0, WIN_H - 2)
+        na  = rng.randint(4, noise_max_a)
+        sz  = rng.randint(1, 2)
+        pygame.draw.rect(ov, (0, 0, 0, na), (nx, ny, sz, sz))
+
+    surf.blit(ov, (0, 0))
 
 
 # 明確宣告所有名稱可被 import * 匯出（含 _ 前綴）

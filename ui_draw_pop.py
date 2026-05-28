@@ -54,6 +54,9 @@ def _draw_choice_popup(surf, fm, fs, mode, choices, log, prompt_text,
         else:
             # 不附帶 log 背景，只顯示 prompt 本身
             q_lines = _wrap(raw, fb, text_w) if raw else []
+    elif mode == "exam_q":
+        # 考試題目：只顯示題幹，完全不附帶任何 log 背景
+        q_lines = _wrap(_exam_q_prompt[0], fb, text_w) if _exam_q_prompt[0] else []
     else:
         q_lines = list(log[-6:]) if log else []
 
@@ -678,7 +681,7 @@ def _draw_modal_timetable(surf, fm, fs, courses, mpos):
 
     # ── 標題 ────────────────────────────────────────────────────
     fb = _font_bold[0] or fm
-    title_s = fb.render("本週課表", True, TITLE)
+    title_s = fb.render("本學期課表", True, TITLE)
     surf.blit(title_s, (cx + (cw - title_s.get_width()) // 2, cy + 12))
     pygame.draw.line(surf, (195, 163, 123),
                      (cx + 16, cy + 44), (cx + cw - 16, cy + 44), 1)

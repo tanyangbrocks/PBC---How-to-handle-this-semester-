@@ -20,7 +20,8 @@ from ui import notify, ask_ok, ask_yn, ask_choice, ask_text, set_player, \
                ask_subject_popup, trigger_time_overflow_warning, tell_story, \
                show_extra_event_popup, ask_exam_start, set_roll_call, clear_roll_call, \
                set_roll_call_attended, set_roll_call_xed, set_special_disabled, \
-               ask_skip_class_popup, ask_withdrawal_popup, set_settlement_data
+               ask_skip_class_popup, ask_withdrawal_popup, set_settlement_data, \
+               ask_exam_question, play_exam_sfx
 
 
 # ── 點名事件觸發週次 ─────────────────────────────────────────────
@@ -493,7 +494,7 @@ class TurnEngine:
             notify_grade_report([
                 {"name": "小考一", "score": self._quiz1_score},
                 {"name": "作業一", "score": 90},
-            ])
+            ], sfx="grade_reveal")
             player.revealed_grades.update(["作業", "小考"])
 
         elif week == 6:
@@ -629,7 +630,7 @@ class TurnEngine:
                 player.change_satisfaction(-2)
                 tell_story(["🎬 重看了一遍電影，心得總算寫完了。"])
             tell_story(["「唉，小考成績出來了，該來的還是來了。」"])
-            notify_grade_report([{"name": "小考二", "score": self._quiz2_score}])
+            notify_grade_report([{"name": "小考二", "score": self._quiz2_score}], sfx="grade_reveal")
             player.revealed_grades.add("小考")
 
         elif week == 15:
@@ -780,37 +781,45 @@ class TurnEngine:
     # 期中 / 期末考
     # ============================================================
     def _pre_exam_check(self) -> float:
+        """考前狀態檢測：依體力與運氣以彈窗形式依序提示，玩家確認後才進入考試。"""
         player   = self.player
         modifier = 1.0
 
-        # print("\n  🔍 考前狀態檢測中……")  # 因套用pygame而調整
-        notify("\n  🔍 考前狀態檢測中……")
-        # time.sleep(0.5)  # 因套用pygame而調整（pygame 不需要假暫停）
-
+        # ── 體力檢測（優先）────────────────────────────────────
         if player.stamina < 30 and random.random() < 0.4:
-            # print("  💀 悲劇！因為考前熬夜體力不支，你居然睡過頭了！")  # 因套用pygame而調整
-            notify("  💀 悲劇！因為考前熬夜體力不支，你居然睡過頭了！")
-            # print("  ⚠️ 趕到考場時時間只剩一半，本次考試總分打 5 折。")  # 因套用pygame而調整
-            notify("  ⚠️ 趕到考場時時間只剩一半，本次考試總分打 5 折。")
             player.change_satisfaction(-15)
             modifier *= 0.5
+            show_extra_event_popup(
+                ["趕到考場時時間只剩一半，本次考試總分打 5 折。",
+                 "自我滿意度 -15"],
+                "💀 考前熬夜體力不支，睡過頭",
+                (200, 50, 50),
+            )
             return modifier
 
+        # ── 運氣檢測（體力正常才繼續）──────────────────────────
         if player.luck < 40 and random.random() < 0.3:
-            # print("  🔧 倒楣！騎腳踏車去考場的路上居然爆胎！")  # 因套用pygame而調整
-            notify("  🔧 倒楣！騎腳踏車去考場的路上居然爆胎！")
-            # print("  ⚠️ 滿頭大汗跑進考場，思緒混亂，考試總分打 85 折。")  # 因套用pygame而調整
-            notify("  ⚠️ 滿頭大汗跑進考場，思緒混亂，考試總分打 85 折。")
             player.change_satisfaction(-8)
             modifier *= 0.85
+            show_extra_event_popup(
+                ["滿頭大汗跑進考場，思緒混亂，考試總分打 85 折。",
+                 "自我滿意度 -8"],
+                "🔧 騎腳踏車去考場路上爆胎",
+                (200, 140, 40),
+            )
             return modifier
 
-        # print("  🍀 一切順利，你安全且準時地坐在考場座位上。")  # 因套用pygame而調整
-        notify("  🍀 一切順利，你安全且準時地坐在考場座位上。")
+        # ── 順利抵達 ─────────────────────────────────────────
+        show_extra_event_popup(
+            ["發揮出最好的水準吧！"],
+            "🍀 一切順利，坐在考場座位上",
+            (40, 180, 80),
+        )
         return modifier
 
     def _run_exam_mini_game(self, exam_type: str) -> float:
-        notify(f"\n{exam_type}考：知識問答挑戰開始！")
+        """考試知識問答：每題以乾淨彈窗呈現（不含 log 背景），
+        答題後右側彈出結果訊息並立即播放音效。"""
 
         questions = [
             {
@@ -849,13 +858,15 @@ class TurnEngine:
         correct_count = 0
 
         for i, q in enumerate(selected_qs, start=1):
-            notify(f"題目 {i}：{q['q']}")
-            ans = ask_choice(q["options"])
+            # 題目以乾淨彈窗呈現：僅顯示題幹，不附帶任何 log
+            ans = ask_exam_question(q["q"], q["options"])
             if ans == q["a"]:
-                notify("  答對了！")
                 correct_count += 1
+                play_exam_sfx(True)                                       # 答對音效
+                show_action_result(["✅ 答對了！"], title=f"題目 {i}")
             else:
-                notify("  選錯了……")
+                play_exam_sfx(False)                                      # 答錯音效
+                show_action_result(["❌ 選錯了……"], title=f"題目 {i}")
 
         return correct_count / len(selected_qs)
 
@@ -877,20 +888,16 @@ class TurnEngine:
         player.grades["期中"] = max(0.0, min(100.0, total_score))
         player.revealed_grades.add("期中")
 
-        # print(f"\n📊 期中考最終成績：{player.grades['期中']:.1f} 分")  # 因套用pygame而調整
-        notify(f"\n📊 期中考最終成績：{player.grades['期中']:.1f} 分")
-        # print(f"  實力底分：{base_stats_score:.1f}")  # 因套用pygame而調整
-        notify(f"  實力底分：{base_stats_score:.1f}")
-        # print(f"  考場發揮：{mini_game_score:.1f}")  # 因套用pygame而調整
-        notify(f"  考場發揮：{mini_game_score:.1f}")
+        # ── 週末：成績彈窗公佈 ─────────────────────────────────
+        score   = player.grades["期中"]
+        sfx_key = "midterm_pass" if score >= 60 else "midterm_fail"
+        notify_grade_report([{"name": "期中考", "score": score}], sfx=sfx_key)
 
-        if player.grades["期中"] >= 60:
-            # print("  ✅ 順利飛過及格線！")  # 因套用pygame而調整
-            notify("  ✅ 順利飛過及格線！")
+        if score >= 60:
+            tell_story(["「期中考及格了，看來這幾週的努力果然還是有成果！」"])
             player.change_satisfaction(10)
         else:
-            # print("  ❌ 望著滿江紅的考卷，你覺得這學期前途堪憂……")  # 因套用pygame而調整
-            notify("  ❌ 望著滿江紅的考卷，你覺得這學期前途堪憂……")
+            tell_story(["「期中考沒有及格，接下來應該怎麼辦呢……」"])
             player.change_satisfaction(-15)
 
     def _final_week(self):
@@ -936,6 +943,9 @@ class TurnEngine:
         _valid = {k: v for k, v in player.subject_exp.items() if k != "綜合"}
         if not _valid:
             avg_exp = 0
+        elif exam_type == "期中":
+            # 期中：每科熟練度先 ×2 再 +10，再取平均
+            avg_exp = sum(v * 2 + 10 for v in _valid.values()) / len(_valid)
         else:
             avg_exp = sum(_valid.values()) / len(_valid)
 
