@@ -5,6 +5,7 @@
 # 玩家可以用打工賺來的錢購買道具，來恢復體力或提升能力。
 # ============================================================
 
+import random
 from ui import display_menu, get_player_choice, notify, open_shop_ui
 
 class Shop:
@@ -28,9 +29,10 @@ class Shop:
                 "id": "snack",
                 "name": "點心",
                 "price": 40,
-                "desc": "恢復 5 點體力，自我滿足度 +10。",
+                "desc": "恢復 5 點體力，自我滿足度 +4（70% 機率）。",
                 "stamina_restore": 5,
-                "satisfaction_gain": 10,
+                "satisfaction_gain": 4,
+                "satisfaction_miss_chance": 0.30,
             },
             {
                 "id": "energy_drink_monster",
@@ -131,9 +133,12 @@ class Shop:
             # print(f"  📖 智力提升了 {item['intel_gain']} 點！")  # 因套用pygame而調整
             notify(f"  📖 智力提升了 {item['intel_gain']} 點！")
         if "satisfaction_gain" in item:
-            self.player.change_satisfaction(item["satisfaction_gain"])
-            # print(f"  🎮 感覺心靈得到了昇華（滿足感提升）！")  # 因套用pygame而調整
-            notify(f"  🎮 感覺心靈得到了昇華（滿足感提升）！")
+            _miss_chance = item.get("satisfaction_miss_chance", 0.0)
+            if _miss_chance > 0 and random.random() < _miss_chance:
+                notify("  😐 吃了點心但心情沒什麼起色……（滿足感未提升）")
+            else:
+                self.player.change_satisfaction(item["satisfaction_gain"])
+                notify(f"  🎮 感覺心靈得到了昇華（滿足感提升）！")
         if "luck_gain" in item:
             self.player.luck += item["luck_gain"]
             # print(f"  🍀 運氣提升了 {item['luck_gain']} 點！")  # 因套用pygame而調整
