@@ -59,6 +59,43 @@ def _draw_bump_bg(surf: pygame.Surface, pr: pygame.Rect) -> None:
     pygame.draw.rect(surf, CYAN,
                      pygame.Rect(bx, top_y, _BUMP_W, full_h), 2, border_radius=14)
 
+def _draw_ap_toggle_btn(surf: pygame.Surface, ar: pygame.Rect, mpos: tuple) -> None:
+    """在底部行動面板頂部中央繪製折疊/展開手柄，並更新 _ap_toggle_rect。"""
+    tw, th = _AP_TOGGLE_W, _AP_TOGGLE_H
+    tx = ar.centerx - tw // 2
+    ty = ar.y - th
+    trect = pygame.Rect(tx, ty, tw, th)
+    _ap_toggle_rect[0] = trect
+
+    collapsed = _ap_collapse_val[0] > 0.5
+    hover = trect.collidepoint(mpos)
+
+    # 膠囊背景
+    bg_alpha = 225 if hover else 190
+    bg = pygame.Surface((tw, th), pygame.SRCALPHA)
+    pygame.draw.rect(bg, (255, 244, 228, bg_alpha), (0, 0, tw, th), border_radius=th // 2)
+    surf.blit(bg, trect.topleft)
+
+    # 邊框
+    bdr_col = CYAN if hover else (175, 145, 105)
+    pygame.draw.rect(surf, bdr_col, trect, 1, border_radius=th // 2)
+
+    # 中央握把線（兩條短橫線）
+    grip_col = (85, 65, 45) if not hover else (45, 35, 20)
+    cx, cy = trect.centerx, trect.centery
+    for dy in (-2, 2):
+        pygame.draw.line(surf, grip_col, (cx - 10, cy + dy), (cx + 10, cy + dy), 1)
+
+    # 兩側小三角（▲ 展開 / ▼ 收起）
+    aw, ah = 7, 4
+    for sx in (cx - 20, cx + 20):
+        if collapsed:   # ▲ 提示可展開
+            pts = [(sx - aw//2, cy + ah//2), (sx, cy - ah//2), (sx + aw//2, cy + ah//2)]
+        else:           # ▼ 提示可收起
+            pts = [(sx - aw//2, cy - ah//2), (sx, cy + ah//2), (sx + aw//2, cy - ah//2)]
+        pygame.draw.polygon(surf, grip_col, pts)
+
+
 def _draw_action_panel(surf, fm, fs, mode, choices, log, prompt, tvalue, rect, time_left, mpos):
     """
     新版底部面板（浮動卡片）。
@@ -473,9 +510,10 @@ def _draw_action_panel(surf, fm, fs, mode, choices, log, prompt, tvalue, rect, t
             br    = pygame.Rect(px + col * (bw + 12), py + row * (bh + 8), bw, bh)
             hover = br.collidepoint(mpos)
             dr    = _premium_btn(surf, br, (238, 210, 170), hover, radius=12)
-            lt    = fb.render(label, True, WHITE)
-            surf.blit(lt, (dr.x + (dr.width  - lt.get_width())  // 2,
-                           dr.y + (dr.height - lt.get_height()) // 2))
+            lw = _measure_mixed(fb, label)
+            _render_mixed(surf, fb, label, WHITE,
+                          dr.x + (dr.width  - lw) // 2,
+                          dr.y + (dr.height - fb.get_height()) // 2)
             content_rects.append((br, i + 1))
 
     elif mode == "yn":
@@ -487,10 +525,9 @@ def _draw_action_panel(surf, fm, fs, mode, choices, log, prompt, tvalue, rect, t
         # prompt 文字（紅色，顯示於按鈕正上方）
         if prompt[0]:
             for j, pln in enumerate(_wrap(prompt[0], fs, content_rect.width - 28)):
-                pt = fs.render(pln, True, RED)
-                surf.blit(pt, (pr.x + 14,
-                               prompt_y - (len(_wrap(prompt[0], fs, content_rect.width - 28)) - 1 - j)
-                               * (fs.get_height() + 3)))
+                _render_mixed(surf, fs, pln, RED, pr.x + 14,
+                              prompt_y - (len(_wrap(prompt[0], fs, content_rect.width - 28)) - 1 - j)
+                              * (fs.get_height() + 3))
         for i, (label, val) in enumerate([(_yn_labels[1], False), (_yn_labels[0], True)]):
             br    = pygame.Rect(pr.x + 14 + i * (BTN_W2 + BTN_SP), btn_y, BTN_W2, BTN_H2)
             hover = br.collidepoint(mpos)
@@ -499,9 +536,10 @@ def _draw_action_panel(surf, fm, fs, mode, choices, log, prompt, tvalue, rect, t
             else:
                 col_b = _yn_no_color[0]  if _yn_no_color[0]  is not None else DARK_GRAY
             dr    = _premium_btn(surf, br, col_b, hover, radius=12)
-            lt    = fb_lg.render(label, True, PANEL)
-            surf.blit(lt, (dr.x + (dr.width  - lt.get_width())  // 2,
-                           dr.y + (dr.height - lt.get_height()) // 2))
+            lw = _measure_mixed(fb_lg, label)
+            _render_mixed(surf, fb_lg, label, PANEL,
+                          dr.x + (dr.width  - lw) // 2,
+                          dr.y + (dr.height - fb_lg.get_height()) // 2)
             content_rects.append((br, val))
 
     elif mode == "text":
@@ -542,15 +580,15 @@ def _draw_action_panel(surf, fm, fs, mode, choices, log, prompt, tvalue, rect, t
 
         # 說話者名稱框（左上角）
         if speaker:
-            spk_surf = fb_lg.render(speaker, True, PANEL)
-            spk_w    = spk_surf.get_width() + 20
+            spk_w    = _measure_mixed(fb_lg, speaker) + 20
             spk_h    = fb_lg.get_height() + 6
             spk_rect = pygame.Rect(content_rect.x + PAD,
                                    content_rect.y + 6, spk_w, spk_h)
             pygame.draw.rect(surf, BTN_N, spk_rect, border_radius=6)
             pygame.draw.rect(surf, CYAN,  spk_rect, 1, border_radius=6)
-            surf.blit(spk_surf, (spk_rect.x + 10,
-                                 spk_rect.y + (spk_h - spk_surf.get_height()) // 2))
+            _render_mixed(surf, fb_lg, speaker, PANEL,
+                          spk_rect.x + 10,
+                          spk_rect.y + (spk_h - fb_lg.get_height()) // 2)
             text_top = spk_rect.bottom + 8
 
         # 劇情文字（自動換行）
@@ -585,6 +623,9 @@ def _draw_action_panel(surf, fm, fs, mode, choices, log, prompt, tvalue, rect, t
         # ── 敘述模式（mode == None）：顯示最新 log ────────────
         _draw_panel_log(surf, fs, log, content_rect, lines=6)
 
+    # ── 折疊/展開手柄（始終顯示於面板頂部中央）────────────────
+    _draw_ap_toggle_btn(surf, rect, mpos)
+
     return content_rects, ew_btn
 
 def _draw_panel_log(surf, fs, log, rect, lines=5):
@@ -600,8 +641,8 @@ def _draw_panel_log(surf, fs, log, rect, lines=5):
             col = GREEN
         else:
             col = WHITE
-        surf.blit(fs.render(_clean(line), True, col),
-                  (rect.x + 14, rect.y + 8 + i * lh))
+        _render_mixed(surf, fs, line, col,
+                      rect.x + 14, rect.y + 8 + i * lh)
 
 def _draw_exam_stress_fx(surf: pygame.Surface) -> None:
     """

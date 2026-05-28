@@ -109,8 +109,7 @@ def _draw_choice_popup(surf, fm, fs, mode, choices, log, prompt_text,
     cur_y = py + PAD_TOP
     for i, line in enumerate(q_lines):
         line_col = GRAY if (mode == "yn" and i < _yn_ctx_count) else WHITE
-        lt = fb.render(line, True, line_col)
-        surf.blit(lt, (px + PAD_X, cur_y))
+        _render_mixed(surf, fb, line, line_col, px + PAD_X, cur_y)
         cur_y += q_lh
 
     if q_lines and sep_actual:
@@ -135,8 +134,9 @@ def _draw_choice_popup(surf, fm, fs, mode, choices, log, prompt_text,
             th    = len(lines) * (fb_lg.get_height() + 3)
             ty    = dr.y + (dr.height - th) // 2
             for line in lines:
-                lt = fb_lg.render(line, True, PANEL)
-                surf.blit(lt, (dr.x + (dr.width - lt.get_width()) // 2, ty))
+                lw = _measure_mixed(fb_lg, line)
+                _render_mixed(surf, fb_lg, line, PANEL,
+                              dr.x + (dr.width - lw) // 2, ty)
                 ty += fb_lg.get_height() + 3
             btn_rects.append((br, val))
     else:
@@ -147,8 +147,9 @@ def _draw_choice_popup(surf, fm, fs, mode, choices, log, prompt_text,
             th    = len(lines) * (fb.get_height() + 3)
             ty    = dr.y + (dr.height - th) // 2
             for line in lines:
-                lt = fb.render(line, True, PANEL)
-                surf.blit(lt, (dr.x + (dr.width - lt.get_width()) // 2, ty))
+                lw = _measure_mixed(fb, line)
+                _render_mixed(surf, fb, line, PANEL,
+                              dr.x + (dr.width - lw) // 2, ty)
                 ty += fb.get_height() + 3
             btn_rects.append((br, val))
             cur_y += bh + BTN_GAP
@@ -603,8 +604,9 @@ def _draw_action_popup(surf, fs):
 
     # 標題列
     ty = pop_r.y + 8
-    title_t = fs.render(_popup_title[0], True, TITLE)
-    surf.blit(title_t, (pop_r.x + (POPUP_W - title_t.get_width()) // 2, ty))
+    title_w = _measure_mixed(fs, _popup_title[0])
+    _render_mixed(surf, fs, _popup_title[0], TITLE,
+                  pop_r.x + (POPUP_W - title_w) // 2, ty)
     ty += title_t.get_height() + 4
     pygame.draw.line(surf, DARK_GRAY,
                      (pop_r.x + 12, ty), (pop_r.right - 12, ty), 1)
@@ -621,9 +623,9 @@ def _draw_action_popup(surf, fs):
             # 多色區段：逐段橫向排列在同一行
             xoff = pop_r.x + 14
             for seg_text, seg_col in row[1]:
-                seg_s = fs.render(seg_text, True, seg_col)
-                surf.blit(seg_s, (xoff, ty))
-                xoff += seg_s.get_width()
+                sw = _measure_mixed(fs, seg_text)
+                _render_mixed(surf, fs, seg_text, seg_col, xoff, ty)
+                xoff += sw
             ty += lh
         else:
             text, col = row
@@ -1114,6 +1116,192 @@ def _draw_shop(surf: pygame.Surface,
                    edr.y + (edr.height - et.get_height()) // 2))
 
     return buy_rects, eb
+
+
+# 與 turn_engine.py 中三個 show_extra_event_popup 內容保持一致
+_GUIDE_PAGES = [
+    {
+        "title": "新手教學①：行動系統",
+        "lines": [
+            "左側面板是本週可選的行動。",
+            "每次行動消耗 1 個時間格。",
+            "時間格用完前可一直選擇行動。",
+            "---",
+            "特殊行動（右下方圓形按鈕）",
+            "不消耗時間格，隨時可用。",
+        ],
+    },
+    {
+        "title": "新手教學②：主要數值",
+        "lines": [
+            "體力：執行行動的消耗來源。",
+            "  歸零會生病，效率大幅下降。",
+            "---",
+            "自我滿足度：降至 0 = 遊戲結束！",
+            "---",
+            "智力：影響讀書效率與考試成績。",
+            "金錢：道具店與進食所需。",
+        ],
+    },
+    {
+        "title": "新手教學③：考試與目標",
+        "lines": [
+            "第 8 週有期中考、第 16 週有期末考。",
+            "各占總成績 30%，是決定結局的關鍵。",
+            "---",
+            "考前多讀書、維持高智力，",
+            "記得留足夠的時間格應考！",
+            "---",
+            "自我滿足度快歸零時，",
+            "優先選社團活動補回來。",
+        ],
+    },
+]
+_GUIDE_N = len(_GUIDE_PAGES)
+_GUIDE_BORDER = (70, 55, 130)   # 與 turn_engine 教學彈窗相同的邊框色
+
+
+def _draw_guide_modal(surf, fm, fs, mpos):
+    """
+    遊戲說明 modal（開始畫面使用）。
+    外觀與 _draw_event_ok_popup 一致；以 prev/next/close 取代確認按鈕。
+    回傳 (close_rect, prev_rect_or_None, next_rect_or_None)。
+    """
+    fb    = _font_bold[0]    or fs
+    fb_lg = _font_bold_lg[0] or fm
+
+    page  = _guide_page[0]
+    pdata = _GUIDE_PAGES[page]
+
+    # 與 show_extra_event_popup 相同方式合併正文
+    body = "\n".join(str(l) for l in pdata["lines"] if l)
+
+    # ── 版面常數（與 _draw_event_ok_popup 相同）──────────────
+    popup_w  = min(WIN_W - 80, 760)
+    PAD_X    = 28
+    PAD_TOP  = 18
+    PAD_BOT  = 24
+    HDR_H    = fb_lg.get_height() + 22
+    SEP_H    = 14
+    BTN_H    = 48
+    BTN_W    = 120
+    DOT_H    = 28          # 頁碼指示點區域高度
+    text_w   = popup_w - PAD_X * 2
+
+    title_lines = _wrap(pdata["title"], fb_lg, text_w)
+    body_lines  = _wrap(body, fb, text_w) if body else []
+    q_lh_lg     = fb_lg.get_height() + 4
+    q_lh        = fb.get_height()    + 4
+    body_h      = len(body_lines) * q_lh
+
+    total_h = min(HDR_H + PAD_TOP + body_h + SEP_H + DOT_H + BTN_H + PAD_BOT,
+                  WIN_H - 60)
+    px = (WIN_W - popup_w) // 2
+    py = max(30, (WIN_H - total_h) // 2)
+
+    # ── 全螢幕遮罩 ────────────────────────────────────────────
+    ov = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
+    ov.fill((0, 0, 0, 165))
+    surf.blit(ov, (0, 0))
+
+    # ── 投影 ──────────────────────────────────────────────────
+    sh = pygame.Surface((popup_w, total_h), pygame.SRCALPHA)
+    pygame.draw.rect(sh, (0, 0, 0, 60),
+                     pygame.Rect(0, 0, popup_w, total_h), border_radius=18)
+    surf.blit(sh, (px + 4, py + 4))
+
+    # ── 主體（米白）──────────────────────────────────────────
+    card = pygame.Surface((popup_w, total_h), pygame.SRCALPHA)
+    pygame.draw.rect(card, (255, 248, 238, 252),
+                     pygame.Rect(0, 0, popup_w, total_h), border_radius=18)
+    surf.blit(card, (px, py))
+
+    # ── 標題列（教學紫色，僅上方圓角）───────────────────────
+    hdr = pygame.Surface((popup_w, HDR_H), pygame.SRCALPHA)
+    pygame.draw.rect(hdr, (*_GUIDE_BORDER, 255),
+                     pygame.Rect(0, 0, popup_w, HDR_H), border_radius=18)
+    pygame.draw.rect(hdr, (*_GUIDE_BORDER, 255),
+                     pygame.Rect(0, 14, popup_w, HDR_H - 14))
+    surf.blit(hdr, (px, py))
+
+    # 標題文字（居中，亮米色）
+    hdr_ty = py + (HDR_H - len(title_lines) * q_lh_lg) // 2
+    for line in title_lines:
+        line_w = _measure_mixed(fb_lg, line)
+        _render_mixed(surf, fb_lg, line, (255, 232, 190),
+                      px + (popup_w - line_w) // 2, hdr_ty)
+        hdr_ty += q_lh_lg
+
+    # ── 邊框 ──────────────────────────────────────────────────
+    pygame.draw.rect(surf, _GUIDE_BORDER,
+                     pygame.Rect(px, py, popup_w, total_h), 3, border_radius=18)
+
+    # ── clip ─────────────────────────────────────────────────
+    old_clip = surf.get_clip()
+    surf.set_clip(pygame.Rect(px + 2, py + 2, popup_w - 4, total_h - 4))
+
+    # ── 正文 ─────────────────────────────────────────────────
+    cur_y = py + HDR_H + PAD_TOP
+    for line in body_lines:
+        _render_mixed(surf, fb, line, WHITE, px + PAD_X, cur_y)
+        cur_y += q_lh
+
+    surf.set_clip(old_clip)
+
+    # ── 分隔線 ────────────────────────────────────────────────
+    nav_top  = py + total_h - PAD_BOT - BTN_H - DOT_H
+    sep_y    = nav_top - SEP_H // 2
+    pygame.draw.line(surf, (210, 190, 165),
+                     (px + PAD_X, sep_y), (px + popup_w - PAD_X, sep_y), 1)
+
+    # ── 頁碼指示點 ───────────────────────────────────────────
+    DOT_R   = 5
+    dot_gap = 16
+    dots_w  = _GUIDE_N * (DOT_R * 2) + (_GUIDE_N - 1) * (dot_gap - DOT_R * 2)
+    dot_x0  = px + (popup_w - dots_w) // 2
+    dot_cy  = nav_top + DOT_H // 2
+    for _di in range(_GUIDE_N):
+        _dcx = dot_x0 + _di * dot_gap + DOT_R
+        _col = (180, 140, 255) if _di == page else (160, 130, 100)
+        pygame.draw.circle(surf, _col, (_dcx, dot_cy), DOT_R)
+
+    # ── 導航按鈕 ─────────────────────────────────────────────
+    btn_y     = py + total_h - PAD_BOT - BTN_H
+    prev_rect = None
+    next_rect = None
+
+    if page > 0:
+        prev_rect = pygame.Rect(px + PAD_X, btn_y, BTN_W, BTN_H)
+        phov = prev_rect.collidepoint(mpos)
+        _premium_btn(surf, prev_rect, _GUIDE_BORDER, phov, radius=12)
+        pw = _measure_mixed(fb_lg, "← 上一頁")
+        _render_mixed(surf, fb_lg, "← 上一頁", PANEL,
+                      prev_rect.x + (BTN_W - pw) // 2,
+                      prev_rect.y + (BTN_H - fb_lg.get_height()) // 2)
+
+    if page < _GUIDE_N - 1:
+        next_rect = pygame.Rect(px + popup_w - PAD_X - BTN_W, btn_y, BTN_W, BTN_H)
+        nhov = next_rect.collidepoint(mpos)
+        _premium_btn(surf, next_rect, _GUIDE_BORDER, nhov, radius=12)
+        nw = _measure_mixed(fb_lg, "下一頁 →")
+        _render_mixed(surf, fb_lg, "下一頁 →", PANEL,
+                      next_rect.x + (BTN_W - nw) // 2,
+                      next_rect.y + (BTN_H - fb_lg.get_height()) // 2)
+
+    # ── 關閉按鈕（右上角 × ）─────────────────────────────────
+    CLOSE_R    = 16
+    close_cx   = px + popup_w - CLOSE_R - 10
+    close_cy   = py + CLOSE_R + 10
+    close_rect = pygame.Rect(close_cx - CLOSE_R, close_cy - CLOSE_R,
+                             CLOSE_R * 2, CLOSE_R * 2)
+    chov = close_rect.collidepoint(mpos)
+    pygame.draw.circle(surf, (220, 80, 60) if chov else (200, 170, 210),
+                       (close_cx, close_cy), CLOSE_R)
+    xt = fb.render("×", True, (255, 255, 255))
+    surf.blit(xt, (close_cx - xt.get_width() // 2,
+                   close_cy - xt.get_height() // 2))
+
+    return close_rect, prev_rect, next_rect
 
 
 # 明確宣告所有名稱可被 import * 匯出（含 _ 前綴）

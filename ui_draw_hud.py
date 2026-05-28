@@ -647,8 +647,8 @@ def _draw_log(surf, fs, log, scroll, rect):
             color = GREEN
         else:
             color = WHITE
-        surf.blit(fs.render(_clean(line), True, color),
-                  (rect.x + 6, rect.y + i * lh + 4))
+        _render_mixed(surf, fs, line, color,
+                      rect.x + 6, rect.y + i * lh + 4)
     surf.set_clip(clip)
 
 def _draw_input(surf, fm, fs, mode, choices, prompt, tvalue, rect, mpos):
