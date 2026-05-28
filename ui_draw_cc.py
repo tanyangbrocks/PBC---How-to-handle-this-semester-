@@ -1022,14 +1022,16 @@ def _draw_cc_summary(surf, fm, fs, mpos, game_mode=False):
         _summ_btn(start_r,   "進入本學期",   BTN_N)
         return start_r, restart_r
 
-def _spawn_confetti():
-    """在畫面上方噴射 80 顆彩帶粒子。"""
+def _spawn_confetti(ox: float, oy: float):
+    """從指定中心點向外噴射 80 顆彩帶粒子。"""
     for _ in range(80):
+        angle = random.uniform(0, math.tau)
+        speed = random.uniform(3.5, 9.5)
         _cc_confetti.append({
-            "x":  random.uniform(0, WIN_W),
-            "y":  random.uniform(-60, -5),
-            "vx": random.uniform(-3.5, 3.5),
-            "vy": random.uniform(-9, -3),
+            "x":  ox,
+            "y":  oy,
+            "vx": math.cos(angle) * speed,
+            "vy": math.sin(angle) * speed - random.uniform(2, 5),  # 帶一點向上偏移
             "color": random.choice(_CONFETTI_COLORS),
             "life": random.randint(55, 110),
             "max_life": 110,
@@ -1083,8 +1085,11 @@ def _update_slot_state(now):
                 _slot_stop_t[i] = now
                 result = _slot_results[i]
                 if result and result.get("name") != "無天賦":
-                    _spawn_confetti()
+                    _slot_confetti_pending[0] = i   # 由 _draw_cc_slot_machine 用卡片中心觸發
+                    _slot_sfx_pending[0]      = "talent_draw"
                     _cc_shake_end[0] = now + 400
+                else:
+                    _slot_sfx_pending[0] = "talent_none"
 
 def _draw_cc_slot_machine(surf, fm, fs, mpos):
     """拉霸機天賦動畫畫面，回傳「繼續」按鈕 Rect 或 None（尚未完成時）。"""
@@ -1118,6 +1123,14 @@ def _draw_cc_slot_machine(surf, fm, fs, mpos):
     sy         = top_y + title_h + TITLE_GAP
     total_w    = 3 * cw + 2 * gap
     sx         = (WIN_W - total_w) // 2
+
+    # ── 彩帶觸發：以剛停止的天賦字卡中心為噴發原點 ───────────────
+    ci = _slot_confetti_pending[0]
+    if ci >= 0:
+        card_cx = sx + ci * (cw + gap) + cw // 2
+        card_cy = sy + ch // 2
+        _spawn_confetti(float(card_cx), float(card_cy))
+        _slot_confetti_pending[0] = -1
 
     _draw_cc_title(surf, "抽取天賦", WIN_W // 2 + shake_dx, top_y + shake_dy, phase=3.0)
 

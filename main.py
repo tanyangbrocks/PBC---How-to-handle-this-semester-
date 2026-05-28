@@ -11,6 +11,7 @@ import threading
 import random
 
 import ui
+from ui import notify_gameover
 from character import Character, TALENTS, DRAWBACKS, DE_LEVELS
 from turn_engine import TurnEngine
 from event_system import EventSystem
@@ -96,6 +97,7 @@ def game_main():
         )
 
         # ── 步驟 3：主遊戲循環（共 16 回合 = 16 週）──────────
+        premature_gameover = False
         for week in range(1, 17):
             # print(f"\n{'─'*50}")  # 因套用pygame而調整
             ui.notify(f"\n{'─'*50}")
@@ -115,6 +117,7 @@ def game_main():
             if game_over:
                 # print("\n💀 遊戲結束：你沒能撐過這學期……")  # 因套用pygame而調整
                 ui.notify("\n💀 遊戲結束：你沒能撐過這學期……")
+                premature_gameover = True
                 break   # 跳出 for，不執行 else（即不呼叫 final_settlement）
 
         else:
@@ -122,7 +125,10 @@ def game_main():
             engine.final_settlement()
 
         # ── 步驟 5：切換結束畫面，等待玩家決定────────────
-        ui.notify_end()
+        if premature_gameover:
+            ui.notify_gameover()   # Game Over 畫面（黑幕 → 背景圖 + 剪影）
+        else:
+            ui.notify_end()        # 正常結算畫面
         ui.wait_restart()
         ui.reset_ui()   # 清除 log 與狀態，準備下一局
 
