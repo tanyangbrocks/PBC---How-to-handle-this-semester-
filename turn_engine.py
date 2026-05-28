@@ -22,7 +22,7 @@ from ui import notify, ask_ok, ask_yn, ask_choice, ask_text, set_player, \
                set_roll_call_attended, set_roll_call_xed, set_special_disabled, \
                set_allnighter_count, \
                ask_skip_class_popup, ask_withdrawal_popup, set_settlement_data, \
-               ask_exam_question, play_exam_sfx
+               ask_exam_question, play_exam_sfx, run_shape_minigame
 
 
 # ── 點名事件觸發週次 ─────────────────────────────────────────────
@@ -64,7 +64,7 @@ ACTIONS = [
         "stamina_cost": 3,
         "exp_gain": 0,
         "satisfaction": 10,
-        "desc": "參加社團，放鬆心情，但會犧牲讀書時間。",
+        "desc": "參加社團，放鬆心情，但會犧牲讀書時間。自我滿足度 +10~+15，金錢 -10~+50，30% 機率不消耗體力。",
     },
     {
         "id": "part_time_job",
@@ -152,6 +152,8 @@ class TurnEngine:
         self._quiz2_score  = 0     # 第十二週計算，第十四週展示
         self._week2_course = None  # {"name":str, "credits":int}
         self._week9_job    = ""    # 美宣 / 公關 / 現場工人
+
+        self.show_tutorial = True  # 第一週是否顯示新手教學（由 main.py 設定）
 
     def run_week(self, week: int) -> bool:
         player = self.player
@@ -457,6 +459,46 @@ class TurnEngine:
         if week == 1:
             tell_story(["新的一學期又開始了，帶著暑假的好心情來上課。"])
             notify_timetable(self._WEEK1_TIMETABLE)
+            if self.show_tutorial:
+                show_extra_event_popup(
+                    [
+                        "左側面板是本週可選的行動。",
+                        "每次行動消耗 1 個時間格。",
+                        "時間格用完前可一直選擇行動。",
+                        "---",
+                        "特殊行動（右下方圓形按鈕）",
+                        "不消耗時間格，隨時可用。",
+                    ],
+                    "新手教學①：行動系統",
+                    (70, 55, 130),
+                )
+                show_extra_event_popup(
+                    [
+                        "體力：執行行動的消耗來源。",
+                        "  歸零會生病，效率大幅下降。",
+                        "---",
+                        "自我滿足度：降至 0 = 遊戲結束！",
+                        "---",
+                        "智力：影響讀書效率與考試成績。",
+                        "金錢：道具店與進食所需。",
+                    ],
+                    "新手教學②：主要數值",
+                    (70, 55, 130),
+                )
+                show_extra_event_popup(
+                    [
+                        "第 8 週有期中考、第 16 週有期末考。",
+                        "各占總成績 30%，是決定結局的關鍵。",
+                        "---",
+                        "考前多讀書、維持高智力，",
+                        "記得留足夠的時間格應考！",
+                        "---",
+                        "自我滿足度快歸零時，",
+                        "優先選社團活動補回來。",
+                    ],
+                    "新手教學③：考試與目標",
+                    (70, 55, 130),
+                )
             tell_story([
                 "「吼呦，雖然大部分的課是我自己選的，不過這學期的課表看起來也太無聊了吧！」",
                 "上課時太無聊，眼睛快要闔起來了，下課時要不要去商店裡繞一繞？",
@@ -681,6 +723,30 @@ class TurnEngine:
         cost    = action["stamina_cost"]
         results = []   # 供彈出視窗顯示的結果列表
         _chosen_subject = None   # 本次選定的科目（有 exp_gain 時設定）
+
+        # ── 社團活動特殊處理 ──────────────────────────────────
+        if action.get("id") == "club_activity":
+            # 30% 機率不消耗體力
+            if random.random() < 0.30:
+                results.append("體力 ±0（幸運！今天活動很輕鬆）")
+            else:
+                player.consume_stamina(cost)
+                results.append(f"體力 -{cost}")
+            # 自我滿足度 +10 ~ +15
+            sat = random.randint(10, 15)
+            player.change_satisfaction(sat)
+            results.append(f"自我滿足度 +{sat}")
+            if player.satisfaction < 60:
+                results.append("---")
+                results.append("! 自我滿足度過低，本週可支配時間大幅下降")
+            # 金錢 -10 ~ +50
+            money_delta = random.randint(-10, 50)
+            player.money += money_delta
+            sign = "+" if money_delta >= 0 else ""
+            results.append(f"金錢 {sign}{money_delta} 元")
+            notify(f"  ✔ 執行【{action['name']}】完成。")
+            show_action_result(results, title=action["name"])
+            return _chosen_subject
 
         # ── 體力 ──────────────────────────────────────────────
         if cost > 0:
@@ -909,9 +975,11 @@ class TurnEngine:
         exam_modifier    = self._pre_exam_check()
         base_stats_score = self._calculate_exam_score("期中") * 0.5
         mini_game_rate   = self._run_exam_mini_game("期中")
-        mini_game_score  = mini_game_rate * 100 * 0.5
+        qa_score         = mini_game_rate * 100 * 0.25
+        minigame_rate    = run_shape_minigame()
+        minigame_score   = minigame_rate * 100 * 0.25
 
-        total_score = (base_stats_score + mini_game_score) * exam_modifier
+        total_score = (base_stats_score + qa_score + minigame_score) * exam_modifier
         player.grades["期中"] = max(0.0, min(100.0, total_score))
         player.revealed_grades.add("期中")
 
@@ -938,18 +1006,19 @@ class TurnEngine:
         exam_modifier    = self._pre_exam_check()
         base_stats_score = self._calculate_exam_score("期末") * 0.5
         mini_game_rate   = self._run_exam_mini_game("期末")
-        mini_game_score  = mini_game_rate * 100 * 0.5
+        qa_score         = mini_game_rate * 100 * 0.25
+        minigame_rate    = run_shape_minigame()
+        minigame_score   = minigame_rate * 100 * 0.25
 
-        total_score = (base_stats_score + mini_game_score) * exam_modifier
+        total_score = (base_stats_score + qa_score + minigame_score) * exam_modifier
         player.grades["期末"] = max(0.0, min(100.0, total_score))
         player.revealed_grades.add("期末")
 
         # print(f"\n📊 期末考最終成績：{player.grades['期末']:.1f} 分")  # 因套用pygame而調整
         notify(f"\n📊 期末考最終成績：{player.grades['期末']:.1f} 分")
-        # print(f"  實力底分：{base_stats_score:.1f}")  # 因套用pygame而調整
         notify(f"  實力底分：{base_stats_score:.1f}")
-        # print(f"  考場發揮：{mini_game_score:.1f}")  # 因套用pygame而調整
-        notify(f"  考場發揮：{mini_game_score:.1f}")
+        notify(f"  答題得分：{qa_score:.1f}")
+        notify(f"  形狀小遊戲：{minigame_score:.1f}")
 
         if player.grades["期末"] >= 60:
             # print("  ✅ 成功撐過期末大魔王！")  # 因套用pygame而調整
