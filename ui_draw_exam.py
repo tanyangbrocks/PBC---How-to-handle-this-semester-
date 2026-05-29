@@ -7,6 +7,7 @@ import random
 
 from ui_state import *
 from ui_const import *
+from ui_draw_base import _play_sfx
 
 # ── 常數 ──────────────────────────────────────────────────
 

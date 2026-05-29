@@ -258,6 +258,74 @@ def _sfx_file_exists(key: str, sym_map: dict[str, str]) -> tuple[bool, str]:
     return False, key + ".mp3"   # 最可能的預期路徑
 
 
+def audit_play_sfx_availability(scan_files: list[Path]) -> None:
+    """
+    分別追蹤兩個名稱的可用性：
+      _play_sfx  → 私有，定義於 ui_draw_base.py
+      play_sfx   → 公開包裝，定義於 ui.py
+    規則：
+      - 自己定義了 def <name>  → OK
+      - from <provider> import *   → OK
+      - from <provider> import <name>  → OK
+      - 其餘 → MISS（NameError at runtime）
+    """
+    print_section("Sound audit ③: _play_sfx / play_sfx symbol availability per module")
+
+    # 每個可呼叫名稱對應的「提供者模組」
+    VARIANTS = {
+        "_play_sfx": "ui_draw_base",
+        "play_sfx":  "ui",
+    }
+
+    wildcard_pat = re.compile(r'from\s+(\w+)\s+import\s+\*')
+    miss_count = 0
+
+    for fp in scan_files:
+        if not fp.exists():
+            continue
+        raw_text = fp.read_text(encoding="utf-8", errors="replace")
+        lines    = raw_text.splitlines()
+        # 把 backslash 繼行合併成單行，方便跨行 import 比對
+        merged   = re.sub(r'\\\n\s*', ' ', raw_text)
+
+        # 收集此檔中各名稱的呼叫行（跳過 def 行）
+        for fname, provider in VARIANTS.items():
+            def_pat      = re.compile(r'def\s+' + re.escape(fname) + r'\s*\(')
+            call_pat     = re.compile(r'(?:^|\b)' + re.escape(fname) + r'\s*\(')
+            # 也匹配括號式多行 import：from X import (\n  ...\n  play_sfx\n)
+            explicit_pat = re.compile(
+                r'from\s+\S+\s+import\s+[^;]*\b' + re.escape(fname) + r'\b')
+
+            calls = [ln for ln, line in enumerate(lines, 1)
+                     if call_pat.search(line) and not def_pat.search(line)]
+            if not calls:
+                continue
+
+            has_def     = any(def_pat.search(line) for line in lines)
+            wildcard_ok = any(provider == m.group(1)
+                              for line in lines
+                              for m in wildcard_pat.finditer(line))
+            # 在合併後的文字中比對（處理 backslash 繼行 + 括號式多行 import）
+            explicit_ok = bool(explicit_pat.search(merged))
+
+            available = has_def or wildcard_ok or explicit_ok
+
+            if available:
+                how = ("self-defined" if has_def
+                       else f"from {provider} import {'*' if wildcard_ok else fname}")
+                print(f"  {GREEN}[OK]  {fp.name:<32}  {fname}  ({how}){RESET}")
+            else:
+                miss_count += 1
+                imports = [line.strip() for line in lines
+                           if re.match(r'\s*(import|from)\s', line)]
+                print(f"  {RED}[MISS] {fp.name}  ← 呼叫了 {fname} 但未 import！{RESET}")
+                print(f"         呼叫位置 (前5): {calls[:5]}")
+                print(f"         目前 imports: {imports}")
+
+    if miss_count == 0:
+        print(f"  {GREEN}[OK] 所有呼叫 _play_sfx / play_sfx 的模組均已正確 import 對應名稱{RESET}")
+
+
 def audit_sound_system(lines: list[str]) -> None:
     sym_map  = collect_sfx_registrations(lines)
     all_calls = collect_play_sfx_calls(SCAN_FILES)
@@ -304,6 +372,9 @@ def audit_sound_system(lines: list[str]) -> None:
         print(f"\n  {YELLOW}[INFO] 以下 {len(dynamic_rows)} 處為動態參數，無法靜態驗證：{RESET}")
         for c in dynamic_rows:
             print(f"         {c['file']}:{c['line_no']}  play_sfx({c['key']})")
+
+    # ── 3. 驗證每個呼叫模組的 _play_sfx 名稱可取得 ────────────
+    audit_play_sfx_availability(SCAN_FILES)
 
 
 # ═══════════════════════════════════════════════════════════════
