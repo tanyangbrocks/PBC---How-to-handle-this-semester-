@@ -188,7 +188,7 @@ def _draw_cc_title(surf: pygame.Surface, text: str,
     OUTLINE_COL = (18,  8, 45)
     OUTLINE_OFF = 2
 
-    _CREATIVE_PATH = os.path.join(os.path.dirname(__file__), "asset", "fonts", "Creative.ttc")
+    _CREATIVE_PATH = resource_path("asset", "fonts", "Creative.ttc")
     _ck = "creative_34b"
     if _ck not in _extra_fonts:
         try:
@@ -1184,7 +1184,7 @@ def _draw_cc_slot_machine(surf, fm, fs, mpos):
         shake_dx = shake_dy = 0
 
     # ── Creative 字型（天賦名稱）──────────────────────────────
-    _CREATIVE_PATH = os.path.join(os.path.dirname(__file__), "asset", "fonts", "Creative.ttc")
+    _CREATIVE_PATH = resource_path("asset", "fonts", "Creative.ttc")
     for _ck, _sz in [("creative_26b", 26), ("creative_22", 22)]:
         if _ck not in _extra_fonts:
             try:

@@ -14,8 +14,7 @@ def _play_sfx(name: str) -> None:
     """播放指定音效；key 不在 _sfx 時嘗試以 name 當檔名自動載入（.mp3 / .wav）。"""
     if name not in _sfx:
         # ── 按需自動載入：把 name 當作 asset/audio/se/ 內的檔名（無副檔名）────
-        _se_base = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                "asset", "audio", "se")
+        _se_base = resource_path("asset", "audio", "se")
         _loaded = None
         for _ext in (".mp3", ".wav"):
             _fp = os.path.join(_se_base, name + _ext)

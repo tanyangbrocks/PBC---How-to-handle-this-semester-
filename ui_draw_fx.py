@@ -706,7 +706,7 @@ def _draw_start(surf, fm, fl, mpos):
     OUTLINE_OFF = 2                # 描邊厚度（px）
 
     # — 字型：優先 Creative.ttc 84px 粗體，否則 fallback 到 fl —
-    _CREATIVE_PATH = os.path.join(os.path.dirname(__file__), "asset", "fonts", "Creative.ttc")
+    _CREATIVE_PATH = resource_path("asset", "fonts", "Creative.ttc")
     _ck = "creative_84b"
     if _ck not in _extra_fonts:
         try:

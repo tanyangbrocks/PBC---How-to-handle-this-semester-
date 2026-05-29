@@ -3,6 +3,20 @@
 #  by refactor_ui.py
 # ============================================================
 import os
+import sys
+
+def resource_path(*parts: str) -> str:
+    """
+    回傳資源檔案的絕對路徑。
+    - 開發環境：相對於本檔案所在目錄（專案根目錄）
+    - PyInstaller --onefile：相對於 sys._MEIPASS 解壓目錄
+    - pygbag（WebAssembly）：相對於專案根目錄
+    """
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        base = sys._MEIPASS
+    else:
+        base = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base, *parts)
 
 # ─────────────────────────────────────────
 #  顏色（陽光少女色系）
@@ -65,8 +79,7 @@ TAB_H    = 36                             # 行動面板頂部標籤列
 CHAR_H   = WIN_H - STATUS_H - ACTION_H   # 人物立繪區 = 335px
 
 # ── 人物立繪系統 ──────────────────────────────────────────────────────
-_CHAR_ART_DIR      = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                   "asset", "picture", "character")
+_CHAR_ART_DIR      = resource_path("asset", "picture", "character")
 
 _PORTRAIT_FADE_MS        = 200   # 淡入總時長（ms）
 PORTRAIT_DISPLAY_H_FACTOR = 2.2  # 立繪縱向放大倍率（腰部以上可見，約 45% 顯示）
@@ -100,8 +113,7 @@ _CONFETTI_COLORS = [
 ]
 
 # ── 道具店小圖示 ──────────────────────────────────────────────
-_SHOP_ICON_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                               "asset", "picture", "small_object")
+_SHOP_ICON_DIR = resource_path("asset", "picture", "small_object")
 
 _SHOP_ITEM_ICON_MAP: dict = {
     "coffee":               "i_coffee",

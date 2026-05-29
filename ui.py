@@ -619,8 +619,7 @@ def run_ui():
         pygame.mixer.init()
         pygame.mixer.set_reserved(1)          # channel 0 保留給突發事件正面音效
         _event_ch[0] = pygame.mixer.Channel(0)
-        _se_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                               "asset", "audio", "se")
+        _se_dir = resource_path("asset", "audio", "se")
         def _ld(fn):
             try:
                 return pygame.mixer.Sound(os.path.join(_se_dir, fn))
@@ -686,8 +685,7 @@ def run_ui():
 
     try:
         _cur_raw = pygame.image.load(
-            os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                         "asset", "picture", "small_object", "pen_mouse.webp")
+            resource_path("asset", "picture", "small_object", "pen_mouse.webp")
         ).convert_alpha()
         _cur_h   = min(_cur_raw.get_height(), 40)
         _cur_w   = int(_cur_raw.get_width() * _cur_h / _cur_raw.get_height())
@@ -734,8 +732,7 @@ def run_ui():
     _grads["start"]  = _gradient_surf(WIN_W, WIN_H,    (255, 248, 226), (255, 228, 192))
 
     # ── 匯入背景圖片（cover 縮放，失敗時保留漸層）───────────
-    _bg_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                           "asset", "picture", "background")
+    _bg_dir = resource_path("asset", "picture", "background")
     _title_img = _load_cover(
         os.path.join(_bg_dir, "title_background.webp"), WIN_W, WIN_H)
     if _title_img is not None:
@@ -778,8 +775,7 @@ def run_ui():
         pass
 
     # ── BGM 初始化（設定資料夾，播放標題音樂）──────────────────
-    _bgm_dir[0] = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                               "asset", "audio", "bgm")
+    _bgm_dir[0] = resource_path("asset", "audio", "bgm")
     _request_bgm("Music-Morning_Rain.mp3")
 
     # ── 角色創建背景影片（WEBM）────────────────────────────────
@@ -797,9 +793,8 @@ def run_ui():
         pass
 
     # ── 結算過場影片（MP4）───────────────────────────────────────
-    _end_vid_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                 "asset", "video",
-                                 "15673cd6-bc6e-432b-bf3f-de47ecfe4918_0.mp4")
+    _end_vid_path = resource_path("asset", "video",
+                                  "15673cd6-bc6e-432b-bf3f-de47ecfe4918_0.mp4")
     try:
         import cv2 as _cv2_ev
         _ev_cap = _cv2_ev.VideoCapture(_end_vid_path)

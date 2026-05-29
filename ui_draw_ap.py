@@ -18,8 +18,7 @@ def _draw_action_icon(surf: pygame.Surface, cx: int, cy: int, ar: int, label: st
         return
     # 懶載入原始圖（每個 label 只 load 一次）
     if label not in _action_icon_srcs:
-        _icon_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                 "asset", "picture", "icon")
+        _icon_dir = resource_path("asset", "picture", "icon")
         path = os.path.join(_icon_dir, _ACTION_ICON_FILES[label])
         try:
             _action_icon_srcs[label] = pygame.image.load(path).convert_alpha()

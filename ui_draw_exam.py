@@ -58,10 +58,8 @@ _SMG_ICON_FILES = {
     "diamond":  "rest_icon.webp",
 }
 
-_BG_DIR   = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                          "asset", "picture", "background")
-_ICON_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                          "asset", "picture", "icon")
+_BG_DIR   = resource_path("asset", "picture", "background")
+_ICON_DIR = resource_path("asset", "picture", "icon")
 
 # ── 小遊戲共用色票（淺背景 × 深色文字）────────────────────
 _SMG_BG      = (248, 243, 230)   # 奶油米色背景
