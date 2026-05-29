@@ -17,12 +17,15 @@ from skill_system import SkillSystem
 from shop_V03 import Shop
 from ui import notify, ask_ok, ask_yn, ask_choice, ask_text, set_player, \
                notify_timetable, notify_grade_report, set_time, show_action_result, \
+               show_action_blocked, \
                ask_subject_popup, trigger_time_overflow_warning, tell_story, \
                show_extra_event_popup, ask_exam_start, set_roll_call, clear_roll_call, \
                set_roll_call_attended, set_roll_call_xed, set_special_disabled, \
                set_allnighter_count, \
                ask_skip_class_popup, ask_withdrawal_popup, set_settlement_data, \
-               ask_exam_question, play_exam_sfx, run_shape_minigame
+               ask_exam_question, play_exam_sfx, run_shape_minigame, play_sfx, \
+               trigger_screen_shake, set_portrait_override, get_portrait_prefix, \
+               run_pregame_countdown
 
 
 # ── 點名事件觸發週次 ─────────────────────────────────────────────
@@ -64,7 +67,7 @@ ACTIONS = [
         "stamina_cost": 3,
         "exp_gain": 0,
         "satisfaction": 10,
-        "desc": "參加社團，放鬆心情，但會犧牲讀書時間。自我滿足度 +10~+15，金錢 -10~+50，30% 機率不消耗體力。",
+        "desc": "參加社團，放鬆心情，但會犧牲讀書時間。自我滿足度 +10~+15，金錢 -10~+50，基礎 30% 機率不消耗體力（運氣 >20 時機率提升）。",
     },
     {
         "id": "part_time_job",
@@ -202,6 +205,10 @@ class TurnEngine:
                 lines.append(f"金錢 {'+' if md >= 0 else ''}{md}")
             if sat != 0:
                 lines.append(f"自我滿足度 {'+' if sat > 0 else ''}{sat}")
+            if ev_id in ("part_time", "tutoring"):
+                play_sfx("benkirb-shine-11-268907")
+            elif ev_id == "club":
+                play_sfx("benkirb-shine-6-268910")
             show_extra_event_popup(lines or ["（本週生效）"], ev["name"],
                                    ev.get("popup_color", (155, 100, 50)))
         return total_t
@@ -233,6 +240,12 @@ class TurnEngine:
 
         # ── 自我滿意度狀態判定（所有週初事件結束後、行動開始前）──
         for name, msg, color in player.apply_weekly_status():
+            if name == "生病":
+                play_sfx("powerdown07")
+            elif name == "無力狀態":
+                play_sfx("freesound_community-power-down-7103")
+            elif name == "神采奕奕":
+                play_sfx("faith_mulato-shine-193240")
             show_extra_event_popup([msg], f"【{name}】", color)
 
         # ── 計算本週可支配時間（狀態乘數已套用）──────────────
@@ -271,8 +284,7 @@ class TurnEngine:
                         notify(f"😶 你還不餓，飽腹狀態剩 {full_timer} 個時間格後解除。")
                         continue
                     if player.money < sa.get("money_cost", 0):
-                        notify(f"💸 錢不夠！【{sa['name']}】需要 ${sa['money_cost']}，"
-                               f"目前只有 ${player.money}。")
+                        show_action_blocked(["你已經沒錢吃飯了！"], title="進食")
                         continue
 
                 # ── 翹課：先跳出選課彈窗 ──────────────────────────
@@ -683,11 +695,14 @@ class TurnEngine:
                 "「簡報、報告、期末作業突然一起出現，行事曆被排得密密麻麻。」",
                 "「到底要先處理什麼東西啊！」",
             ])
+            _w14_costs    = [10, 20, 5]   # 各選項體力消耗（依選項順序）
+            _w14_disabled = {i + 1 for i, c in enumerate(_w14_costs)
+                             if player.stamina < c}
             ans = ask_choice([
                 "製作小組簡報：從零開始排版，完成後作業 70 分，體力 -10",
                 "撰寫個人五千字書面報告：最困難的部分還等著你，完成後作業 85 分，體力 -20",
                 "撰寫個人三千字觀影心得：要先重看一遍電影才能寫，完成後作業 65 分，體力 -5",
-            ])
+            ], disabled=_w14_disabled)
             if ans == 1:
                 player.grades["作業"] = max(player.grades["作業"], 70.0)
                 player.consume_stamina(10)
@@ -736,24 +751,50 @@ class TurnEngine:
 
         # ── 社團活動特殊處理 ──────────────────────────────────
         if action.get("id") == "club_activity":
-            # 30% 機率不消耗體力
-            if random.random() < 0.30:
+            # 運氣影響不耗體力機率（分段線性，上限 95%）：
+            #   luck ≤ 20            → 不加成
+            #   20 < luck ≤ 40      → 每點 +1%
+            #   luck > 40            → 每點 +0.5%
+            if player.luck <= 20:
+                _luck_bonus = 0.0
+            elif player.luck <= 40:
+                _luck_bonus = (player.luck - 20) * 0.01
+            else:
+                _luck_bonus = 0.20 + (player.luck - 40) * 0.005
+            _free_prob = min(0.80, 0.30 + _luck_bonus)
+            if random.random() < _free_prob:
                 results.append("體力 ±0（幸運！今天活動很輕鬆）")
             else:
                 player.consume_stamina(cost)
                 results.append(f"體力 -{cost}")
-            # 自我滿足度 +10 ~ +15
-            sat = random.randint(10, 15)
+            # 是否有「參加社團」額外事件
+            _has_club_ev = "club" in player.extra_events
+            if _has_club_ev:
+                # 固定最大值
+                sat         = 15
+                money_delta = 50
+            else:
+                sat         = random.randint(10, 15)
+                money_delta = random.randint(-10, 50)
+            # 自我滿足度
             player.change_satisfaction(sat)
             results.append(f"自我滿足度 +{sat}")
             if player.satisfaction < 60:
                 results.append("---")
                 results.append("! 自我滿足度過低，本週可支配時間大幅下降")
-            # 金錢 -10 ~ +50
-            money_delta = random.randint(-10, 50)
+            # 金錢
             player.money += money_delta
             sign = "+" if money_delta >= 0 else ""
             results.append(f"金錢 {sign}{money_delta} 元")
+            # 社團事件額外隨機好處：智力 +2~8 或 運氣 +2~8
+            if _has_club_ev:
+                _bonus = random.randint(2, 8)
+                if random.random() < 0.5:
+                    player.intel += _bonus
+                    results.append(f"智力 +{_bonus}（社團加成！）")
+                else:
+                    player.luck += _bonus
+                    results.append(f"運氣 +{_bonus}（社團加成！）")
             notify(f"  ✔ 執行【{action['name']}】完成。")
             show_action_result(results, title=action["name"])
             return _chosen_subject
@@ -890,7 +931,9 @@ class TurnEngine:
         modifier = 1.0
 
         # ── 體力檢測（優先）────────────────────────────────────
-        if player.stamina < 30 and random.random() < 0.4:
+        if (player.stamina < 30
+                and player.stamina < player.stamina_max * 0.3
+                and random.random() < 0.4):
             player.change_satisfaction(-15)
             modifier *= 0.5
             show_extra_event_popup(
@@ -974,6 +1017,36 @@ class TurnEngine:
 
         return correct_count / len(selected_qs)
 
+    def _pre_minigame_ceremony(self, exam_type: str) -> None:
+        """
+        形狀小遊戲前的預備儀式：
+          1. 切換立繪到考試壓力版（{prefix}_9）
+          2. 0.5 秒靜候（讓立繪淡入後才顯示文字）
+          3. 第一句台詞
+          4. 全螢幕震動 + 第二句台詞
+          5. 倒數動畫（準備提示 → 3 → 2 → 1 → 開始！）
+          6. 解除立繪覆寫
+        """
+        import time
+        prefix = get_portrait_prefix()
+
+        # 切換立繪（_9 = 考試壓力版；若檔案不存在則保持前一張立繪）
+        set_portrait_override(f"{prefix}_9")
+        time.sleep(0.5)   # 遊戲執行緒暫停，pygame 主執行緒持續運行
+
+        # 第一句台詞（會自動收起行動面板）
+        tell_story(["即便已經做足準備，考試壓力仍逼得你喘不過氣……"])
+
+        # 震動後接第二句台詞（trigger_screen_shake 非阻塞，與 story cmd 同幀觸發）
+        trigger_screen_shake()
+        tell_story(["此時考驗的是你的臨場發揮能力！"])
+
+        # 倒數動畫（阻塞直到「開始！」淡出）
+        run_pregame_countdown()
+
+        # 解除立繪覆寫（形狀小遊戲進行中恢復自動選擇邏輯）
+        set_portrait_override(None)
+
     def _midterm_week(self):
         player = self.player
 
@@ -987,6 +1060,9 @@ class TurnEngine:
         base_stats_score = self._calculate_exam_score("期中") * 0.5
         mini_game_rate   = self._run_exam_mini_game("期中")
         qa_score         = mini_game_rate * 100 * 0.25
+        # ── 形狀小遊戲前的預備儀式（立繪 _9 + 台詞 + 倒數）──────
+        self._pre_minigame_ceremony("期中")
+        # ─────────────────────────────────────────────────────────
         minigame_rate    = run_shape_minigame("期中")
         minigame_score   = minigame_rate * 100 * 0.25
 
@@ -1018,6 +1094,9 @@ class TurnEngine:
         base_stats_score = self._calculate_exam_score("期末") * 0.5
         mini_game_rate   = self._run_exam_mini_game("期末")
         qa_score         = mini_game_rate * 100 * 0.25
+        # ── 形狀小遊戲前的預備儀式（立繪 _9 + 台詞 + 倒數）──────
+        self._pre_minigame_ceremony("期末")
+        # ─────────────────────────────────────────────────────────
         minigame_rate    = run_shape_minigame("期末")
         minigame_score   = minigame_rate * 100 * 0.25
 

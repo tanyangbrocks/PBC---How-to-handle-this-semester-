@@ -42,14 +42,16 @@ def set_player(player):
     """把角色物件傳給 UI，讓狀態欄即時更新。"""
     _cmd_q.put(("player", player))
 
-def ask_choice(options) -> int:
+def ask_choice(options, disabled: set = None) -> int:
     """
     取代 get_player_choice()。
-    options: 字串列表 或 帶 'name' key 的字典列表。
+    options:  字串列表 或 帶 'name' key 的字典列表。
+    disabled: 停用選項的 1-based 索引集合（None = 全部可選）；
+              停用的選項會以灰色顯示且不可點擊。
     回傳：0 = 返回/結束，1..n = 玩家選擇的編號（1-based）。
     """
     labels = [opt["name"] if isinstance(opt, dict) else str(opt) for opt in options]
-    _cmd_q.put(("choices", labels))
+    _cmd_q.put(("choices", labels, disabled or set()))
     _reply_event.clear()
     _reply_event.wait()
     return _reply_val[0]
@@ -194,6 +196,10 @@ def trigger_time_overflow_warning():
 def trigger_screen_shake() -> None:
     """觸發全螢幕短暫劇烈晃動效果（突發事件出現時）。非阻塞。"""
     _cmd_q.put(("screen_shake",))
+
+def play_sfx(name: str) -> None:
+    """從遊戲執行緒播放指定音效（非阻塞）。"""
+    _play_sfx(name)
 
 def play_event_sfx(is_positive: bool) -> None:
     """突發事件觸發時播放對應音效（可從遊戲執行緒直接呼叫）。"""
@@ -384,6 +390,26 @@ def trigger_ripple() -> None:
     """觸發漣漪轉場效果；由遊戲執行緒在週次切換時呼叫。"""
     _cmd_q.put(("ripple",))
 
+def set_portrait_override(key: "str | None") -> None:
+    """
+    強制立繪顯示指定 key（e.g. 'b1_9'）。
+    key=None 時解除強制，恢復 _get_portrait_key() 的自動選擇邏輯。非阻塞。
+    """
+    _cmd_q.put(("portrait_override", key))
+
+def get_portrait_prefix() -> str:
+    """回傳當前角色立繪前綴（'b1' 或 'g1'）。可從遊戲執行緒直接讀取（無鎖）。"""
+    return _portrait_prefix[0]
+
+def run_pregame_countdown() -> None:
+    """
+    在形狀小遊戲之前播放倒數動畫（準備提示 → 3 → 2 → 1 → 開始！）。
+    阻塞直到「開始！」完全淡出後才繼續。
+    """
+    _reply_event.clear()
+    _cmd_q.put(("pregame_countdown",))
+    _reply_event.wait()
+
 def show_action_result(lines: list, title: str = "行動結果",
                        direction: str = "right") -> None:
     """
@@ -400,6 +426,21 @@ def show_action_result(lines: list, title: str = "行動結果",
     _now = pygame.time.get_ticks()
     _popup_t0[0]        = _now
     _action_flash_t0[0] = _now   # 觸發全螢幕白光閃爍
+
+def show_action_blocked(lines: list, title: str = "",
+                        sfx: str = "damage6",
+                        direction: str = "right") -> None:
+    """
+    由遊戲執行緒呼叫：顯示行動阻斷提示視窗（不觸發白光閃爍），並播放音效。
+    適用於進食金錢不足等無法執行行動的情況。
+    """
+    _popup_lines.clear()
+    _popup_lines.extend(lines)
+    _popup_title[0]     = title
+    _popup_direction[0] = direction
+    _popup_t0[0]        = pygame.time.get_ticks()
+    # 不設定 _action_flash_t0（不觸發白光閃爍）
+    _play_sfx(sfx)
 
 def display_status(player):
     set_player(player)
@@ -427,7 +468,8 @@ def _handle_cc_action(ev_pos):
         # 依賴 _cc_btn_cache 中暫存的按鈕 Rect（由繪製函式寫入）
         ok = _cc_btn_cache.get("name_ok")
         if ok and ok.collidepoint(ev_pos):
-            _cc_reply_val[0] = _cc_tvalue[0]
+            _cc_reply_val[0] = _cc_tvalue[0] + _cc_composing[0]   # 包含組字中的文字
+            _cc_composing[0] = ""
             _cc_mode[0] = ""
             pygame.key.stop_text_input()
             _cc_reply_event.set()
@@ -567,6 +609,8 @@ def _handle_cc_action(ev_pos):
 
 def run_ui():
     """啟動 pygame 視窗並進入主迴圈，直到視窗關閉。"""
+    import os
+    os.environ["SDL_IME_SHOW_UI"] = "1"   # 啟用原生 IME 候選字清單與組字底線（須在 init 前設定）
     pygame.init()
     pygame.key.set_repeat(400, 50)  # 長按重複：400ms 後開始，每 50ms 一次（backspace 連刪）
 
@@ -601,6 +645,8 @@ def run_ui():
         _sfx["talent_draw"]  = _ld("u_u4pf5h7zip-prop_show-345987.mp3")
         _sfx["talent_none"]  = _ld("nikin-pop-up-something-160353.mp3")
         _sfx["exam_correct"] = _ld("updatepelgo-success-221935.mp3")
+        _sfx["pcd_3"]  = _ld("universfield-soft-notice-146623.mp3")
+        _sfx["pcd_go"] = _ld("notification_message-notification-alert-9-331720.mp3")
     except Exception:
         pass
 
@@ -802,6 +848,8 @@ def run_ui():
     running = True
     _prev_hov_btns: set = set()   # 上一幀 hover 中的按鈕 key 集合（用於首次進入偵測）
     _prev_tick = pygame.time.get_ticks()
+    _ime_arrow_prev    = {"left": False, "right": False}  # 上一幀 ←/→ 按壓狀態（邊緣偵測用）
+    _ime_cancel_frames = [0]   # 強制取消 IME 後，忽略殘留 TEXTEDITING 的幀數倒數
     while running:
         _now_tick = pygame.time.get_ticks()
         _dt_ms    = max(1, _now_tick - _prev_tick)
@@ -837,6 +885,9 @@ def run_ui():
             elif tag == "choices":
                 _choices.clear()
                 _choices.extend(cmd[1])
+                _choices_disabled.clear()
+                if len(cmd) > 2:
+                    _choices_disabled.update(cmd[2])
                 _mode[0] = "choices"
             elif tag == "yn":
                 _prompt[0]       = cmd[1]
@@ -922,7 +973,13 @@ def run_ui():
                 _cc_data[0]      = tag
                 _cc_tvalue[0]    = ""
                 _cc_composing[0] = ""
+                _cc_caret_pos[0] = 0
                 pygame.key.start_text_input()
+                # 告知 IME 輸入框位置，讓候選字清單出現在正確位置
+                pygame.key.set_text_input_rect(pygame.Rect(
+                    (WIN_W - 520) // 2 + 30 + _fs_off[0],
+                    (WIN_H - 250) // 2 + 80 + _fs_off[1],
+                    460, 42))
             elif tag == "cc_portrait":
                 _cc_mode[0] = "portrait"
             elif tag == "cc_dept":
@@ -989,6 +1046,15 @@ def run_ui():
             elif tag == "screen_shake":
                 _evt_shake_t0[0] = pygame.time.get_ticks()
                 _play_sfx("damage6")
+            elif tag == "portrait_override":
+                _portrait_override_key[0] = cmd[1]
+            elif tag == "pregame_countdown":
+                _info_modal_active[0] = False   # 確保資訊一覽不干擾
+                _panel_slide_val[0]   = 1.0     # 立即完全收起面板（無動畫）
+                _panel_slide_dir[0]   = "none"
+                _pcd_active[0]        = True
+                _pcd_phase[0]         = "msg"
+                _pcd_t0[0]            = pygame.time.get_ticks()
             elif tag == "roll_call_set":
                 _roll_call_course[0]   = cmd[1]
                 _roll_call_attended[0] = False   # 新的點名週次，重置出席狀態
@@ -1355,6 +1421,13 @@ def run_ui():
             pygame.draw.line(screen, _ic, (_ix+_iw,     _iy+_ih),    (_ix+_iw-_a,  _iy+_ih),       2)
             pygame.draw.line(screen, _ic, (_ix+_iw,     _iy+_ih),    (_ix+_iw,     _iy+_ih-_a),    2)
 
+        # ── 考場倒數動畫覆蓋層（形狀小遊戲前，蓋在所有遊戲 UI 之上）──
+        if _pcd_active[0]:
+            _pcd_done = _draw_pregame_countdown(screen, fm, pygame.time.get_ticks())
+            if _pcd_done:
+                _reply_val[0] = True
+                _reply_event.set()
+
         # ── 形狀小遊戲覆蓋層（優先蓋過所有遊戲 UI）────────────
         if _smg_active[0]:
             _draw_shape_minigame(screen, fm, fs, fm, mpos, _dt_ms)
@@ -1400,6 +1473,36 @@ def run_ui():
                                    mpos[1] - _cur_img.get_height() + _cursor_glow_pad))
 
         pygame.display.flip()
+
+        # ── IME 組字中方向鍵偵測（IME 攔截了 KEYDOWN，改用 GetAsyncKeyState 輪詢）──
+        if _phase[0] == "char_create" and _cc_mode[0] == "name" and _cc_composing[0]:
+            try:
+                import ctypes
+                _left_now  = bool(ctypes.windll.user32.GetAsyncKeyState(0x25) & 0x8000)
+                _right_now = bool(ctypes.windll.user32.GetAsyncKeyState(0x27) & 0x8000)
+                _triggered = None
+                if _left_now and not _ime_arrow_prev["left"]:
+                    _triggered = "left"
+                elif _right_now and not _ime_arrow_prev["right"]:
+                    _triggered = "right"
+                _ime_arrow_prev["left"]  = _left_now
+                _ime_arrow_prev["right"] = _right_now
+                if _triggered:
+                    # 移動游標（在已確認文字範圍內）
+                    # 到達邊界時不 commit 組字，只壓制 TEXTEDITING 讓虛線保持可見
+                    if _triggered == "left":
+                        _cc_caret_pos[0] = max(0, _cc_caret_pos[0] - 1)
+                    else:
+                        _cc_caret_pos[0] = min(len(_cc_tvalue[0]), _cc_caret_pos[0] + 1)
+                    # 壓制 IME 回傳的 TEXTEDITING，避免它把 _cc_composing 清空
+                    _ime_cancel_frames[0] = 3
+            except Exception:
+                pass
+        else:
+            _ime_arrow_prev["left"]  = False
+            _ime_arrow_prev["right"] = False
+        if _ime_cancel_frames[0] > 0:
+            _ime_cancel_frames[0] -= 1
 
         # ── pygame 事件 ───────────────────────────────────────
         for ev in pygame.event.get():
@@ -1757,8 +1860,20 @@ def run_ui():
                                 # 決定音效
                                 if _mode[0] == "choices":
                                     if isinstance(val, int) and val < 0:
-                                        # 特殊行動按鈕（負值索引）一律播 action 音效
-                                        _play_sfx("action")
+                                        # 進食（val == -3）且金錢不足 → 不播 action 音效
+                                        # （由 show_action_blocked 負責播放 damage6）
+                                        _sa_name = (
+                                            _SPECIAL_ACTION_NAMES[(-val) - 1]
+                                            if 1 <= (-val) <= len(_SPECIAL_ACTION_NAMES)
+                                            else ""
+                                        )
+                                        _eat_money_blocked = (
+                                            _sa_name == "進食"
+                                            and _player[0] is not None
+                                            and _player[0].money < 50
+                                        )
+                                        if not _eat_money_blocked:
+                                            _play_sfx("action")
                                     else:
                                         _cname = (_choices[val - 1]
                                                   if isinstance(val, int) and 1 <= val <= len(_choices)
@@ -1793,14 +1908,19 @@ def run_ui():
             elif ev.type == pygame.TEXTEDITING:
                 # 輸入法組字中（例如注音還沒按確認）：只更新預覽，不寫入正文
                 if _phase[0] == "char_create" and _cc_mode[0] == "name":
-                    _cc_composing[0] = ev.text
+                    if _ime_cancel_frames[0] > 0:
+                        pass   # 忽略強制取消 IME 後的殘留 TEXTEDITING 事件
+                    else:
+                        _cc_composing[0] = ev.text
                 elif _mode[0] == "text":
                     _composing[0] = ev.text
 
             elif ev.type == pygame.TEXTINPUT:
                 # 輸入法確認（或直接打英數）：寫入正文，清除組字預覽
                 if _phase[0] == "char_create" and _cc_mode[0] == "name":
-                    _cc_tvalue[0] += ev.text
+                    _p = _cc_caret_pos[0]
+                    _cc_tvalue[0]    = _cc_tvalue[0][:_p] + ev.text + _cc_tvalue[0][_p:]
+                    _cc_caret_pos[0] = _p + len(ev.text)
                     _cc_composing[0] = ""
                 elif _mode[0] == "text":
                     _tvalue[0] += ev.text
@@ -1816,16 +1936,61 @@ def run_ui():
                     _is_fullscreen[0] = False
                 elif _phase[0] == "char_create":
                     if _cc_mode[0] == "name":
+                        _ime_rect = pygame.Rect(
+                            (WIN_W - 520) // 2 + 30 + _fs_off[0],
+                            (WIN_H - 250) // 2 + 80 + _fs_off[1],
+                            460, 42)
                         if ev.key == pygame.K_RETURN:
-                            _cc_reply_val[0] = _cc_tvalue[0]
+                            _cc_reply_val[0] = _cc_tvalue[0] + _cc_composing[0]
+                            _cc_composing[0] = ""
                             _cc_mode[0] = ""
                             pygame.key.stop_text_input()
                             _cc_reply_event.set()
                         elif ev.key == pygame.K_BACKSPACE:
                             if _cc_composing[0]:
                                 _cc_composing[0] = ""
-                            else:
-                                _cc_tvalue[0] = _cc_tvalue[0][:-1]
+                            elif _cc_caret_pos[0] > 0:
+                                _p = _cc_caret_pos[0]
+                                _cc_tvalue[0]    = _cc_tvalue[0][:_p - 1] + _cc_tvalue[0][_p:]
+                                _cc_caret_pos[0] = _p - 1
+                        elif ev.key == pygame.K_DELETE:
+                            if not _cc_composing[0]:
+                                _p = _cc_caret_pos[0]
+                                if _p < len(_cc_tvalue[0]):
+                                    _cc_tvalue[0] = _cc_tvalue[0][:_p] + _cc_tvalue[0][_p + 1:]
+                        elif ev.key == pygame.K_LEFT:
+                            if _cc_composing[0]:   # 組字中：先取消組字再移動
+                                _cc_composing[0] = ""
+                                pygame.key.stop_text_input()
+                                pygame.key.start_text_input()
+                                pygame.key.set_text_input_rect(_ime_rect)
+                            _cc_caret_pos[0] = max(0, _cc_caret_pos[0] - 1)
+                        elif ev.key == pygame.K_RIGHT:
+                            if _cc_composing[0]:   # 組字中：先取消組字再移動
+                                _cc_composing[0] = ""
+                                pygame.key.stop_text_input()
+                                pygame.key.start_text_input()
+                                pygame.key.set_text_input_rect(_ime_rect)
+                            _cc_caret_pos[0] = min(len(_cc_tvalue[0]), _cc_caret_pos[0] + 1)
+                        elif ev.key == pygame.K_HOME:
+                            if not _cc_composing[0]:
+                                _cc_caret_pos[0] = 0
+                        elif ev.key == pygame.K_END:
+                            if not _cc_composing[0]:
+                                _cc_caret_pos[0] = len(_cc_tvalue[0])
+                        elif ev.key == pygame.K_ESCAPE:
+                            # ESC：強制重置輸入法，從候選字卡住狀態脫困
+                            _cc_composing[0] = ""
+                            pygame.key.stop_text_input()
+                            pygame.key.start_text_input()
+                            pygame.key.set_text_input_rect(_ime_rect)
+                        elif ev.key in (pygame.K_DOWN, pygame.K_UP):
+                            if _cc_composing[0]:
+                                # ↓↑ 在組字中會觸發候選字模式，卡住後續按鍵
+                                _cc_composing[0] = ""
+                                pygame.key.stop_text_input()
+                                pygame.key.start_text_input()
+                                pygame.key.set_text_input_rect(_ime_rect)
                     elif _cc_mode[0] == "stats":
                         ai = _cc_active_stat[0]
                         if ai is not None:

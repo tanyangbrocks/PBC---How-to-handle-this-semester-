@@ -14,7 +14,8 @@ from ui import (notify, ask_text, ask_choice, ask_yn,
                 begin_char_create, end_char_create,
                 ask_cc_name, ask_cc_portrait, ask_cc_dept, ask_cc_de_level,
                 ask_cc_drawbacks, ask_cc_stats, ask_cc_talent,
-                ask_cc_extra_events, ask_cc_summary)
+                ask_cc_extra_events, ask_cc_summary,
+                play_sfx)
 
 # ── 年級資料庫 ────────────────────────────────────────────────
 DE_LEVELS = [
@@ -214,6 +215,7 @@ class Character:
         if self.stamina < 0:
             self.stamina = 0
             self.add_status("生病", duration=2)
+            play_sfx("powerdown07")
             # print("⚠ 你累壞了，生病了！本週與下週行動效率大幅下降。")  # 因套用pygame而調整
             notify("⚠ 你累壞了，生病了！本週與下週行動效率大幅下降。")
             return False

@@ -133,7 +133,14 @@ class Shop:
             # print(f"  📖 智力提升了 {item['intel_gain']} 點！")  # 因套用pygame而調整
             notify(f"  📖 智力提升了 {item['intel_gain']} 點！")
         if "satisfaction_gain" in item:
-            _miss_chance = item.get("satisfaction_miss_chance", 0.0)
+            _base_miss = item.get("satisfaction_miss_chance", 0.0)
+            if _base_miss > 0:
+                # 運氣動態調整失敗率，與道具店 hover 顯示公式一致：
+                #   成功率 = max(0, min(100, 70 + (luck - 40)))%
+                #   _base_miss (0.30) 對應 luck=40 時的基準失敗率
+                _miss_chance = max(0.0, _base_miss - (self.player.luck - 40) / 100.0)
+            else:
+                _miss_chance = 0.0
             if _miss_chance > 0 and random.random() < _miss_chance:
                 notify("  😐 吃了點心但心情沒什麼起色……（滿足感未提升）")
             else:
