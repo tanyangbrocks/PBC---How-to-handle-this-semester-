@@ -262,6 +262,15 @@ def _draw_action_panel(surf, fm, fs, mode, choices, log, prompt, tvalue, rect, t
         surf.blit(st_t, (_tip_x0, _tip_y))
     elif hovered_action and hovered_action in _ACTION_INFO:
         cost_str, eff_str = _ACTION_INFO[hovered_action]
+        # 社團活動：動態計算不耗體力機率 + 判斷是否有社團加成
+        if hovered_action == "社團活動":
+            _ap = _player[0]
+            if _ap is not None:
+                _free_pct = int(min(95, 30 + _ap.luck))
+                cost_str  = f"體力-3，{_free_pct}%免"
+                _has_club = "club" in _ap.extra_events
+                if _has_club:
+                    eff_str = "滿足度+15 金錢+50 未知好處"
         is_restore = cost_str.startswith("恢復")
         cost_col   = GREEN if is_restore else RED
         cost_t = fb.render(cost_str, True, cost_col)

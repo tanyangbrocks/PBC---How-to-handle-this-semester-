@@ -272,14 +272,30 @@ def _draw_cc_name(surf, fm, fs, mpos):
     # 輸入框
     ir = pygame.Rect(cx + 30, cy + 80, cw - 60, 42)
     pygame.draw.rect(surf, MILK, ir, border_radius=10)
-    t_done = fm.render(_cc_tvalue[0], True, BLACK)
     t_comp = fm.render(_cc_composing[0], True, (150, 90, 180)) if _cc_composing[0] else None
     t_cur  = fm.render("|", True, BLACK)
+    # 依 caret 位置拆成「游標前 + 組字 + 游標 + 游標後」
+    _caret  = max(0, min(_cc_caret_pos[0], len(_cc_tvalue[0])))
+    t_before = fm.render(_cc_tvalue[0][:_caret],  True, BLACK)
+    t_after  = fm.render(_cc_tvalue[0][_caret:],  True, BLACK)
     xo = ir.x + 8
-    surf.blit(t_done, (xo, ir.y + 6)); xo += t_done.get_width()
+    surf.blit(t_before, (xo, ir.y + 6)); xo += t_before.get_width()
     if t_comp:
-        surf.blit(t_comp, (xo, ir.y + 6)); xo += t_comp.get_width()
-    surf.blit(t_cur, (xo, ir.y + 6))
+        # 組字在游標前：[已確認] [組字虛線] [游標|] [已確認]
+        # 游標跟著組字走，視覺上自然（打字時游標在最右端）
+        _comp_x0 = xo
+        surf.blit(t_comp, (xo, ir.y + 6))
+        # 組字虛線底線（每 4px 畫線、2px 留空）
+        _ul_y  = ir.y + 6 + t_comp.get_height() - 2
+        _ul_x1 = _comp_x0 + t_comp.get_width()
+        _dx = _comp_x0
+        while _dx < _ul_x1:
+            pygame.draw.line(surf, (150, 90, 180),
+                             (_dx, _ul_y), (min(_dx + 4, _ul_x1), _ul_y), 1)
+            _dx += 6
+        xo += t_comp.get_width()
+    surf.blit(t_cur,   (xo, ir.y + 6)); xo += t_cur.get_width()
+    surf.blit(t_after, (xo, ir.y + 6))
     # 提示
     hint = fs.render("（留空則為「無名大學生」）", True, GRAY)
     surf.blit(hint, (cx + (cw - hint.get_width()) // 2, cy + 138))
@@ -765,6 +781,10 @@ def _draw_cc_extra_events(surf, fm, fs, mpos):
             req_col = GRAY if disabled else (GREEN if intel >= ir else RED)
             req_t = fs.render(f"需要智力 ≥ {ir}", True, req_col)
             surf.blit(req_t, (dr.x + (dr.width - req_t.get_width()) // 2, dr.y + 126))
+        # 參加社團：顯示社團加成說明
+        if ev_id == "club" and not disabled:
+            bonus_t = fs.render("大幅提高社團活動的收益", True, (160, 100, 0))
+            surf.blit(bonus_t, (dr.x + (dr.width - bonus_t.get_width()) // 2, dr.y + 126))
         if not disabled:
             card_rects.append((r, ev_id))
 
@@ -944,9 +964,9 @@ def _draw_cc_summary(surf, fm, fs, mpos, game_mode=False):
         surf.blit(_vs, (_sx + _ls.get_width(), _sy))
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    # 中間區  cy+220 ~ cy+328  (h=108)  天賦 | 負面特質
+    # 中間區  cy+220 ~ cy+350  (h=130)  天賦 | 負面特質
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    MID_Y  = cy + 220;  MID_H  = 108
+    MID_Y  = cy + 220;  MID_H  = 130
     HALF_W = (cw - 20 - 20 - GAP) // 2    # = 325
 
     slots     = data.get("slot_results", [])
@@ -972,9 +992,9 @@ def _draw_cc_summary(surf, fm, fs, mpos, game_mode=False):
     )
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    # 下方區  cy+338 ~ cy+460  (h=122)  額外事件 | 按鈕
+    # 下方區  cy+360 ~ cy+482  (h=122)  額外事件 | 按鈕
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    BOT_Y = cy + 338;  BOT_H = 122
+    BOT_Y = cy + 360;  BOT_H = 122
 
     ev_ids  = data.get("extra_ev_ids",  [])
     ev_map  = {e["id"]: e for e in data.get("extra_ev_data", [])}

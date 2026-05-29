@@ -141,17 +141,28 @@ def _draw_choice_popup(surf, fm, fs, mode, choices, log, prompt_text,
             btn_rects.append((br, val))
     else:
         for lines, bh, val in btn_layout:
-            br    = pygame.Rect(bx, cur_y, bw, bh)
-            hover = br.collidepoint(mpos)
-            dr    = _premium_btn(surf, br, BTN_N, hover, radius=12)
-            th    = len(lines) * (fb.get_height() + 3)
-            ty    = dr.y + (dr.height - th) // 2
-            for line in lines:
-                lw = _measure_mixed(fb, line)
-                _render_mixed(surf, fb, line, PANEL,
-                              dr.x + (dr.width - lw) // 2, ty)
-                ty += fb.get_height() + 3
-            btn_rects.append((br, val))
+            br = pygame.Rect(bx, cur_y, bw, bh)
+            if val in _choices_disabled:
+                # ── 停用選項：灰色底，文字暗淡，不加入可點擊清單 ──
+                _premium_btn(surf, br, (72, 60, 50), False, radius=12)
+                th = len(lines) * (fb.get_height() + 3)
+                ty = br.y + (br.height - th) // 2
+                for line in lines:
+                    lw = _measure_mixed(fb, line)
+                    _render_mixed(surf, fb, line, (115, 95, 78),
+                                  br.x + (br.width - lw) // 2, ty)
+                    ty += fb.get_height() + 3
+            else:
+                hover = br.collidepoint(mpos)
+                dr    = _premium_btn(surf, br, BTN_N, hover, radius=12)
+                th    = len(lines) * (fb.get_height() + 3)
+                ty    = dr.y + (dr.height - th) // 2
+                for line in lines:
+                    lw = _measure_mixed(fb, line)
+                    _render_mixed(surf, fb, line, PANEL,
+                                  dr.x + (dr.width - lw) // 2, ty)
+                    ty += fb.get_height() + 3
+                btn_rects.append((br, val))
             cur_y += bh + BTN_GAP
 
     surf.set_clip(old_clip)
@@ -1081,7 +1092,13 @@ def _draw_shop(surf: pygame.Surface,
         _draw_icon_coin(surf, rp.x + 14 + _hl_t.get_width() + _hr, _hcy, _hr)
         surf.blit(_hn2_t, (rp.x + 14 + _hl_t.get_width() + _hr * 2, _hy))
         dy2 = desc_y + fm.get_height() + fs.get_height() + 18
-        for j, ln in enumerate(_wrap(hi.get("desc", ""), fs, rp.width - 28)):
+        # 點心：動態顯示當前滿足感觸發機率
+        if hi.get("id") == "snack" and player:
+            _sat_pct = int(max(0, min(100, 70 + (player.luck - 40))))
+            _dyn_desc = f"恢復 5 點體力，自我滿足度 +4（{_sat_pct}% 機率）。"
+        else:
+            _dyn_desc = hi.get("desc", "")
+        for j, ln in enumerate(_wrap(_dyn_desc, fs, rp.width - 28)):
             surf.blit(fs.render(ln, True, GRAY),
                       (rp.x + 14, dy2 + j * (fs.get_height() + 5)))
     else:

@@ -11,7 +11,21 @@ from ui_const import *
 from ui_state  import *
 
 def _play_sfx(name: str) -> None:
-    """播放指定音效；若未載入或發生錯誤則靜默跳過。"""
+    """播放指定音效；key 不在 _sfx 時嘗試以 name 當檔名自動載入（.mp3 / .wav）。"""
+    if name not in _sfx:
+        # ── 按需自動載入：把 name 當作 asset/audio/se/ 內的檔名（無副檔名）────
+        _se_base = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                "asset", "audio", "se")
+        _loaded = None
+        for _ext in (".mp3", ".wav"):
+            _fp = os.path.join(_se_base, name + _ext)
+            if os.path.isfile(_fp):
+                try:
+                    _loaded = pygame.mixer.Sound(_fp)
+                except Exception:
+                    pass
+                break
+        _sfx[name] = _loaded   # None 也寫入，避免下次再嘗試
     snd = _sfx.get(name)
     if snd:
         try:
@@ -503,6 +517,9 @@ def _portrait_head_load(prefix: str):
 
 def _get_portrait_key() -> str:
     """根據當前遊戲狀態決定應顯示哪張立繪的 key。"""
+    # ── 強制覆寫（考前儀式等特定場景優先）─────────────────────
+    if _portrait_override_key[0] is not None:
+        return _portrait_override_key[0]
     prefix = _portrait_prefix[0]
     if not prefix:
         return ""
@@ -623,9 +640,19 @@ def _apply_shop_purchase(idx: int) -> None:
         player.intel += item["intel_gain"]
         _msg(f"  📖 智力提升了 {item['intel_gain']} 點！")
     if "satisfaction_gain" in item:
-        player.satisfaction = max(0, min(100,
-            player.satisfaction + item["satisfaction_gain"]))
-        _msg(f"  🎮 滿足感提升了 {item['satisfaction_gain']} 點！")
+        if item.get("id") == "snack":
+            # 運氣影響滿足感機率：70% + (luck - 40)%，範圍 [0, 100]
+            _sat_prob = max(0.0, min(1.0, 0.70 + (player.luck - 40) * 0.01))
+            if random.random() < _sat_prob:
+                player.satisfaction = max(0, min(100,
+                    player.satisfaction + item["satisfaction_gain"]))
+                _msg(f"  🎮 滿足感提升了 {item['satisfaction_gain']} 點！")
+            else:
+                _msg("  😐 吃了點心但心情沒什麼起色……（滿足感未提升）")
+        else:
+            player.satisfaction = max(0, min(100,
+                player.satisfaction + item["satisfaction_gain"]))
+            _msg(f"  🎮 滿足感提升了 {item['satisfaction_gain']} 點！")
     if "luck_gain" in item:
         player.luck += item["luck_gain"]
         _msg(f"  🍀 運氣提升了 {item['luck_gain']} 點！")

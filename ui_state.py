@@ -29,6 +29,8 @@ _mode      = [None]   # "choices" | "yn" | "text" | None
 
 _choices   = []       # 選項標籤列表
 
+_choices_disabled: set = set()  # 停用選項的 1-based val 集合（灰色不可點）
+
 _prompt    = [""]     # yn / text 提示文字
 
 _yn_labels       = ["是", "否"]   # yn 模式的按鈕文字（可自定義）
@@ -167,6 +169,8 @@ _cc_sel         = []            # 已選取的索引（drawbacks 複選、talent
 _cc_tvalue      = [""]          # name 輸入框文字
 
 _cc_composing   = [""]          # name 輸入法組字預覽
+
+_cc_caret_pos   = [0]           # name 輸入框游標位置（0 = 最左端）
 
 _cc_stat_vals   = [10, 10, 10]  # [體力, 智力, 運氣]
 
@@ -414,6 +418,14 @@ _smg_final_ok_rect   = [None]     # 「確認」按鈕 Rect（每幀更新）
 _smg_q_answered     = [False]    # 記憶題已作答（顯示對錯結果中）
 _smg_q_ans_correct  = [False]    # 本次作答是否正確
 _smg_q_ans_t0       = [0]        # 作答時間戳（ms）
+
+# ── 立繪強制覆寫（考前儀式等特定場景） ──────────────────────────
+_portrait_override_key = [None]   # None = 自動；str = 強制使用此 key
+
+# ── 考場倒數動畫狀態 ────────────────────────────────────────────
+_pcd_active = [False]  # 倒數動畫是否進行中
+_pcd_phase  = ["msg"]  # "msg" | "3" | "2" | "1" | "go"
+_pcd_t0     = [0]      # 當前階段開始時間戳 (ticks)
 
 # 明確宣告所有名稱可被 import * 匯出（含 _ 前綴）
 __all__ = [_n for _n in vars() if not _n.startswith('__')]
