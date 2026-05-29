@@ -440,11 +440,21 @@ def _draw_memory_question(
         by = WIN_H // 2 - 10
         br = pygame.Rect(bx, by, 110, 52)
         hov = br.collidepoint(mpos)
-        pygame.draw.rect(surf,
-                         _SMG_BTN_H if hov else _SMG_BTN_N,
-                         br, border_radius=12)
-        pygame.draw.rect(surf, _SMG_BTN_BDR, br, 2, border_radius=12)
-        vt = fb.render(str(val), True, _SMG_BTN_TXT)
+
+        # 作答後：正確選項亮金黃色（無論玩家是否答對）
+        is_correct_opt = _smg_q_answered[0] and (val == _smg_q_correct[0])
+        if is_correct_opt:
+            _btn_fill = (240, 195, 20)   # 金黃
+            _btn_bdr  = (160, 120,  0)   # 深琥珀框
+            _txt_col  = ( 50,  30,  0)   # 深棕文字
+        else:
+            _btn_fill = _SMG_BTN_H if hov else _SMG_BTN_N
+            _btn_bdr  = _SMG_BTN_BDR
+            _txt_col  = _SMG_BTN_TXT
+
+        pygame.draw.rect(surf, _btn_fill, br, border_radius=12)
+        pygame.draw.rect(surf, _btn_bdr,  br, 2, border_radius=12)
+        vt = fb.render(str(val), True, _txt_col)
         surf.blit(vt, (br.x + (br.width  - vt.get_width())  // 2,
                        br.y + (br.height - vt.get_height()) // 2))
         _smg_q_rects.append((br, val))
