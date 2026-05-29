@@ -88,40 +88,20 @@ def _get_stamp_shake_offset() -> tuple:
     return rng.randint(-amp, amp), rng.randint(-amp, amp)
 
 def _get_font(size: int):
-    """優先微軟正黑體，再依序嘗試其他能渲染中文的系統字型。"""
-    candidates = [
-        "microsoft jhenghei", "microsoftjhenghei",   # 微軟正黑體（繁體）
-        "microsoftyahei", "microsoft yahei",           # 微軟雅黑（簡體）
-        "simsun", "nsimsun",
-        "arial unicode ms",
-        "noto sans cjk tc", "noto sans tc",
-    ]
-    for name in candidates:
-        try:
-            f = pygame.font.SysFont(name, size)
-            f.render("測", True, WHITE)
-            return f
-        except Exception:
-            pass
-    return pygame.font.SysFont(None, size)
+    """載入內建 Noto Sans TC Regular；失敗時退回 pygame 內建字型（WebAssembly 安全）。"""
+    _path = resource_path("asset", "fonts", "Noto_Sans_TC", "static", "NotoSansTC-Regular.ttf")
+    try:
+        return pygame.font.Font(_path, size)
+    except Exception:
+        return pygame.font.Font(None, size)
 
 def _get_font_bold(size: int):
-    """粗體版字型，優先微軟正黑體 Bold。"""
-    candidates = [
-        "microsoft jhenghei", "microsoftjhenghei",
-        "microsoftyahei", "microsoft yahei",
-        "simsun", "nsimsun",
-        "arial unicode ms",
-        "noto sans cjk tc", "noto sans tc",
-    ]
-    for name in candidates:
-        try:
-            f = pygame.font.SysFont(name, size, bold=True)
-            f.render("測", True, WHITE)
-            return f
-        except Exception:
-            pass
-    return pygame.font.SysFont(None, size, bold=True)
+    """載入內建 Noto Sans TC Bold；失敗時退回 pygame 內建字型（WebAssembly 安全）。"""
+    _path = resource_path("asset", "fonts", "Noto_Sans_TC", "static", "NotoSansTC-Bold.ttf")
+    try:
+        return pygame.font.Font(_path, size)
+    except Exception:
+        return pygame.font.Font(None, size)
 
 def _clean(text: str) -> str:
     """
@@ -149,17 +129,22 @@ def _clean(text: str) -> str:
     # 移除因去掉前置 Emoji 而殘留的空白
     return "".join(out).lstrip()
 
-# ── Segoe UI Emoji 備用字型（Windows 內建，支援 Emoji）────────────────────
-_EMOJI_FONT_PATH = r"C:\Windows\Fonts\seguiemj.ttf"
+# ── Emoji 備用字型（優先內建 Noto Emoji，Windows 上另備 Segoe UI Emoji）──
+_EMOJI_FONT_PATH = resource_path("asset", "fonts", "Noto_Emoji", "static", "NotoEmoji-Regular.ttf")
+_EMOJI_FONT_PATH_FALLBACK = r"C:\Windows\Fonts\seguiemj.ttf"
 _emoji_font_cache: dict = {}
 
 def _get_emoji_font(size: int):
-    """載入並快取 Segoe UI Emoji，失敗時回傳 None。"""
+    """載入並快取 Noto Emoji（無法載入時嘗試 Segoe UI Emoji），失敗回傳 None。"""
     if size not in _emoji_font_cache:
-        try:
-            _emoji_font_cache[size] = pygame.font.Font(_EMOJI_FONT_PATH, size)
-        except Exception:
-            _emoji_font_cache[size] = None
+        loaded = None
+        for _p in (_EMOJI_FONT_PATH, _EMOJI_FONT_PATH_FALLBACK):
+            try:
+                loaded = pygame.font.Font(_p, size)
+                break
+            except Exception:
+                pass
+        _emoji_font_cache[size] = loaded
     return _emoji_font_cache[size]
 
 def _is_emoji_char(ch: str) -> bool:

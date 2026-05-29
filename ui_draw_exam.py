@@ -30,12 +30,11 @@ def _get_shape_label_font() -> pygame.font.Font:
     """取得（並快取）第一回合字母標籤用字型（48px 粗體）。"""
     ck = "smg_label_48b"
     if ck not in _extra_fonts:
+        _path = resource_path("asset", "fonts", "Noto_Sans_TC", "static", "NotoSansTC-Bold.ttf")
         try:
-            _extra_fonts[ck] = pygame.font.SysFont(
-                "microsoftyahei,notosanscjktc,meiryobold", 48, bold=True
-            )
+            _extra_fonts[ck] = pygame.font.Font(_path, 48)
         except Exception:
-            _extra_fonts[ck] = pygame.font.SysFont(None, 48, bold=True)
+            _extra_fonts[ck] = pygame.font.Font(None, 48)
     return _extra_fonts[ck]
 
 ROUND_MS = 30_000   # 每回合 30 秒
