@@ -561,7 +561,109 @@ def main():
     # ── 6. 指令 tag 覆蓋率審計 ─────────────────────────────
     audit_tag_coverage(lines)
 
+    # ── 7. async 相容性審計（Phase 4 前：顯示待辦；完成後：全綠）
+    audit_async_compat()
+
     print(f"\n{BOLD}Analysis complete.{RESET}\n")
+
+
+# ═══════════════════════════════════════════════════════════════
+#  新功能 7：async 相容性審計
+#  Phase 4 完成前：顯示尚待處理的阻塞點。
+#  Phase 4 完成後：全部顯示綠色 OK。
+# ═══════════════════════════════════════════════════════════════
+
+# 這些函式在 Phase 4 完成後應該全部變成 async def
+_SEED_ASYNC_FUNCS = [
+    "ask_yn", "ask_choice", "ask_ok", "ask_text",
+    "ask_subject_popup", "ask_withdrawal_popup",
+    "ask_exam_start", "ask_exam_question",
+    "run_shape_minigame", "tell_story",
+    "wait_start", "wait_restart",
+    "show_extra_event_popup", "notify_grade_report", "notify_timetable",
+]
+
+# Phase 4 完成後，這些模式應該全部消失
+_BLOCKING_PATTERNS = [
+    (re.compile(r"threading\.Thread"),          "threading.Thread（應改為 asyncio.create_task）"),
+    (re.compile(r"threading\.Event\(\)"),       "threading.Event()（應改為 asyncio.Event()）"),
+    (re.compile(r"queue\.Queue\(\)"),           "queue.Queue()（應改為 asyncio.Queue()）"),
+    (re.compile(r"_reply_event\.wait\(\)"),     "_reply_event.wait()（應改為 await event.wait()）"),
+    (re.compile(r"_start_event\.wait\(\)"),     "_start_event.wait()（應改為 await event.wait()）"),
+    (re.compile(r"_restart_event\.wait\(\)"),   "_restart_event.wait()（應改為 await event.wait()）"),
+]
+
+_ASYNC_SCAN_FILES = [
+    PROJECT / "ui.py",
+    PROJECT / "main.py",
+    PROJECT / "turn_engine.py",
+    PROJECT / "character.py",
+    PROJECT / "event_system.py",
+    PROJECT / "skill_system.py",
+    PROJECT / "shop_V03.py",
+]
+
+
+def audit_async_compat() -> None:
+    print_section("⑦ async 相容性審計（pygbag Phase 4）")
+
+    all_lines: dict[str, list[str]] = {}
+    for fpath in _ASYNC_SCAN_FILES:
+        if fpath.exists():
+            all_lines[fpath.name] = fpath.read_text(encoding="utf-8").splitlines()
+
+    # ── 7-A：種子函式是否已改成 async def ─────────────────────
+    print(f"\n  {BOLD}[7-A] 種子 async 函式狀態{RESET}")
+    ui_lines = all_lines.get("ui.py", [])
+    for fn in _SEED_ASYNC_FUNCS:
+        found_async  = any(re.search(rf"async\s+def\s+{fn}\b", ln) for ln in ui_lines)
+        found_sync   = any(re.search(rf"(?<!async\s)def\s+{fn}\b", ln) for ln in ui_lines)
+        if found_async:
+            print(f"    {GREEN}[OK]{RESET}  async def {fn}()")
+        elif found_sync:
+            print(f"    {YELLOW}[TODO]{RESET} def {fn}()  ← 尚未改為 async（Phase 4 待辦）")
+        else:
+            print(f"    {YELLOW}[--]{RESET}   {fn}()  ← 未偵測到定義")
+
+    # ── 7-B：阻塞式模式是否已清除 ──────────────────────────────
+    print(f"\n  {BOLD}[7-B] 阻塞式模式殘留檢查{RESET}")
+    blocking_found = False
+    for fpath in _ASYNC_SCAN_FILES:
+        if fpath.name not in all_lines:
+            continue
+        file_lines = all_lines[fpath.name]
+        for pat, desc in _BLOCKING_PATTERNS:
+            hits = [
+                (i + 1, ln.rstrip())
+                for i, ln in enumerate(file_lines)
+                if pat.search(ln) and not ln.strip().startswith("#")
+            ]
+            for lineno, code in hits:
+                blocking_found = True
+                print(f"    {YELLOW}[TODO]{RESET} {fpath.name}:{lineno}  {desc}")
+                print(f"           {code[:80]}")
+    if not blocking_found:
+        print(f"    {GREEN}[OK]{RESET}  無殘留阻塞式模式（Phase 4 已完成！）")
+
+    # ── 7-C：是否有 asyncio.sleep 讓出控制權 ────────────────────
+    print(f"\n  {BOLD}[7-C] asyncio.sleep(0) 讓出控制權{RESET}")
+    main_lines = all_lines.get("main.py", [])
+    has_sleep = any("asyncio.sleep" in ln for ln in main_lines)
+    if has_sleep:
+        print(f"    {GREEN}[OK]{RESET}  main.py 含有 asyncio.sleep（pygame 迴圈已讓出控制權）")
+    else:
+        print(f"    {YELLOW}[TODO]{RESET} main.py 尚未加入 asyncio.sleep（Phase 4 待辦）")
+
+    # ── 7-D：是否移除了 threading.Thread ────────────────────────
+    print(f"\n  {BOLD}[7-D] threading.Thread 移除確認{RESET}")
+    main_has_thread = any(
+        "threading.Thread" in ln and not ln.strip().startswith("#")
+        for ln in main_lines
+    )
+    if main_has_thread:
+        print(f"    {YELLOW}[TODO]{RESET} main.py 仍使用 threading.Thread（Phase 4 待辦）")
+    else:
+        print(f"    {GREEN}[OK]{RESET}  main.py 已無 threading.Thread")
 
 
 if __name__ == "__main__":
