@@ -153,6 +153,7 @@ class TurnEngine:
         # ── 跨週追蹤資料 ──────────────────────────────────────
         self._quiz1_score  = 0     # 第四週計算，第五週展示
         self._quiz2_score  = 0     # 第十二週計算，第十四週展示
+        self._hw_scores: list[float] = []   # 所有作業原始分數，最終取平均
         self._week2_course = None  # {"name":str, "credits":int}
         self._week9_job    = ""    # 美宣 / 公關 / 現場工人
 
@@ -571,7 +572,8 @@ class TurnEngine:
                 "「行事曆上的待辦事項開始變多，每次都覺得有東西快到期了。」",
                 "「原本以為還很閒，結果發現突然多了好多事情。欸？等等。」",
             ])
-            player.grades["作業"] = max(player.grades["作業"], 90.0)
+            self._hw_scores.append(90.0)
+            player.grades["作業"] = sum(self._hw_scores) / len(self._hw_scores)
             notify_grade_report([
                 {"name": "小考一", "score": self._quiz1_score},
                 {"name": "作業一", "score": 90},
@@ -704,17 +706,20 @@ class TurnEngine:
                 "撰寫個人三千字觀影心得：要先重看一遍電影才能寫，完成後作業 65 分，體力 -5",
             ], disabled=_w14_disabled)
             if ans == 1:
-                player.grades["作業"] = max(player.grades["作業"], 70.0)
+                self._hw_scores.append(70.0)
+                player.grades["作業"] = sum(self._hw_scores) / len(self._hw_scores)
                 player.consume_stamina(10)
                 player.change_satisfaction(-3)
                 tell_story(["🤝 順利完成小組簡報，至少不會被組員罵。"])
             elif ans == 2:
-                player.grades["作業"] = max(player.grades["作業"], 85.0)
+                self._hw_scores.append(85.0)
+                player.grades["作業"] = sum(self._hw_scores) / len(self._hw_scores)
                 player.consume_stamina(20)
                 player.change_satisfaction(-8)
                 tell_story(["📝 瘋狂趕工完成五千字報告！作業成績提升。"])
             else:
-                player.grades["作業"] = max(player.grades["作業"], 65.0)
+                self._hw_scores.append(65.0)
+                player.grades["作業"] = sum(self._hw_scores) / len(self._hw_scores)
                 player.consume_stamina(5)
                 player.change_satisfaction(-2)
                 tell_story(["🎬 重看了一遍電影，心得總算寫完了。"])
@@ -786,9 +791,9 @@ class TurnEngine:
             player.money += money_delta
             sign = "+" if money_delta >= 0 else ""
             results.append(f"金錢 {sign}{money_delta} 元")
-            # 社團事件額外隨機好處：智力 +2~8 或 運氣 +2~8
+            # 社團事件額外隨機好處：智力 +1~2 或 運氣 +1~2
             if _has_club_ev:
-                _bonus = random.randint(2, 8)
+                _bonus = random.randint(1, 2)
                 if random.random() < 0.5:
                     player.intel += _bonus
                     results.append(f"智力 +{_bonus}（社團加成！）")
