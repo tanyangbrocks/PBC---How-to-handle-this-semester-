@@ -90,7 +90,21 @@ for vid in VIDEOS:
 
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    cap      = cv2.VideoCapture(str(src_path))
+    # cv2.VideoCapture 在 Windows 中文路徑下也可能有問題；
+    # 改用 imdecode 讀取不了影片，VideoCapture 仍需 str，但先嘗試。
+    # 若 VideoCapture 開不了，改用檔案開短路徑（Windows 8.3 名稱）。
+    cap = cv2.VideoCapture(str(src_path))
+    if not cap.isOpened():
+        # 嘗試以短路徑開啟（Windows 8.3 短路徑不含中文）
+        try:
+            import ctypes
+            buf = ctypes.create_unicode_buffer(512)
+            ctypes.windll.kernel32.GetShortPathNameW(str(src_path), buf, 512)
+            short = buf.value
+            if short:
+                cap = cv2.VideoCapture(short)
+        except Exception:
+            pass
     src_fps  = cap.get(cv2.CAP_PROP_FPS) or 30.0
     total_fc = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     target   = vid["extract_fps"]
@@ -113,9 +127,12 @@ for vid in VIDEOS:
             break
         if read_count % step == 0:
             out_path = out_dir / f"{frame_count:05d}.webp"
-            ok = cv2.imwrite(str(out_path), frame,
-                             [cv2.IMWRITE_WEBP_QUALITY, quality])
+            # cv2.imwrite 在含中文字的 Windows 路徑下會靜默失敗；
+            # 改用 imencode 編碼至記憶體，再由 Python 寫入（支援 Unicode 路徑）
+            ok, buf = cv2.imencode(".webp", frame,
+                                   [cv2.IMWRITE_WEBP_QUALITY, quality])
             if ok:
+                out_path.write_bytes(buf.tobytes())
                 sz = out_path.stat().st_size
                 dir_size += sz
                 frame_count += 1
