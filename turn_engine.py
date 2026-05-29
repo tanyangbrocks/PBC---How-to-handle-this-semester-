@@ -67,7 +67,7 @@ ACTIONS = [
         "stamina_cost": 3,
         "exp_gain": 0,
         "satisfaction": 10,
-        "desc": "參加社團，放鬆心情，但會犧牲讀書時間。自我滿足度 +10~+15，金錢 -10~+50，基礎 30% 機率不消耗體力（運氣 >20 時機率提升）。",
+        "desc": "參加社團，放鬆心情，但會犧牲讀書時間。自我滿足度 +10~+15，基礎 30% 機率不消耗體力（運氣 >20 時機率提升）。",
     },
     {
         "id": "part_time_job",
@@ -775,22 +775,15 @@ class TurnEngine:
             # 是否有「參加社團」額外事件
             _has_club_ev = "club" in player.extra_events
             if _has_club_ev:
-                # 固定最大值
-                sat         = 15
-                money_delta = 50
+                sat = 15
             else:
-                sat         = random.randint(10, 15)
-                money_delta = random.randint(-10, 50)
+                sat = random.randint(10, 15)
             # 自我滿足度
             player.change_satisfaction(sat)
             results.append(f"自我滿足度 +{sat}")
             if player.satisfaction < 60:
                 results.append("---")
                 results.append("! 自我滿足度過低，本週可支配時間大幅下降")
-            # 金錢
-            player.money += money_delta
-            sign = "+" if money_delta >= 0 else ""
-            results.append(f"金錢 {sign}{money_delta} 元")
             # 社團事件額外隨機好處：智力 +1~2 或 運氣 +1~2
             if _has_club_ev:
                 _bonus = random.randint(1, 2)

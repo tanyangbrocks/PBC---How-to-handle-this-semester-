@@ -277,7 +277,7 @@ def _draw_action_panel(surf, fm, fs, mode, choices, log, prompt, tvalue, rect, t
                 cost_str  = f"體力-3，{_free_pct}%免"
                 _has_club = "club" in _ap.extra_events
                 if _has_club:
-                    eff_str = "滿足度+15 金錢+50 未知好處"
+                    eff_str = "滿足度+15 未知好處"
         is_restore = cost_str.startswith("恢復")
         cost_col   = GREEN if is_restore else RED
         cost_t = fb.render(cost_str, True, cost_col)
