@@ -940,12 +940,8 @@ def _draw_end(surf, fm, fs, mpos):
         elif sub == "fade_in_1"  and elapsed >= _EFADE_MS:
             _end_sub[0] = "anim";       _end_t0[0] = ms
             # 進入影片動畫前，將影片倒帶回第 0 幀
-            if _end_video_cap[0] is not None:
-                try:
-                    import cv2 as _cv2_ev
-                    _end_video_cap[0].set(_cv2_ev.CAP_PROP_POS_FRAMES, 0)
-                except Exception:
-                    pass
+            if _end_player[0] is not None:
+                _end_player[0].reset()
             _end_video_surf[0] = None
             _end_video_done[0] = False
         elif sub == "anim":
@@ -997,28 +993,17 @@ def _draw_end(surf, fm, fs, mpos):
 
 
 def _draw_end_anim(surf, fm, fs, elapsed):
-    """過場動畫：播放結算過場影片（無音訊）；cv2 未安裝或影片缺失時退回轉圈動畫。"""
-    cap = _end_video_cap[0]
+    """過場動畫：播放結算過場影片（SpritePlayer）；影格資料夾缺失時退回轉圈動畫。"""
+    player = _end_player[0]
 
-    if cap is not None:
-        # ── 影片播放 ─────────────────────────────────────────────
+    if player is not None and player.loaded:
+        # ── 影片播放（SpritePlayer）──────────────────────────────
         now = pygame.time.get_ticks()
         if not _end_video_done[0]:
-            try:
-                import cv2
-                ms_per_frame = 1000.0 / max(_end_video_fps[0], 1.0)
-                if _end_video_surf[0] is None or now - _end_video_last[0] >= ms_per_frame:
-                    ret, frame = cap.read()
-                    if ret:
-                        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                        vsf       = pygame.surfarray.make_surface(
-                                        frame_rgb.transpose(1, 0, 2))
-                        vsf = pygame.transform.scale(vsf, (WIN_W, WIN_H))  # 強制撐滿，允許變形
-                        _end_video_surf[0] = vsf
-                        _end_video_last[0] = now
-                    else:
-                        _end_video_done[0] = True   # 影片播完，等待推進
-            except Exception:
+            _frame = player.get_surface(now, (WIN_W, WIN_H))
+            if _frame is not None:
+                _end_video_surf[0] = _frame
+            if player.done:
                 _end_video_done[0] = True
 
         # 繪製當前幀；影片尚未讀到第一幀時以白底填充
@@ -1091,21 +1076,12 @@ def _draw_end_report(surf, fm, fs, mpos, data, ms, elapsed):
         _end_bg_fade_t0[0] = ms
 
     if _end_bg_fade_t0[0] > 0:
-        key = _end_bg_key[0]
-        cap = _end_bg_caps.get(key) if key else None
-        if cap is not None:
-            import cv2
-            mspf = 1000.0 / max(_end_bg_fps_map.get(key, 30.0), 1.0)
-            if _end_bg_surf[0] is None or ms - _end_bg_last[0] >= mspf:
-                ret, frame = cap.read()
-                if ret:
-                    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    vsf       = pygame.surfarray.make_surface(frame_rgb.transpose(1, 0, 2))
-                    vsf = pygame.transform.scale(vsf, (WIN_W, WIN_H))  # 強制撐滿，允許變形
-                    _end_bg_surf[0] = vsf
-                    _end_bg_last[0] = ms
-                else:
-                    cap.set(cv2.CAP_PROP_POS_FRAMES, 0)  # 循環播放
+        key    = _end_bg_key[0]
+        player = _end_bg_players.get(key) if key else None
+        if player is not None and player.loaded:
+            _frame = player.get_surface(ms, (WIN_W, WIN_H))
+            if _frame is not None:
+                _end_bg_surf[0] = _frame
 
         if _end_bg_surf[0] is not None:
             surf.blit(_end_bg_surf[0], (0, 0))

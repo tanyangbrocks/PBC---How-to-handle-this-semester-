@@ -13,6 +13,7 @@ import random
 from ui_const import *
 from ui_state  import *
 from ui_draw_base import *
+from ui_video import SpritePlayer
 from ui_draw_fx   import *
 from ui_draw_hud  import *
 from ui_draw_cc   import *
@@ -778,55 +779,23 @@ def run_ui():
     _bgm_dir[0] = resource_path("asset", "audio", "bgm")
     _request_bgm("Music-Morning_Rain.mp3")
 
-    # ── 角色創建背景影片（WEBM）────────────────────────────────
-    _cc_webm_path = os.path.join(_bg_dir, "skill_background.webm")
-    try:
-        import cv2 as _cv2_init
-        _cap = _cv2_init.VideoCapture(_cc_webm_path)
-        if _cap.isOpened():
-            _cc_video_cap[0] = _cap
-            _fps = _cap.get(_cv2_init.CAP_PROP_FPS)
-            _cc_video_fps[0] = float(_fps) if _fps and _fps > 0 else 30.0
-        else:
-            _cap.release()
-    except Exception:
-        pass
+    # ── 角色創建背景影片（SpritePlayer，循環）──────────────────
+    _cc_player[0] = SpritePlayer(
+        resource_path("asset", "video_frames", "skill_bg"), loop=True)
 
-    # ── 結算過場影片（MP4）───────────────────────────────────────
-    _end_vid_path = resource_path("asset", "video",
-                                  "15673cd6-bc6e-432b-bf3f-de47ecfe4918_0.mp4")
-    try:
-        import cv2 as _cv2_ev
-        _ev_cap = _cv2_ev.VideoCapture(_end_vid_path)
-        if _ev_cap.isOpened():
-            _end_video_cap[0] = _ev_cap
-            _fps = _ev_cap.get(_cv2_ev.CAP_PROP_FPS)
-            _end_video_fps[0] = float(_fps) if _fps and _fps > 0 else 30.0
-        else:
-            _ev_cap.release()
-    except Exception:
-        pass
+    # ── 結算過場影片（SpritePlayer，單次播放）───────────────────
+    _end_player[0] = SpritePlayer(
+        resource_path("asset", "video_frames", "end_cutscene"), loop=False)
 
-    # ── 結局背景影片（WEBM，評語出現後淡入）────────────────────
-    _ENDING_BG_FILES = {
-        "best":  "best_ending_background.webm",
-        "next":  "next_ending_background.webm",
-        "break": "break_background.webm",
-        "lose":  "lose_background.webm",
-    }
-    try:
-        import cv2 as _cv2_eb
-        for _ebkey, _ebfname in _ENDING_BG_FILES.items():
-            _ebpath = os.path.join(_bg_dir, _ebfname)
-            _ebcap  = _cv2_eb.VideoCapture(_ebpath)
-            if _ebcap.isOpened():
-                _end_bg_caps[_ebkey] = _ebcap
-                _ebfps = _ebcap.get(_cv2_eb.CAP_PROP_FPS)
-                _end_bg_fps_map[_ebkey] = float(_ebfps) if _ebfps and _ebfps > 0 else 30.0
-            else:
-                _ebcap.release()
-    except Exception:
-        pass
+    # ── 結局背景影片（SpritePlayer，循環）──────────────────────
+    for _ebkey, _ebslug in [
+        ("best",  "best_bg"),
+        ("next",  "next_bg"),
+        ("break", "break_bg"),
+        ("lose",  "lose_bg"),
+    ]:
+        _end_bg_players[_ebkey] = SpritePlayer(
+            resource_path("asset", "video_frames", _ebslug), loop=True)
 
     # 全螢幕切換按鈕固定 Rect（右下角，各畫面常駐）
     fs_btn = pygame.Rect(WIN_W - 46, WIN_H - 46, 40, 40)
@@ -931,12 +900,9 @@ def run_ui():
                     _end_bg_fade_t0[0]       = 0
                     _end_bg_key[0]           = None
                     # 結局背景影片倒帶，以供下一局重新播放
-                    for _rkey, _rcap in _end_bg_caps.items():
-                        try:
-                            import cv2 as _cv2_rew
-                            _rcap.set(_cv2_rew.CAP_PROP_POS_FRAMES, 0)
-                        except Exception:
-                            pass
+                    for _rplayer in _end_bg_players.values():
+                        if _rplayer is not None:
+                            _rplayer.reset()
                 elif cmd[1] == "gameover":
                     _request_bgm(None)
                     _play_sfx("game_over")

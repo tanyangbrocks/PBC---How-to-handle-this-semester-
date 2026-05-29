@@ -132,26 +132,12 @@ def _draw_cc_bg(surf: pygame.Surface) -> None:
          讓 UI 卡片在影片上仍保有良好對比。
       3. 最上層：紫色螢光粒子特效（光球 + 光絮飄盪）。
     """
-    # ── 底層：影片 or 靜態漸層 ───────────────────────────────
-    cap = _cc_video_cap[0]
-    if cap is not None:
-        import cv2
-        now = pygame.time.get_ticks()
-        ms_per_frame = 1000.0 / max(_cc_video_fps[0], 1.0)
-        if _cc_video_surf[0] is None or now - _cc_video_last[0] >= ms_per_frame:
-            ret, frame = cap.read()
-            if not ret:
-                cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-                ret, frame = cap.read()
-            if ret:
-                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                fh, fw = frame_rgb.shape[:2]
-                vsf = pygame.surfarray.make_surface(
-                    frame_rgb.transpose(1, 0, 2))
-                if fw != WIN_W or fh != WIN_H:
-                    vsf = pygame.transform.scale(vsf, (WIN_W, WIN_H))
-                _cc_video_surf[0] = vsf
-                _cc_video_last[0] = now
+    # ── 底層：影片（SpritePlayer）or 靜態漸層 ───────────────
+    _player = _cc_player[0]
+    if _player is not None and _player.loaded:
+        _frame = _player.get_surface(pygame.time.get_ticks(), (WIN_W, WIN_H))
+        if _frame is not None:
+            _cc_video_surf[0] = _frame
     if _cc_video_surf[0] is not None:
         surf.blit(_cc_video_surf[0], (0, 0))
     elif "start" in _grads:

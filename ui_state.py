@@ -287,14 +287,10 @@ _ripple_t0       = [0]       # 觸發時間戳（ms，0 = 未啟用）
 
 _ripple_np_cache : dict = {} # numpy 座標格快取（同解析度只建一次）
 
-# ── 角色創建背景影片（WEBM 循環播放） ────────────────────────
-_cc_video_cap    = [None]  # cv2.VideoCapture 物件（None 表示未載入）
+# ── 角色創建背景影片（循環播放，SpritePlayer） ───────────────
+_cc_player       = [None]  # SpritePlayer instance（None = 未載入）
 
-_cc_video_fps    = [30.0]  # 影片 FPS
-
-_cc_video_surf   = [None]  # 當前幀的 pygame.Surface
-
-_cc_video_last   = [0]     # 上次更新幀的時間戳（ms）
+_cc_video_surf   = [None]  # 當前幀的 pygame.Surface（blit 快取）
 
 _cc_overlay_surf = [None]  # 奶茶↔奶白漸層遮罩（75% 透明，懶初始化）
 
@@ -367,18 +363,14 @@ _stamp_shake_t0   = [0]            # 印章晃動觸發時間戳（ms，0=未啟
 
 _ending_bgm_triggered = [False]    # 結局 BGM 是否已觸發（每次進入 end 畫面重置）
 
-# ── 結算過場影片 ─────────────────────────────────────────────
-_end_video_cap   = [None]   # cv2.VideoCapture（None = 未載入）
-_end_video_fps   = [30.0]   # 影片 FPS
-_end_video_surf  = [None]   # 當前幀的 pygame.Surface（已縮放至螢幕尺寸）
-_end_video_last  = [0]      # 上次更新幀的時間戳（ms）
+# ── 結算過場影片（SpritePlayer，單次播放）────────────────────
+_end_player      = [None]   # SpritePlayer instance（None = 未載入）
+_end_video_surf  = [None]   # 當前幀快取（fade 邏輯需要保留最後一幀）
 _end_video_done  = [False]  # 影片播完旗標（觸發後推進到 fade_out_2）
 
-# ── 結局背景影片（成績單評語出現後顯示）────────────────────
-_end_bg_caps    = {}      # {"best": cap, "next": cap, "break": cap, "lose": cap}
-_end_bg_fps_map = {}      # {"best": fps, ...}
-_end_bg_surf    = [None]  # 當前幀的 pygame.Surface
-_end_bg_last    = [0]     # 上次更新幀的時間戳（ms）
+# ── 結局背景影片（SpritePlayer，循環播放）───────────────────
+_end_bg_players = {}      # {"best": SpritePlayer, "next": ..., ...}
+_end_bg_surf    = [None]  # 當前幀快取
 _end_bg_fade_t0 = [0]     # 背景漸變開始時間戳（0=未開始）
 _end_bg_key     = [None]  # 目前播放的結局背景 key（best/next/break/lose）
 
