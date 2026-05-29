@@ -37,7 +37,7 @@ class Shop:
             {
                 "id": "energy_drink_monster",
                 "name": "猛獸能量",
-                "price": 60,
+                "price": 120,
                 "desc": "恢復 25 點體力，並獲得「激勵」狀態（2週）。",
                 "stamina_restore": 25,
                 "status": "激勵",
