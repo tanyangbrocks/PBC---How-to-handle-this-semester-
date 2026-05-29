@@ -42,6 +42,18 @@ _BG_DIR   = os.path.join(os.path.dirname(os.path.abspath(__file__)),
 _ICON_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                           "asset", "picture", "icon")
 
+# ── 小遊戲共用色票（淺背景 × 深色文字）────────────────────
+_SMG_BG      = (248, 243, 230)   # 奶油米色背景
+_SMG_PRI     = ( 45,  30,  15)   # 深棕 — 主要文字
+_SMG_SEC     = ( 75,  58,  38)   # 中棕 — 次要 / 說明文字
+_SMG_ACC     = (130,  85,   5)   # 深琥珀 — 強調 / 分數
+_SMG_FLS     = (155,  90,  10)   # 深橙棕 — phase 閃字
+_SMG_BAR_TRK = (195, 180, 160)   # 淺棕灰 — 計時條軌道
+_SMG_BTN_N   = ( 70,  55,  38)   # 深棕 — 按鈕常態
+_SMG_BTN_H   = (105,  85,  58)   # 中棕 — 按鈕 hover
+_SMG_BTN_BDR = ( 50,  38,  20)   # 極深棕 — 按鈕邊框
+_SMG_BTN_TXT = (255, 248, 230)   # 奶白 — 按鈕文字（深底配淺字）
+
 # ── 背景 / 圖示工具 ──────────────────────────────────────
 
 def _load_smg_bg(filename: str) -> "pygame.Surface | None":
@@ -230,6 +242,10 @@ def _draw_shape_minigame(
     ms      = pygame.time.get_ticks()
     elapsed = ms - _smg_t0[0]
 
+    # ── 粗體字型（優先使用 ui_state 粗體，保留原字型作 fallback）
+    fb_lg = _font_bold_lg[0] or fm   # 粗體 size-22（HUD 主要文字）
+    fb_s  = _font_bold[0]   or fs   # 粗體 size-17（HUD 次要文字）
+
     # ── 第二回合結束：顯示總分 + 確認按鈕 ──────────────────
     if _smg_final_score_t0[0] > 0:
         _draw_final_score(surf, fm, fs, fb, mpos, ms)
@@ -292,8 +308,12 @@ def _draw_shape_minigame(
     # ── 繪製背景 ─────────────────────────────────────────
     if _smg_round[0] == 2 and _smg_bg_surf[0] is not None:
         surf.blit(_smg_bg_surf[0], (0, 0))
+        # 淡奶油遮罩：讓深色文字在任何背景圖上均可讀
+        ov = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
+        ov.fill((*_SMG_BG, 160))
+        surf.blit(ov, (0, 0))
     else:
-        surf.fill((18, 12, 35))
+        surf.fill(_SMG_BG)
 
     # ── 繪製所有形狀 ─────────────────────────────────────
     for s in _smg_shapes:
@@ -303,14 +323,14 @@ def _draw_shape_minigame(
     r2 = (_smg_round[0] == 2)
     if r2:
         inst_surf = _make_text_icon_surf(
-            fm, "點擊：", _smg_phase[0], "", (255, 240, 180))
+            fb_lg, "點擊：", _smg_phase[0], "", _SMG_PRI)
     else:
         target_name = "圓形 ○" if _smg_phase[0] == "circle" else "叉形 ×"
-        inst_surf   = fm.render(f"點擊：{target_name}", True, (255, 240, 180))
+        inst_surf   = fb_lg.render(f"點擊：{target_name}", True, _SMG_PRI)
     surf.blit(inst_surf, (WIN_W // 2 - inst_surf.get_width() // 2, 14))
 
     # ── HUD：回合標示 ─────────────────────────────────────
-    round_surf = fs.render(f"回合 {_smg_round[0]} / 2", True, (160, 140, 200))
+    round_surf = fb_s.render(f"回合 {_smg_round[0]} / 2", True, _SMG_SEC)
     surf.blit(round_surf, (WIN_W - round_surf.get_width() - 16, 14))
 
     # ── HUD：計時條 ──────────────────────────────────────
@@ -318,7 +338,7 @@ def _draw_shape_minigame(
     bar_x, bar_y  = 40, 50
     bar_total_w   = WIN_W - 80
     bar_h         = 10
-    pygame.draw.rect(surf, (60, 55, 80),
+    pygame.draw.rect(surf, _SMG_BAR_TRK,
                      (bar_x, bar_y, bar_total_w, bar_h), border_radius=5)
     bar_col = (
         (100, 210, 120) if ratio > 0.4 else
@@ -333,9 +353,9 @@ def _draw_shape_minigame(
     # ── HUD：分數預覽 ─────────────────────────────────────
     pv = 80 / 20
     cs = max(0.0, _smg_correct_clicks[0] * pv - _smg_wrong_clicks[0] * pv)
-    score_surf = fs.render(
+    score_surf = fb_s.render(
         f"點擊 {_smg_correct_clicks[0]}✓  {_smg_wrong_clicks[0]}✗  ({cs:.0f}pt)",
-        True, (180, 170, 210),
+        True, _SMG_SEC,
     )
     surf.blit(score_surf, (16, 14))
 
@@ -345,10 +365,10 @@ def _draw_shape_minigame(
         alpha    = max(0, int(255 * (1.0 - progress)))
         if r2:
             flash_surf = _make_text_icon_surf(
-                fm, "改按 ", _smg_phase[0], "！", (255, 240, 120))
+                fb_lg, "改按 ", _smg_phase[0], "！", _SMG_FLS)
         else:
             target_name = "圓形 ○" if _smg_phase[0] == "circle" else "叉形 ×"
-            flash_surf  = fm.render(f"改按 {target_name}！", True, (255, 240, 120))
+            flash_surf  = fb_lg.render(f"改按 {target_name}！", True, _SMG_FLS)
         flash_surf.set_alpha(alpha)
         surf.blit(flash_surf,
                   (WIN_W // 2 - flash_surf.get_width()  // 2,
@@ -378,24 +398,26 @@ def _draw_memory_question(
     fb: pygame.font.Font,
     mpos: tuple,
 ) -> None:
-    # 背景：第二回合延續遊戲背景，否則深色
+    # 粗體大字型
+    fb_lg = _font_bold_lg[0] or fm
+
+    # 背景：奶油色；第二回合延續背景圖 + 奶油遮罩
     if _smg_round[0] == 2 and _smg_bg_surf[0] is not None:
         surf.blit(_smg_bg_surf[0], (0, 0))
-        # 半透明深色遮罩提升可讀性
         overlay = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
-        overlay.fill((10, 6, 20, 180))
+        overlay.fill((*_SMG_BG, 200))
         surf.blit(overlay, (0, 0))
     else:
-        surf.fill((18, 12, 35))
+        surf.fill(_SMG_BG)
 
     r2 = (_smg_round[0] == 2)
     if r2:
         q_surf = _make_text_icon_surf(
-            fm, "剛才飛過幾個", _smg_q_shape[0], "？",
-            (255, 240, 180), icon_size=36)
+            fb_lg, "剛才飛過幾個", _smg_q_shape[0], "？",
+            _SMG_PRI, icon_size=36)
     else:
         shape_name = "三角形 △" if _smg_q_shape[0] == "triangle" else "菱形 ◇"
-        q_surf     = fm.render(f"剛才飛過幾個{shape_name}？", True, (255, 240, 180))
+        q_surf     = fb_lg.render(f"剛才飛過幾個{shape_name}？", True, _SMG_PRI)
 
     surf.blit(q_surf, (WIN_W // 2 - q_surf.get_width() // 2, WIN_H // 2 - 120))
 
@@ -406,10 +428,10 @@ def _draw_memory_question(
         br = pygame.Rect(bx, by, 110, 52)
         hov = br.collidepoint(mpos)
         pygame.draw.rect(surf,
-                         (80, 65, 130) if hov else (50, 42, 88),
+                         _SMG_BTN_H if hov else _SMG_BTN_N,
                          br, border_radius=12)
-        pygame.draw.rect(surf, (140, 110, 200), br, 2, border_radius=12)
-        vt = fb.render(str(val), True, (255, 255, 255))
+        pygame.draw.rect(surf, _SMG_BTN_BDR, br, 2, border_radius=12)
+        vt = fb.render(str(val), True, _SMG_BTN_TXT)
         surf.blit(vt, (br.x + (br.width  - vt.get_width())  // 2,
                        br.y + (br.height - vt.get_height()) // 2))
         _smg_q_rects.append((br, val))
@@ -418,11 +440,11 @@ def _draw_memory_question(
     if _smg_q_answered[0]:
         if _smg_q_ans_correct[0]:
             result_text  = "答對了！"
-            result_color = (80, 230, 100)
+            result_color = (20, 140, 50)    # 深綠
         else:
             result_text  = "答錯了……"
-            result_color = (255, 90, 90)
-        result_surf = fm.render(result_text, True, result_color)
+            result_color = (185, 35, 35)    # 深紅
+        result_surf = fb_lg.render(result_text, True, result_color)
         rx = WIN_W // 2 - result_surf.get_width()  // 2
         ry = WIN_H // 2 + 60
         # 半透明底板提升可讀性
@@ -431,7 +453,7 @@ def _draw_memory_question(
                               result_surf.get_width() + pad * 2,
                               result_surf.get_height() + pad)
         bg_surf = pygame.Surface((bg_rect.width, bg_rect.height), pygame.SRCALPHA)
-        bg_surf.fill((10, 6, 20, 200))
+        bg_surf.fill((240, 235, 220, 220))
         surf.blit(bg_surf, (bg_rect.x, bg_rect.y))
         surf.blit(result_surf, (rx, ry))
 
@@ -445,17 +467,21 @@ def _draw_final_score(
     mpos: tuple,
     ms: int,
 ) -> None:
-    surf.fill((18, 12, 35))
+    surf.fill(_SMG_BG)
+
+    # 粗體字型
+    fb_lg = _font_bold_lg[0] or fm
+    fb_s  = _font_bold[0]   or fs
 
     r1    = _smg_round_scores[0]
     r2    = _smg_round_scores[1]
     total = r1 + r2
 
-    cy = WIN_H // 2
-    title  = fm.render("小遊戲結束！",          True, (255, 240, 180))
-    line1  = fs.render(f"第一回合：{r1} / 100", True, (180, 170, 230))
-    line2  = fs.render(f"第二回合：{r2} / 100", True, (180, 170, 230))
-    total_surf = fm.render(f"總分：{total} / 200", True, (255, 220, 80))
+    cy         = WIN_H // 2
+    title      = fb_lg.render("小遊戲結束！",          True, _SMG_PRI)
+    line1      = fb_s.render( f"第一回合：{r1} / 100", True, _SMG_SEC)
+    line2      = fb_s.render( f"第二回合：{r2} / 100", True, _SMG_SEC)
+    total_surf = fb_lg.render(f"總分：{total} / 200",  True, _SMG_ACC)
 
     surf.blit(title,      (WIN_W // 2 - title.get_width()      // 2, cy - 140))
     surf.blit(line1,      (WIN_W // 2 - line1.get_width()      // 2, cy -  70))
@@ -470,11 +496,9 @@ def _draw_final_score(
         by = cy + 110
         br = pygame.Rect(bx, by, bw, bh)
         hov = br.collidepoint(mpos)
-        pygame.draw.rect(surf,
-                         (100, 80, 160) if hov else (65, 52, 120),
-                         br, border_radius=12)
-        pygame.draw.rect(surf, (160, 130, 220), br, 2, border_radius=12)
-        bt = fb.render("確認", True, (255, 255, 255))
+        pygame.draw.rect(surf, _SMG_BTN_H if hov else _SMG_BTN_N, br, border_radius=12)
+        pygame.draw.rect(surf, _SMG_BTN_BDR, br, 2, border_radius=12)
+        bt = fb.render("確認", True, _SMG_BTN_TXT)
         surf.blit(bt, (br.x + (br.width  - bt.get_width())  // 2,
                        br.y + (br.height - bt.get_height()) // 2))
         _smg_final_ok_rect[0] = br
@@ -486,11 +510,16 @@ def _draw_r1_score(
     fm: pygame.font.Font,
     fs: pygame.font.Font,
 ) -> None:
-    surf.fill((18, 12, 35))
+    surf.fill(_SMG_BG)
+
+    # 粗體字型
+    fb_lg = _font_bold_lg[0] or fm
+    fb_s  = _font_bold[0]   or fs
+
     score = _smg_round_scores[0]
-    t1   = fm.render("第一回合結束！",       True, (255, 240, 180))
-    t2   = fm.render(f"{score} / 100",     True, (255, 220, 80))
-    hint = fs.render("第二回合即將開始……", True, (160, 150, 190))
+    t1   = fb_lg.render("第一回合結束！",       True, _SMG_PRI)
+    t2   = fb_lg.render(f"{score} / 100",       True, _SMG_ACC)
+    hint = fb_s.render( "第二回合即將開始……", True, _SMG_SEC)
     surf.blit(t1,   (WIN_W // 2 - t1.get_width()   // 2, WIN_H // 2 - 80))
     surf.blit(t2,   (WIN_W // 2 - t2.get_width()   // 2, WIN_H // 2))
     surf.blit(hint, (WIN_W // 2 - hint.get_width() // 2, WIN_H // 2 + 80))
@@ -519,10 +548,108 @@ def _start_round_2() -> None:
     _smg_next_spawn_dt[0]  = random.randint(700, 1100)
     _smg_r1_score_t0[0]    = 0
 
+# ──────────────────────────────────────────────────────────────────
+# 考場倒數動畫（形狀小遊戲之前的預備儀式）
+# ──────────────────────────────────────────────────────────────────
+_PCD_MSG_MS   = 1200   # "準備進行考場壓力小遊戲！" 顯示時長 (ms)
+_PCD_DIG_SHOW = 500    # 每個數字完整顯示時長 (ms)
+_PCD_DIG_FADE = 450    # 每個數字淡出時長 (ms)
+_PCD_GO_SHOW  = 700    # "開始！" 完整顯示時長 (ms)
+_PCD_GO_FADE  = 500    # "開始！" 淡出時長 (ms)
+
+def _draw_pregame_countdown(surf: "pygame.Surface", fm, ms: int) -> bool:
+    """
+    在形狀小遊戲之前播放倒數動畫。
+    動畫序列：「準備進行考場壓力小遊戲！」→ 3 → 2 → 1 → 開始！
+    回傳 True 代表動畫已結束，呼叫端應立即觸發 _reply_event.set()。
+    """
+    if not _pcd_active[0]:
+        return False
+
+    phase   = _pcd_phase[0]
+    elapsed = ms - _pcd_t0[0]
+
+    # 深色半透明遮罩（疊在所有遊戲 UI 之上）
+    ov = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
+    ov.fill((0, 0, 0, 165))
+    surf.blit(ov, (0, 0))
+
+    cx, cy   = WIN_W // 2, WIN_H // 2
+    fc_big   = _extra_fonts.get("creative_84b") or fm   # 大號倒數數字
+    fc_label = _font_bold_xl[0] or fm                    # "準備進行..." 提示文字
+
+    # ── "準備進行考場壓力小遊戲！" ──────────────────────────────
+    if phase == "msg":
+        t_in  = min(1.0, elapsed / 300)     # 前 300ms 淡入
+        alpha = int(255 * t_in)
+        txt   = fc_label.render("準備進行考場壓力小遊戲！", True, (255, 240, 180))
+        tmp   = txt.copy()
+        tmp.set_alpha(alpha)
+        surf.blit(tmp, (cx - txt.get_width() // 2, cy - txt.get_height() // 2))
+        if elapsed >= _PCD_MSG_MS:
+            _pcd_phase[0] = "3"
+            _pcd_t0[0]    = ms
+            _play_sfx("pcd_3")
+
+    # ── 3 / 2 / 1 ──────────────────────────────────────────────
+    elif phase in ("3", "2", "1"):
+        total = _PCD_DIG_SHOW + _PCD_DIG_FADE
+        if elapsed < _PCD_DIG_SHOW:
+            t_shrink = elapsed / _PCD_DIG_SHOW
+            scale    = 1.45 - 0.45 * t_shrink   # 1.45x → 1.0x 衝入感
+            alpha    = 255
+        elif elapsed < total:
+            scale  = 1.0
+            t_fade = (elapsed - _PCD_DIG_SHOW) / _PCD_DIG_FADE
+            alpha  = int(255 * (1.0 - t_fade))
+        else:
+            # 推進到下一階段
+            nxt = {"3": "2", "2": "1", "1": "go"}[phase]
+            _pcd_phase[0] = nxt
+            _pcd_t0[0]    = ms
+            if nxt != "go":
+                _play_sfx("pcd_3")    # 2 和 1 使用同一個提示音
+            else:
+                _play_sfx("pcd_go")   # 開始！音效
+            return False
+
+        digit_s = fc_big.render(phase, True, (255, 255, 255))
+        if scale != 1.0:
+            nw = max(1, int(digit_s.get_width()  * scale))
+            nh = max(1, int(digit_s.get_height() * scale))
+            digit_s = pygame.transform.smoothscale(digit_s, (nw, nh))
+        tmp = digit_s.copy()
+        tmp.set_alpha(alpha)
+        surf.blit(tmp, (cx - digit_s.get_width()  // 2,
+                        cy - digit_s.get_height() // 2))
+
+    # ── 開始！──────────────────────────────────────────────────
+    elif phase == "go":
+        total = _PCD_GO_SHOW + _PCD_GO_FADE
+        if elapsed < _PCD_GO_SHOW:
+            alpha = 255
+        elif elapsed < total:
+            t_fade = (elapsed - _PCD_GO_SHOW) / _PCD_GO_FADE
+            alpha  = int(255 * (1.0 - t_fade))
+        else:
+            # 動畫全部結束，重置並通知呼叫端
+            _pcd_active[0] = False
+            _pcd_phase[0]  = "msg"
+            return True
+
+        go_s = fc_big.render("開始！", True, (255, 215, 60))
+        tmp  = go_s.copy()
+        tmp.set_alpha(alpha)
+        surf.blit(tmp, (cx - go_s.get_width()  // 2,
+                        cy - go_s.get_height() // 2))
+
+    return False
+
 # ── __all__ ───────────────────────────────────────────────
 __all__ = [
     "_draw_shape_minigame",
     "_draw_memory_question",
+    "_draw_pregame_countdown",
     "shape_rect",
     "ROUND_MS",
     "SHAPE_COLORS",
