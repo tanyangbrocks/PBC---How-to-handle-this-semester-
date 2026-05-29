@@ -266,7 +266,14 @@ def _draw_action_panel(surf, fm, fs, mode, choices, log, prompt, tvalue, rect, t
         if hovered_action == "社團活動":
             _ap = _player[0]
             if _ap is not None:
-                _free_pct = int(min(95, 30 + _ap.luck))
+                _lk = _ap.luck
+                if _lk <= 20:
+                    _lb = 0.0
+                elif _lk <= 40:
+                    _lb = (_lk - 20) * 0.01
+                else:
+                    _lb = 0.20 + (_lk - 40) * 0.005
+                _free_pct = int(min(0.80, 0.30 + _lb) * 100)
                 cost_str  = f"體力-3，{_free_pct}%免"
                 _has_club = "club" in _ap.extra_events
                 if _has_club:

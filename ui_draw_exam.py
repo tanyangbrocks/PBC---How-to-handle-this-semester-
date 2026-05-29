@@ -18,6 +18,26 @@ SHAPE_COLORS = {
     "diamond":  (190, 100, 255),
 }
 
+# 第一回合：各形狀對應的字母標籤
+_SHAPE_LABELS = {
+    "circle":   "Ａ",
+    "cross":    "Ｂ",
+    "diamond":  "Ｃ",
+    "triangle": "Ｄ",
+}
+
+def _get_shape_label_font() -> pygame.font.Font:
+    """取得（並快取）第一回合字母標籤用字型（48px 粗體）。"""
+    ck = "smg_label_48b"
+    if ck not in _extra_fonts:
+        try:
+            _extra_fonts[ck] = pygame.font.SysFont(
+                "microsoftyahei,notosanscjktc,meiryobold", 48, bold=True
+            )
+        except Exception:
+            _extra_fonts[ck] = pygame.font.SysFont(None, 48, bold=True)
+    return _extra_fonts[ck]
+
 ROUND_MS = 30_000   # 每回合 30 秒
 
 # 第二回合可用背景清單
@@ -209,20 +229,12 @@ def _draw_shape(surf: pygame.Surface, s: dict) -> None:
         if icon:
             surf.blit(icon, (x - 45, y - 45))
             return
-    # 第一回合（或 icon 載入失敗）：繪製幾何圖形
+    # 第一回合：以彩色字母取代幾何圖形（顏色保持與原形狀一致）
     col = SHAPE_COLORS[s["type"]]
-    t   = s["type"]
-    if t == "circle":
-        pygame.draw.circle(surf, col, (x, y), 33, 4)
-    elif t == "cross":
-        pygame.draw.line(surf, col, (x - 27, y - 27), (x + 27, y + 27), 5)
-        pygame.draw.line(surf, col, (x + 27, y - 27), (x - 27, y + 27), 5)
-    elif t == "triangle":
-        pts = [(x, y - 33), (x - 28, y + 21), (x + 28, y + 21)]
-        pygame.draw.polygon(surf, col, pts, 4)
-    elif t == "diamond":
-        pts = [(x, y - 33), (x + 24, y), (x, y + 33), (x - 24, y)]
-        pygame.draw.polygon(surf, col, pts, 4)
+    lbl = _SHAPE_LABELS[s["type"]]
+    fl  = _get_shape_label_font()
+    ts  = fl.render(lbl, True, col)
+    surf.blit(ts, (x - ts.get_width() // 2, y - ts.get_height() // 2))
 
 def shape_rect(s: dict) -> pygame.Rect:
     # 第二回合 icon 為 90px；第一回合幾何圖形維持 72px 判定框
@@ -326,7 +338,7 @@ def _draw_shape_minigame(
         inst_surf = _make_text_icon_surf(
             fb_lg, "點擊：", _smg_phase[0], "", _SMG_PRI)
     else:
-        target_name = "圓形 ○" if _smg_phase[0] == "circle" else "叉形 ×"
+        target_name = "Ａ" if _smg_phase[0] == "circle" else "Ｂ"
         inst_surf   = fb_lg.render(f"點擊：{target_name}", True, _SMG_PRI)
     surf.blit(inst_surf, (WIN_W // 2 - inst_surf.get_width() // 2, 14))
 
@@ -368,7 +380,7 @@ def _draw_shape_minigame(
             flash_surf = _make_text_icon_surf(
                 fb_lg, "改按 ", _smg_phase[0], "！", _SMG_FLS)
         else:
-            target_name = "圓形 ○" if _smg_phase[0] == "circle" else "叉形 ×"
+            target_name = "Ａ" if _smg_phase[0] == "circle" else "Ｂ"
             flash_surf  = fb_lg.render(f"改按 {target_name}！", True, _SMG_FLS)
         flash_surf.set_alpha(alpha)
         surf.blit(flash_surf,
@@ -417,7 +429,7 @@ def _draw_memory_question(
             fb_lg, "剛才飛過幾個", _smg_q_shape[0], "？",
             _SMG_PRI, icon_size=36)
     else:
-        shape_name = "三角形 △" if _smg_q_shape[0] == "triangle" else "菱形 ◇"
+        shape_name = "Ｄ" if _smg_q_shape[0] == "triangle" else "Ｃ"
         q_surf     = fb_lg.render(f"剛才飛過幾個{shape_name}？", True, _SMG_PRI)
 
     surf.blit(q_surf, (WIN_W // 2 - q_surf.get_width() // 2, WIN_H // 2 - 120))
