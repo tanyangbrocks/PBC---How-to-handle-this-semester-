@@ -238,9 +238,9 @@ class TestPreExamCheck:
         assert mod == pytest.approx(1.0)
 
     def test_oversleep_triggers_when_stamina_low_and_random_hit(self):
-        """體力 < 30 且 random() < 0.4 → modifier = 0.5，滿足感 -15。"""
+        """體力 < 30 且 < stamina_max*0.3 且 random() < 0.4 → modifier = 0.5，滿足感 -15。"""
         p = make_char(stamina=50, luck=60, satisfaction=80)
-        p.stamina = 20   # 低體力
+        p.stamina = 10   # 低體力（< 30 且 < 50*0.3=15）
         te = make_engine(p)
         with patch("turn_engine.random.random", return_value=0.1):   # < 0.4
             mod = te._pre_exam_check()
@@ -248,9 +248,9 @@ class TestPreExamCheck:
         assert p.satisfaction == 65   # 80 - 15
 
     def test_oversleep_not_triggered_when_random_miss(self):
-        """體力 < 30 但 random() >= 0.4 → 繼續判斷運氣（不立即返回 0.5）。"""
+        """體力 < 30 且 < stamina_max*0.3 但 random() >= 0.4 → 繼續判斷運氣（不立即返回 0.5）。"""
         p = make_char(stamina=50, luck=60, satisfaction=80)
-        p.stamina = 20
+        p.stamina = 10   # 低體力（< 30 且 < 50*0.3=15）
         te = make_engine(p)
         with patch("turn_engine.random.random", return_value=0.5):   # >= 0.4
             mod = te._pre_exam_check()
