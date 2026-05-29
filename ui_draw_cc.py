@@ -504,13 +504,37 @@ def _draw_cc_stats(surf, fm, fs, total, base, talent, vals, raw, active, mpos, d
     rem  = total - used
     _draw_cc_title(surf, "分配能力點", WIN_W // 2, top_y, phase=1.0)
     bonus = total - base
-    pts_label = f"{base}(+{bonus})" if bonus > 0 else str(total)
-    info_text = f"可用點數：{pts_label}   已用：{used}   剩餘：{rem}   初始金錢 +{rem * 10} 元"
-    # 直接渲染文字（粗體，與標籤同色，移除半透明遮罩底板）
+
+    # ── 基礎點數評價標籤 ─────────────────────────────────────────
+    if base < 40:
+        _rating_lbl = "極少"
+        _rating_col = RED
+    elif base <= 50:
+        _rating_lbl = "偏少"
+        _rating_col = (88, 148, 220)   # 藍色（非 CYAN 棕）
+    elif base <= 60:
+        _rating_lbl = "偏多"
+        _rating_col = GREEN
+    else:
+        _rating_lbl = "極多"
+        _rating_col = YELLOW
+
+    # 組成三段文字：前段（白） + 評價（色） + 後段（白）
+    _seg1 = f"可用點數：{base}"
+    _seg2 = f"【{_rating_lbl}】"
+    _seg3 = (f"(+{bonus})   已用：{used}   剩餘：{rem}   初始金錢 +{rem * 10} 元"
+             if bonus > 0
+             else f"   已用：{used}   剩餘：{rem}   初始金錢 +{rem * 10} 元")
+    _s1 = fb_lg.render(_seg1, True, WHITE)
+    _s2 = fb_lg.render(_seg2, True, _rating_col)
+    _s3 = fb_lg.render(_seg3, True, WHITE)
+    _info_w = _s1.get_width() + _s2.get_width() + _s3.get_width()
     _fy_info = _float_offset(7, 0.00170, 1.0)
-    info_s   = fb_lg.render(info_text, True, WHITE)
-    surf.blit(info_s, (WIN_W // 2 - info_s.get_width() // 2,
-                       sub_y + _fy_info + (sub_h - info_s.get_height()) // 2))
+    _info_x  = WIN_W // 2 - _info_w // 2
+    _info_y  = sub_y + _fy_info + (sub_h - fb_lg.get_height()) // 2
+    surf.blit(_s1, (_info_x, _info_y))
+    surf.blit(_s2, (_info_x + _s1.get_width(), _info_y))
+    surf.blit(_s3, (_info_x + _s1.get_width() + _s2.get_width(), _info_y))
 
     labels      = ["體力", "智力", "運氣"]
     talent_keys = ["stamina", "intel", "luck"]
