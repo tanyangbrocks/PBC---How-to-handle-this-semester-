@@ -493,9 +493,17 @@ async def notify_timetable(courses: list):
     顯示課表彈出畫面，阻塞直到玩家點確認。
     courses: [{"name": "統計學", "day": "週一", "time": "08:10", "credits": 3}, ...]
     """
+    print(f"[DBG] notify_timetable: 開始，課程數={len(courses)}")
     _cmd_q.append(("timetable", courses))
     _modal_ready[0] = False
-    while not _modal_ready[0]: await asyncio.sleep(0)
+    print("[DBG] notify_timetable: 開始等待玩家點確認...")
+    _f = 0
+    while not _modal_ready[0]:
+        await asyncio.sleep(0)
+        _f += 1
+        if _f == 1: print("[DBG] notify_timetable: asyncio yield 正常（第1幀）")
+        if _f % 90 == 0: print(f"[DBG] notify_timetable: 仍在等待 frame={_f}")
+    print("[DBG] notify_timetable: 確認按下，繼續遊戲")
 
 async def notify_grade_report(items: list, sfx: str = None):
     """
@@ -1501,11 +1509,18 @@ async def run_ui():
         # ── Modal 疊加（課表 / 成績公告，浮在所有畫面之上）────────
         _modal_ok_btn = None
         if _modal[0] == "timetable":
-            _modal_ok_btn = _draw_modal_timetable(
-                screen, fm, fs, _modal_data[0] or [], mpos)
+            try:
+                _modal_ok_btn = _draw_modal_timetable(
+                    screen, fm, fs, _modal_data[0] or [], mpos)
+            except Exception as _e:
+                print(f"[DBG] _draw_modal_timetable ERROR: {type(_e).__name__}: {_e}")
+                import traceback; traceback.print_exc()
         elif _modal[0] == "grade_report":
-            _modal_ok_btn = _draw_modal_grade(
-                screen, fm, fl, fs, _modal_data[0] or [], mpos)
+            try:
+                _modal_ok_btn = _draw_modal_grade(
+                    screen, fm, fl, fs, _modal_data[0] or [], mpos)
+            except Exception as _e:
+                print(f"[DBG] _draw_modal_grade ERROR: {type(_e).__name__}: {_e}")
 
         # ── 全螢幕切換按鈕（全螢幕模式下隱藏；非全螢幕時右下角常駐）──
         if not _is_fullscreen[0]:
