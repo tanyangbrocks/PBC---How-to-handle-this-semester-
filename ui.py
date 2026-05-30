@@ -812,7 +812,10 @@ async def run_ui():
         # （之前誤設 22050Hz，導致 pygame 把 44100→22050 降頻 → 失真）
         # tab 切換造成的 AudioContext suspend/resume 由 patch_index.py 的 Page Visibility fix 處理
         _freq = 44100
-        _buf  = 2048  if _sys_m.platform == "emscripten" else 512
+        # WASM: ScriptProcessorNode 在主執行緒處理音效。
+        # 前景時主執行緒忙於渲染，buffer 填不及 → 失真。
+        # 增大 buffer 到 4096 給更多餘裕（~93ms latency，BGM 可接受）。
+        _buf  = 4096  if _sys_m.platform == "emscripten" else 512
         pygame.mixer.init(frequency=_freq, size=-16, channels=2, buffer=_buf)
         # WASM：減少 channel 數量降低音訊處理負載
         if _sys_m.platform == "emscripten":

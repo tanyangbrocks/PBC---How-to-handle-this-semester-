@@ -144,15 +144,15 @@ AUDIO_FIX_JS = """
             ctx.resume();
         }
     });
-    // 首次點擊時強制 suspend→resume，重置 AudioContext 初始狀態（修復載入後音質失真）
-    document.addEventListener('click', function _audioInit() {
-        document.removeEventListener('click', _audioInit);
-        setTimeout(function() {
-            var ctx = getAudioCtx();
-            if (!ctx || ctx.state !== 'running') return;
-            ctx.suspend().then(function() { ctx.resume(); });
-        }, 300);
-    }, { once: true });
+    // 前景重新取得焦點時強制 resume（確保 ScriptProcessorNode 重新同步）
+    document.addEventListener('focus', function() {
+        var ctx = getAudioCtx();
+        if (ctx && ctx.state === 'suspended') ctx.resume();
+    });
+    window.addEventListener('focus', function() {
+        var ctx = getAudioCtx();
+        if (ctx && ctx.state === 'suspended') ctx.resume();
+    });
 })();
 </script>
 </body>"""
