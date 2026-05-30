@@ -39,7 +39,7 @@ def _run_patch():
     time.sleep(1)   # 讓 server 完全就緒
     print("\n[build] 偵測到 build 完成，套用 patch_index.py...")
     result = subprocess.run(
-        [sys.executable, "patch_index.py"],
+        [sys.executable, "-X", "utf8", "patch_index.py"],
         cwd=ROOT,
     )
     if result.returncode == 0:
