@@ -213,15 +213,17 @@ def _render_mixed(surf: pygame.Surface,
         cp = ord(ch)
         if cp == 0xFE0F:
             continue
-        if _is_emoji_char(ch) and em_f is not None:
-            _flush()
-            em_col = _EMOJI_COLORS.get(ch, color)
-            try:
-                es = em_f.render(ch, True, em_col)
-                surf.blit(es, (cx, y + (fh - es.get_height()) // 2))
-                cx += es.get_width()
-            except Exception:
-                pass
+        if _is_emoji_char(ch):
+            if em_f is not None:
+                _flush()
+                em_col = _EMOJI_COLORS.get(ch, color)
+                try:
+                    es = em_f.render(ch, True, em_col)
+                    surf.blit(es, (cx, y + (fh - es.get_height()) // 2))
+                    cx += es.get_width()
+                except Exception:
+                    pass
+            # else: emoji font not available → skip char silently (no square box)
         else:
             seg.append(ch)
     _flush()

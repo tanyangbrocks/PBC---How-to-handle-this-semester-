@@ -1022,18 +1022,16 @@ async def run_ui():
         _prev_tick = _now_tick
         mpos = _tpos(pygame.mouse.get_pos())
 
-        # ── WASM：偵測瀏覽器退出全螢幕（ESC 或拖拉視窗等方式）────────
-        # JS fullscreenchange 事件寫入 /tmp/__fs_exit.txt → Python 在此讀取
-        # 完全不呼叫 pygame.display.set_mode，只更新旗標
+        # ── WASM：每幀同步全螢幕狀態（JS fullscreenchange 寫 /tmp/__fs_state.txt）
+        # '1' = 全螢幕中，'0' = 已退出。不刪檔，JS 每次事件都會覆寫。
         import sys as _sys_fschk
-        if _sys_fschk.platform == "emscripten" and _is_fullscreen[0]:
-            _FS_EXIT_FILE = "/tmp/__fs_exit.txt"
+        if _sys_fschk.platform == "emscripten":
             try:
                 import os as _os_fschk
-                if _os_fschk.path.exists(_FS_EXIT_FILE):
-                    _os_fschk.remove(_FS_EXIT_FILE)
-                    _is_fullscreen[0] = False
-            except Exception:
+                if _os_fschk.path.exists("/tmp/__fs_state.txt"):
+                    with open("/tmp/__fs_state.txt", "r") as _fsf:
+                        _is_fullscreen[0] = (_fsf.read().strip() == "1")
+            except (FileNotFoundError, OSError):
                 pass
 
         # 道具店按鈕是否可點擊：只有在行動選單中且選項包含道具店時才亮起
@@ -1706,18 +1704,11 @@ async def run_ui():
                 import sys as _sys_fs
                 if fs_btn.collidepoint(_tpos(ev.pos)):
                     if _sys_fs.platform == "emscripten":
-                        # WASM：用瀏覽器 Canvas Fullscreen API
-                        # ！絕對不呼叫 pygame.display.set_mode() — 在 WASM 很危險
-                        try:
-                            import platform as _plt_fs
-                            if not _is_fullscreen[0]:
-                                _plt_fs.window.eval("__wasm_fs_enter()")
-                                _is_fullscreen[0] = True
-                            else:
-                                _plt_fs.window.eval("__wasm_fs_exit_api()")
-                                _is_fullscreen[0] = False
-                        except Exception:
-                            pass
+                        # WASM：全螢幕由 JS canvas click listener 處理（user gesture 要求）
+                        # requestFullscreen() 必須在 JS event handler 內同步呼叫，
+                        # Python window.eval() 呼叫時已超出 user gesture 時間窗 → 無效。
+                        # 狀態由 fullscreenchange → /tmp/__fs_state.txt → Python 每幀讀取同步。
+                        pass  # JS 已處理，Python 只需 continue
                     else:
                         # 桌面：用 pygame display mode
                         if _is_fullscreen[0]:

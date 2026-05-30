@@ -170,7 +170,7 @@ print("[patch_index] ✓ browserfs URL 修復（pygame-web CDN 404 → jsdelivr�
 # Python polling 只用 open() 讀檔，完全不在 await 後呼叫任何 JS，避免死鎖
 IME_OVERLAY = """
 <div id="__cc_ov" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;
-  background:rgba(0,0,0,0.52);z-index:99999;align-items:center;justify-content:center;">
+  background:rgba(0,0,0,0.52);z-index:2147483647;align-items:center;justify-content:center;">
   <div style="background:#fff9f0;border-radius:16px;padding:30px 36px;min-width:340px;
     text-align:center;font-family:sans-serif;box-shadow:0 6px 28px rgba(0,0,0,.35);
     border:2px solid #e8c898;">
@@ -188,28 +188,64 @@ IME_OVERLAY = """
   </div>
 </div>
 <script>
-// 全螢幕切換（WASM 用瀏覽器 Canvas Fullscreen API，不碰 pygame display mode）
-function __wasm_fs_enter() {
-  var c = document.getElementById('canvas');
-  if (!c) return;
-  if (c.requestFullscreen) c.requestFullscreen();
-  else if (c.webkitRequestFullscreen) c.webkitRequestFullscreen();
-}
-function __wasm_fs_exit_api() {
-  if (document.exitFullscreen) document.exitFullscreen();
-  else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
-}
-document.addEventListener('fullscreenchange', function() {
-  if (!document.fullscreenElement && !document.webkitFullscreenElement) {
-    // 瀏覽器退出全螢幕（ESC 或其他方式）→ 通知 Python
-    try { Module.FS.writeFile('/tmp/__fs_exit.txt', '1'); } catch(e) {}
+// 全螢幕狀態橋接：fullscreenchange → /tmp/__fs_state.txt（Python 每幀讀取）
+// 純 JS 方案：user gesture 必須在 JS 事件 handler 內同步呼叫 requestFullscreen，
+// 無法透過 Python window.eval() 觸發（已超出 user gesture 時間窗）
+(function() {
+  var BTN_X = 1234, BTN_Y = 674, BTN_W = 40, BTN_H = 40; // WIN_W=1280, WIN_H=720
+
+  function writeState(s) {
+    try { Module.FS.writeFile('/tmp/__fs_state.txt', s); } catch(e) {}
   }
-});
-document.addEventListener('webkitfullscreenchange', function() {
-  if (!document.fullscreenElement && !document.webkitFullscreenElement) {
-    try { Module.FS.writeFile('/tmp/__fs_exit.txt', '1'); } catch(e) {}
+
+  function fsToggle() {
+    var c = document.getElementById('canvas');
+    if (!c) return;
+    if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+      var req = c.requestFullscreen || c.webkitRequestFullscreen;
+      if (req) req.call(c).catch(function(e){ console.warn('[fs] enter failed:', e); });
+    } else {
+      var ex = document.exitFullscreen || document.webkitExitFullscreen;
+      if (ex) ex.call(document);
+    }
   }
-});
+
+  function handleCanvasClick(e) {
+    if (document.fullscreenElement || document.webkitFullscreenElement) return;
+    var c = e.currentTarget;
+    var rect = c.getBoundingClientRect();
+    var sx = (c.width  || 1280) / (rect.width  || 1);
+    var sy = (c.height || 720)  / (rect.height || 1);
+    var lx = (e.clientX - rect.left) * sx;
+    var ly = (e.clientY - rect.top)  * sy;
+    if (lx >= BTN_X && lx <= BTN_X + BTN_W && ly >= BTN_Y && ly <= BTN_Y + BTN_H) {
+      fsToggle();
+    }
+  }
+
+  document.addEventListener('fullscreenchange', function() {
+    writeState((document.fullscreenElement || document.webkitFullscreenElement) ? '1' : '0');
+  });
+  document.addEventListener('webkitfullscreenchange', function() {
+    writeState((document.fullscreenElement || document.webkitFullscreenElement) ? '1' : '0');
+  });
+
+  // canvas 可能在 DOMContentLoaded 後才建立，用 MutationObserver 等待
+  function attachClickListener() {
+    var c = document.getElementById('canvas');
+    if (c) { c.addEventListener('click', handleCanvasClick); return; }
+    var obs = new MutationObserver(function() {
+      var c2 = document.getElementById('canvas');
+      if (c2) { obs.disconnect(); c2.addEventListener('click', handleCanvasClick); }
+    });
+    obs.observe(document.body || document.documentElement, { childList: true, subtree: true });
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', attachClickListener);
+  } else {
+    attachClickListener();
+  }
+})();
 
 function __cc_show(prompt) {
   var ov  = document.getElementById('__cc_ov');
@@ -217,8 +253,14 @@ function __cc_show(prompt) {
   document.getElementById('__cc_prm').textContent = prompt;
   inp.value = '';
   ov.style.display = 'flex';
+  ov.style.zIndex   = '2147483647';  // INT_MAX：確保蓋過 canvas
   var cv = document.getElementById('canvas');
-  if (cv) { cv._oldPe = cv.style.pointerEvents; cv.style.pointerEvents = 'none'; }
+  if (cv) {
+    cv._oldPe = cv.style.pointerEvents;
+    cv._oldZ  = cv.style.zIndex;
+    cv.style.pointerEvents = 'none';
+    cv.style.zIndex = '1';  // 強制 canvas 沉底
+  }
   setTimeout(function(){ inp.focus(); inp.select(); }, 80);
 }
 function __cc_submit() {
@@ -226,7 +268,11 @@ function __cc_submit() {
   var ov  = document.getElementById('__cc_ov');
   ov.style.display = 'none';
   var cv = document.getElementById('canvas');
-  if (cv) { cv.style.pointerEvents = cv._oldPe || ''; cv.focus(); }
+  if (cv) {
+    cv.style.pointerEvents = cv._oldPe || '';
+    cv.style.zIndex = cv._oldZ || '';  // 還原 canvas z-index
+    cv.focus();
+  }
   try {
     // emscripten FS bridge：直接寫入 WASM 虛擬檔案系統，Python 用 open() 讀取
     Module.FS.writeFile('/tmp/__cc_result.txt', val);
