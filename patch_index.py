@@ -188,6 +188,29 @@ IME_OVERLAY = """
   </div>
 </div>
 <script>
+// 全螢幕切換（WASM 用瀏覽器 Canvas Fullscreen API，不碰 pygame display mode）
+function __wasm_fs_enter() {
+  var c = document.getElementById('canvas');
+  if (!c) return;
+  if (c.requestFullscreen) c.requestFullscreen();
+  else if (c.webkitRequestFullscreen) c.webkitRequestFullscreen();
+}
+function __wasm_fs_exit_api() {
+  if (document.exitFullscreen) document.exitFullscreen();
+  else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+}
+document.addEventListener('fullscreenchange', function() {
+  if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+    // 瀏覽器退出全螢幕（ESC 或其他方式）→ 通知 Python
+    try { Module.FS.writeFile('/tmp/__fs_exit.txt', '1'); } catch(e) {}
+  }
+});
+document.addEventListener('webkitfullscreenchange', function() {
+  if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+    try { Module.FS.writeFile('/tmp/__fs_exit.txt', '1'); } catch(e) {}
+  }
+});
+
 function __cc_show(prompt) {
   var ov  = document.getElementById('__cc_ov');
   var inp = document.getElementById('__cc_inp');

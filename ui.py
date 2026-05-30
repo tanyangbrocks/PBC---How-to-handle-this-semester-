@@ -1021,6 +1021,21 @@ async def run_ui():
         _dt_ms    = max(1, _now_tick - _prev_tick)
         _prev_tick = _now_tick
         mpos = _tpos(pygame.mouse.get_pos())
+
+        # ── WASM：偵測瀏覽器退出全螢幕（ESC 或拖拉視窗等方式）────────
+        # JS fullscreenchange 事件寫入 /tmp/__fs_exit.txt → Python 在此讀取
+        # 完全不呼叫 pygame.display.set_mode，只更新旗標
+        import sys as _sys_fschk
+        if _sys_fschk.platform == "emscripten" and _is_fullscreen[0]:
+            _FS_EXIT_FILE = "/tmp/__fs_exit.txt"
+            try:
+                import os as _os_fschk
+                if _os_fschk.path.exists(_FS_EXIT_FILE):
+                    _os_fschk.remove(_FS_EXIT_FILE)
+                    _is_fullscreen[0] = False
+            except Exception:
+                pass
+
         # 道具店按鈕是否可點擊：只有在行動選單中且選項包含道具店時才亮起
         shop_active = (_mode[0] == "choices" and "🏪 前往道具店" in _choices)
 
@@ -1687,31 +1702,44 @@ async def run_ui():
                 # 點擊波紋特效（任何畫面均觸發，無條件生成）
                 _click_spawn(_tpos(ev.pos)[0], _tpos(ev.pos)[1], pygame.time.get_ticks())
 
-                # 全螢幕切換按鈕（WASM 停用，桌面才有效）
+                # 全螢幕切換按鈕
                 import sys as _sys_fs
-                if fs_btn.collidepoint(_tpos(ev.pos)) and _sys_fs.platform != "emscripten":
-                    if _is_fullscreen[0]:
-                        # ── 退出全螢幕 ──────────────────────────────
-                        screen = pygame.display.set_mode((WIN_W, WIN_H))
-                        real_screen  = screen
-                        fs_bg_scaled = None
-                        _fs_off[0] = _fs_off[1] = 0
-                        _is_fullscreen[0] = False
+                if fs_btn.collidepoint(_tpos(ev.pos)):
+                    if _sys_fs.platform == "emscripten":
+                        # WASM：用瀏覽器 Canvas Fullscreen API
+                        # ！絕對不呼叫 pygame.display.set_mode() — 在 WASM 很危險
+                        try:
+                            import platform as _plt_fs
+                            if not _is_fullscreen[0]:
+                                _plt_fs.window.eval("__wasm_fs_enter()")
+                                _is_fullscreen[0] = True
+                            else:
+                                _plt_fs.window.eval("__wasm_fs_exit_api()")
+                                _is_fullscreen[0] = False
+                        except Exception:
+                            pass
                     else:
-                        # ── 進入全螢幕（原生解析度 + 子 Surface）──
-                        real_screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
-                        _rw, _rh = real_screen.get_size()
-                        _gx = max(0, (_rw - WIN_W) // 2)
-                        _gy = max(0, (_rh - WIN_H) // 2)
-                        _fs_off[0], _fs_off[1] = _gx, _gy
-                        screen = real_screen.subsurface(
-                            pygame.Rect(_gx, _gy, WIN_W, WIN_H))
-                        if _outside_bg_raw is not None:
-                            fs_bg_scaled = pygame.transform.scale(
-                                _outside_bg_raw, (_rw, _rh))
-                        else:
+                        # 桌面：用 pygame display mode
+                        if _is_fullscreen[0]:
+                            screen = pygame.display.set_mode((WIN_W, WIN_H))
+                            real_screen  = screen
                             fs_bg_scaled = None
-                        _is_fullscreen[0] = True
+                            _fs_off[0] = _fs_off[1] = 0
+                            _is_fullscreen[0] = False
+                        else:
+                            real_screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
+                            _rw, _rh = real_screen.get_size()
+                            _gx = max(0, (_rw - WIN_W) // 2)
+                            _gy = max(0, (_rh - WIN_H) // 2)
+                            _fs_off[0], _fs_off[1] = _gx, _gy
+                            screen = real_screen.subsurface(
+                                pygame.Rect(_gx, _gy, WIN_W, WIN_H))
+                            if _outside_bg_raw is not None:
+                                fs_bg_scaled = pygame.transform.scale(
+                                    _outside_bg_raw, (_rw, _rh))
+                            else:
+                                fs_bg_scaled = None
+                            _is_fullscreen[0] = True
                     continue
 
                 # ── Modal 優先攔截（課表 / 成績公告）────────────
@@ -2104,11 +2132,16 @@ async def run_ui():
             elif ev.type == pygame.KEYDOWN:
                 # ESC：全螢幕模式下退出全螢幕
                 if ev.key == pygame.K_ESCAPE and _is_fullscreen[0]:
-                    screen = pygame.display.set_mode((WIN_W, WIN_H))
-                    real_screen  = screen
-                    fs_bg_scaled = None
-                    _fs_off[0] = _fs_off[1] = 0
-                    _is_fullscreen[0] = False
+                    import sys as _sys_esc
+                    if _sys_esc.platform != "emscripten":
+                        # 桌面：pygame 直接管理全螢幕模式
+                        screen = pygame.display.set_mode((WIN_W, WIN_H))
+                        real_screen  = screen
+                        fs_bg_scaled = None
+                        _fs_off[0] = _fs_off[1] = 0
+                        _is_fullscreen[0] = False
+                    # WASM：瀏覽器 ESC → fullscreenchange 事件 → 寫 /tmp/__fs_exit.txt
+                    # 狀態更新由上方 FS exit 偵測區處理，此處不呼叫 pygame.display.set_mode
                 elif _phase[0] == "char_create":
                     if _cc_mode[0] == "name":
                         _ime_rect = pygame.Rect(
