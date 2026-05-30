@@ -83,8 +83,120 @@ async def ask_withdrawal_popup(options: list) -> str:
     while not _reply_ready[0]: await asyncio.sleep(0)
     return _reply_val[0]
 
+def _wasm_input_setup(prompt: str, default: str = "") -> None:
+    """WASM 專用：建立支援中文 IME 的 HTML 輸入框，同時安全地讓它取得鍵盤焦點。
+    採用 tabindex 屬性切換（不觸發 blur/focus 事件），避免 SDL2 崩潰。
+    """
+    import platform as _plt
+    # 停止 SDL2 IME 捕獲，讓瀏覽器 IME 可接管
+    pygame.key.stop_text_input()
+    import json as _json
+    _plt.window.eval(f"window._ask_text_prompt={_json.dumps(prompt)};")
+    _plt.window.eval(f"window._ask_text_default={_json.dumps(default)};")
+    _plt.window.eval(f"window._ask_text_hint={_json.dumps('（支援繁體中文輸入法）')};")
+    _plt.window.eval(f"window._ask_text_btn={_json.dumps('確認')};")
+    _plt.window.eval("window._ask_text_result=null;")
+    _plt.window.eval("""
+(function(){
+  var d=document.createElement('div');
+  d.id='__py_input_ov';
+  d.style.cssText='position:fixed;top:0;left:0;width:100%;height:100%;'
+    +'background:rgba(0,0,0,0.52);z-index:99999;'
+    +'display:flex;align-items:center;justify-content:center;';
+  var box=document.createElement('div');
+  box.style.cssText='background:#fff9f0;border-radius:16px;padding:30px 36px;'
+    +'min-width:340px;text-align:center;font-family:sans-serif;'
+    +'box-shadow:0 6px 28px rgba(0,0,0,0.35);'
+    +'border:2px solid #e8c898;';
+  var p=document.createElement('p');
+  p.textContent=window._ask_text_prompt;
+  p.style.cssText='font-size:17px;margin:0 0 16px;color:#4a3020;font-weight:bold;';
+  var hint=document.createElement('p');
+  hint.textContent=window._ask_text_hint||'';
+  hint.style.cssText='font-size:12px;margin:0 0 10px;color:#a08060;';
+  var inp=document.createElement('input');
+  inp.type='text'; inp.id='__py_inp';
+  inp.setAttribute('lang','zh-TW');
+  inp.setAttribute('inputmode','text');
+  inp.setAttribute('autocomplete','off');
+  inp.setAttribute('spellcheck','false');
+  inp.value=window._ask_text_default||'';
+  inp.style.cssText='font-size:18px;width:220px;padding:8px 12px;'
+    +'border:2px solid #d0a870;border-radius:8px;'
+    +'background:#fffdf6;color:#3a2010;outline:none;'
+    +'font-family:sans-serif;letter-spacing:2px;';
+  var row=document.createElement('div');
+  row.style.cssText='display:flex;gap:10px;justify-content:center;margin-top:16px;';
+  var btn=document.createElement('button');
+  btn.textContent=window._ask_text_btn||'';
+  btn.style.cssText='padding:8px 30px;font-size:15px;'
+    +'background:#FF9460;color:#fff;border:none;border-radius:8px;'
+    +'cursor:pointer;font-weight:bold;';
+  function ok(){
+    var v=document.getElementById('__py_inp');
+    if(v)window._ask_text_result=v.value;
+  }
+  btn.onclick=ok;
+  inp.addEventListener('keydown',function(e){
+    if(e.key==='Enter'&&!e.isComposing)ok();
+  });
+  // 組字事件（IME 輸入法使用中）→ 即時更新組字狀態供 Python 讀取
+  window._cc_composing_wasm='';
+  inp.addEventListener('compositionstart',function(e){
+    window._cc_composing_wasm=e.data||'';
+  });
+  inp.addEventListener('compositionupdate',function(e){
+    window._cc_composing_wasm=e.data||'';
+  });
+  inp.addEventListener('compositionend',function(e){
+    window._cc_composing_wasm='';
+  });
+  row.appendChild(btn);
+  box.appendChild(p); box.appendChild(hint);
+  box.appendChild(inp); box.appendChild(row);
+  d.appendChild(box); document.body.appendChild(d);
+  // 延遲 focus 確保 DOM 已渲染
+  setTimeout(function(){inp.focus();inp.select();},80);
+})();
+""")
+
+def _wasm_input_teardown() -> None:
+    """WASM 專用：移除輸入框 overlay，恢復 canvas 鍵盤焦點與 SDL2 IME。"""
+    import platform as _plt
+    _plt.window.eval(
+        "var e=document.getElementById('__py_input_ov');if(e)e.remove();"
+        "delete window._ask_text_result;"
+        "delete window._ask_text_prompt;"
+        "delete window._ask_text_default;"
+    )
+    # 恢復 canvas 焦點與 SDL2 文字輸入
+    _plt.window.eval(
+        "var c=document.getElementById('canvas');if(c)c.focus();"
+    )
+    pygame.key.start_text_input()
+
 async def ask_text(prompt: str, default: str = "") -> str:
-    """取代自由文字輸入的 input()：顯示輸入框，確認後回傳字串。"""
+    """取代自由文字輸入的 input()：顯示輸入框，確認後回傳字串。
+    WASM 環境：HTML overlay（支援中文 IME，不阻塞事件迴圈）。
+    桌面環境：pygame 自訂輸入框（SDL2 IME，含組字預覽）。
+    """
+    import sys
+    if sys.platform == "emscripten":
+        try:
+            _wasm_input_setup(prompt, default)
+            import platform as _plt
+            while True:
+                result = _plt.window._ask_text_result
+                if result is not None:
+                    break
+                await asyncio.sleep(0.05)
+            _wasm_input_teardown()
+            return str(result)
+        except Exception as _e:
+            try: _wasm_input_teardown()
+            except Exception: pass
+            print(f"[ask_text WASM] 失敗：{_e}")
+    # 桌面環境
     _cmd_q.append(("text", prompt, default))
     _reply_ready[0] = False
     while not _reply_ready[0]: await asyncio.sleep(0)
@@ -282,7 +394,53 @@ def end_char_create():
     _cmd_q.append(("phase", "game"))
 
 async def ask_cc_name(prompt: str) -> str:
-    """顯示姓名輸入 modal，回傳玩家輸入的字串。"""
+    """顯示姓名輸入 modal，回傳玩家輸入的字串。
+    WASM：用 HTML overlay（支援中文 IME）；同時即時更新 _cc_tvalue/_cc_composing
+          讓角色創建畫面的輸入框能同步顯示（視覺與本地端一致）。
+    桌面：用 pygame cc_name 輸入框（SDL2 IME + 組字預覽）。
+    """
+    import sys
+    if sys.platform == "emscripten":
+        try:
+            import platform as _plt
+            # 啟動角色創建畫面的 name 模式（這樣畫面會繪製輸入框）
+            _cmd_q.append(("cc_name", prompt))
+            await asyncio.sleep(0)   # 讓繪製更新一幀
+
+            # 建立 HTML overlay（pygame 畫面同時顯示，overlay 疊在上面）
+            _wasm_input_setup(prompt, default="")
+
+            # 即時同步 HTML input → pygame 狀態（讓 CC 畫面顯示打字過程）
+            while True:
+                result = _plt.window._ask_text_result
+                if result is not None:
+                    break
+                # 讀取當前輸入值，更新 pygame CC 輸入框狀態
+                try:
+                    val  = _plt.window.eval(
+                        "var i=document.getElementById('__py_inp');i?i.value:''")
+                    comp = _plt.window.eval(
+                        "window._cc_composing_wasm||''")
+                    if val  is not None: _cc_tvalue[0]    = str(val)
+                    if comp is not None: _cc_composing[0]  = str(comp)
+                    _cc_caret_pos[0] = len(_cc_tvalue[0])
+                except Exception:
+                    pass
+                await asyncio.sleep(0.05)
+
+            _wasm_input_teardown()
+            final = str(result).strip() or "無名氏"
+            # 確認：把結果填入 CC 狀態，觸發回覆
+            _cc_tvalue[0]    = final
+            _cc_composing[0] = ""
+            _cc_reply_val[0] = final
+            _cc_reply_ready[0] = True
+            return final
+        except Exception as _e:
+            try: _wasm_input_teardown()
+            except Exception: pass
+            print(f"[ask_cc_name WASM] 失敗：{_e}")
+    # 桌面環境
     _cmd_q.append(("cc_name", prompt))
     _cc_reply_ready[0] = False
     while not _cc_reply_ready[0]: await asyncio.sleep(0)
@@ -611,15 +769,20 @@ def _handle_cc_action(ev_pos):
 async def run_ui():
     """啟動 pygame 視窗並進入主迴圈，直到視窗關閉。"""
     import os
-    print("[DEBUG] run_ui() started")
     os.environ["SDL_IME_SHOW_UI"] = "1"   # 啟用原生 IME 候選字清單與組字底線（須在 init 前設定）
     pygame.init()
-    print("[DEBUG] pygame.init() done")
     pygame.key.set_repeat(400, 50)  # 長按重複：400ms 後開始，每 50ms 一次（backspace 連刪）
 
     # ── 初始化音效 ────────────────────────────────────────────
     try:
-        pygame.mixer.init()
+        import sys as _sys_m
+        # WASM：22050Hz 減半音訊處理量，緩解 ScriptProcessorNode 主線程競爭
+        _freq = 22050 if _sys_m.platform == "emscripten" else 44100
+        _buf  = 2048  if _sys_m.platform == "emscripten" else 512
+        pygame.mixer.init(frequency=_freq, size=-16, channels=2, buffer=_buf)
+        # WASM：減少 channel 數量降低音訊處理負載
+        if _sys_m.platform == "emscripten":
+            pygame.mixer.set_num_channels(4)   # 桌面預設 8，WASM 降為 4
         pygame.mixer.set_reserved(1)          # channel 0 保留給突發事件正面音效
         _event_ch[0] = pygame.mixer.Channel(0)
         _se_dir = resource_path("asset", "audio", "se")
@@ -628,27 +791,27 @@ async def run_ui():
                 return pygame.mixer.Sound(os.path.join(_se_dir, fn))
             except Exception:
                 return None
-        _sfx["start_click"] = _ld("soundreality-interface-6-204504.mp3")
-        _sfx["cc_click"]    = _ld("dropping (mp3cut.net).wav")
-        _sfx["action"]      = _ld("attack1.mp3")
-        _sfx["ui_click"]    = _ld("poka.mp3")
-        _sfx["back"]        = _ld("universfield-interface-03-277552.mp3")
-        _sfx["damage6"]     = _ld("damage6.mp3")
-        _sfx["cash"]        = _ld("cash.mp3")
-        _sfx["hover"]       = _ld("liecio-menu-buttom-190020 (1) (mp3cut.net).mp3")
-        _sfx["event_good"]   = _ld("freesound_community-good-6081.mp3")
-        _sfx["event_bad"]    = _ld("u_3bsnvt0dsu-spin-fail-295088.mp3")
-        _sfx["midterm_pass"] = _ld("freesound_community-piglevelwin2mp3-14800.mp3")
-        _sfx["midterm_fail"] = _ld("shidenbeatsmusic-no-luck-too-bad-disappointing-sound-effect-112943.mp3")
-        _sfx["grade_reveal"] = _ld("freesound_community-level-win-6416.mp3")
-        _sfx["stamp_hit"]    = _ld("lordsonny-cinematic-hit-159487 (mp3cut.net).mp3")
-        _sfx["game_over"]    = _ld("blendertimer-happy-outro-8110.mp3")
-        _sfx["shop_open"]    = _ld("mubeenstudio-money-counting-machine-sfx-406495.mp3")
-        _sfx["talent_draw"]  = _ld("u_u4pf5h7zip-prop_show-345987.mp3")
-        _sfx["talent_none"]  = _ld("nikin-pop-up-something-160353.mp3")
-        _sfx["exam_correct"] = _ld("updatepelgo-success-221935.mp3")
-        _sfx["pcd_3"]  = _ld("universfield-soft-notice-146623.mp3")
-        _sfx["pcd_go"] = _ld("notification_message-notification-alert-9-331720.mp3")
+        _sfx["start_click"] = _ld("soundreality-interface-6-204504.ogg")
+        _sfx["cc_click"]    = _ld("dropping.ogg")
+        _sfx["action"]      = _ld("attack1.ogg")
+        _sfx["ui_click"]    = _ld("poka.ogg")
+        _sfx["back"]        = _ld("universfield-interface-03-277552.ogg")
+        _sfx["damage6"]     = _ld("damage6.ogg")
+        _sfx["cash"]        = _ld("cash.ogg")
+        _sfx["hover"]       = _ld("liecio-menu-buttom-190020.ogg")
+        _sfx["event_good"]   = _ld("freesound_community-good-6081.ogg")
+        _sfx["event_bad"]    = _ld("u_3bsnvt0dsu-spin-fail-295088.ogg")
+        _sfx["midterm_pass"] = _ld("freesound_community-piglevelwin2mp3-14800.ogg")
+        _sfx["midterm_fail"] = _ld("shidenbeatsmusic-no-luck-too-bad-disappointing-sound-effect-112943.ogg")
+        _sfx["grade_reveal"] = _ld("freesound_community-level-win-6416.ogg")
+        _sfx["stamp_hit"]    = _ld("lordsonny-cinematic-hit-159487.ogg")
+        _sfx["game_over"]    = _ld("blendertimer-happy-outro-8110.ogg")
+        _sfx["shop_open"]    = _ld("mubeenstudio-money-counting-machine-sfx-406495.ogg")
+        _sfx["talent_draw"]  = _ld("u_u4pf5h7zip-prop_show-345987.ogg")
+        _sfx["talent_none"]  = _ld("nikin-pop-up-something-160353.ogg")
+        _sfx["exam_correct"] = _ld("updatepelgo-success-221935.ogg")
+        _sfx["pcd_3"]  = _ld("universfield-soft-notice-146623.ogg")
+        _sfx["pcd_go"] = _ld("notification_message-notification-alert-9-331720.ogg")
     except Exception:
         pass
 
@@ -656,8 +819,9 @@ async def run_ui():
     pygame.display.set_caption("如何渡過這學期？")
     clock  = pygame.time.Clock()
 
-    # ── 自訂游標（pen_mouse.webp）────────────────────────────────
-    pygame.mouse.set_visible(False)
+    # ── 自訂游標（pen_mouse.png）────────────────────────────────
+    # 注意：mouse.set_visible(False) 移至圖片載入成功後才呼叫
+    # 若圖片載入失敗（如 WASM 環境），系統游標維持可見
     _cursor_normal   = None
     _cursor_pressed  = None
     _cursor_glow_pad = 0
@@ -688,7 +852,7 @@ async def run_ui():
 
     try:
         _cur_raw = pygame.image.load(
-            resource_path("asset", "picture", "small_object", "pen_mouse.webp")
+            resource_path("asset", "picture", "small_object", "pen_mouse.png")
         ).convert_alpha()
         _cur_h   = min(_cur_raw.get_height(), 40)
         _cur_w   = int(_cur_raw.get_width() * _cur_h / _cur_raw.get_height())
@@ -698,6 +862,7 @@ async def run_ui():
         _cur_press = _cur_base.copy()
         _cur_press.fill((200, 155, 110), special_flags=pygame.BLEND_RGB_MULT)
         _cursor_pressed, _ = _build_cursor_with_glow(_cur_press)
+        pygame.mouse.set_visible(False)   # 圖片載入成功才隱藏系統游標
         # ── 筆尖奶茶色光球（預建，永久顯示於筆尖） ──────────────
         _gb_r  = 20                       # 光球半徑（px）
         _gb_d  = _gb_r * 2 + 2
@@ -737,7 +902,7 @@ async def run_ui():
     # ── 匯入背景圖片（cover 縮放，失敗時保留漸層）───────────
     _bg_dir = resource_path("asset", "picture", "background")
     _title_img = _load_cover(
-        os.path.join(_bg_dir, "title_background.webp"), WIN_W, WIN_H)
+        os.path.join(_bg_dir, "title_background.jpg"), WIN_W, WIN_H)
     if _title_img is not None:
         _grads["start"] = _title_img
 
@@ -748,7 +913,7 @@ async def run_ui():
         if _img is not None:
             _bg_surfs[_fn] = _img
     # 用第 1-2 週背景作初始底圖（無圖則保持漸層）
-    _init_bg = _bg_surfs.get("1234_background.webp")
+    _init_bg = _bg_surfs.get("1234_background.jpg")
     if _init_bg is not None:
         _bg_current[0] = _init_bg
         _grads["bg"]   = _init_bg   # 保持 fallback 相容
@@ -763,7 +928,7 @@ async def run_ui():
     # ── Game Over 背景圖 ───────────────────────────────────────────
     try:
         _go_img = _load_cover(
-            os.path.join(_bg_dir, "the_end_background.webp"), WIN_W, WIN_H)
+            os.path.join(_bg_dir, "the_end_background.jpg"), WIN_W, WIN_H)
         if _go_img is not None:
             _grads["gameover"] = _go_img
     except Exception:
@@ -773,13 +938,14 @@ async def run_ui():
     _outside_bg_raw = None
     try:
         _outside_bg_raw = pygame.image.load(
-            os.path.join(_bg_dir, "outside_background.webp")).convert()
-    except Exception:
-        pass
+            os.path.join(_bg_dir, "outside_background.jpg")).convert()
+    except Exception as _e:
+        _p = os.path.join(_bg_dir, "outside_background.jpg")
+        print(f"[圖片診斷] outside_bg 失敗: {_p}  存在:{os.path.exists(_p)}  錯誤:{_e}")
 
     # ── BGM 初始化（設定資料夾，播放標題音樂）──────────────────
     _bgm_dir[0] = resource_path("asset", "audio", "bgm")
-    _request_bgm("Music-Morning_Rain.mp3")
+    _request_bgm("Music-Morning_Rain.ogg")
 
     # ── 角色創建背景影片（SpritePlayer，循環）──────────────────
     _cc_player[0] = SpritePlayer(
@@ -887,7 +1053,7 @@ async def run_ui():
                     _shop_slide_t0[0]  = pygame.time.get_ticks()
                     _play_sfx("shop_open")
                 elif cmd[1] == "char_create":
-                    _request_bgm("Music-Aether.mp3")
+                    _request_bgm("Music-Aether.ogg")
                 elif cmd[1] == "end":
                     # BGM 在此繼續播放，等到成績單畫面才淡出
                     _end_sub[0]              = "fade_out_1"
@@ -929,7 +1095,7 @@ async def run_ui():
                 _scroll[0] = 0
                 _composing[0] = ""
                 _settlement_data[0] = None
-                _request_bgm("Music-Morning_Rain.mp3")
+                _request_bgm("Music-Morning_Rain.ogg")
             elif tag == "cc_name":
                 _cc_mode[0]      = "name"
                 _cc_data[0]      = tag
@@ -1117,7 +1283,6 @@ async def run_ui():
         shop_exit_btn  = None
 
         if _phase[0] == "start":
-            print("[DEBUG] drawing start screen")
             start_btn, _debug_btn, _guide_btn = _draw_start(screen, fm, fl, mpos)
             if _guide_active[0]:
                 _guide_close_r, _guide_prev_r, _guide_next_r = \
@@ -1437,10 +1602,10 @@ async def run_ui():
                                    mpos[1] - _cur_img.get_height() + _cursor_glow_pad))
 
         pygame.display.flip()
-        print("[DEBUG] flip done")
 
-        # ── IME 組字中方向鍵偵測（IME 攔截了 KEYDOWN，改用 GetAsyncKeyState 輪詢）──
-        if _phase[0] == "char_create" and _cc_mode[0] == "name" and _cc_composing[0]:
+        # ── IME 組字中方向鍵偵測（Windows 限定：GetAsyncKeyState 輪詢）────────
+        if (_phase[0] == "char_create" and _cc_mode[0] == "name"
+                and _cc_composing[0] and sys.platform == "win32"):
             try:
                 import ctypes
                 _left_now  = bool(ctypes.windll.user32.GetAsyncKeyState(0x25) & 0x8000)
@@ -1478,8 +1643,9 @@ async def run_ui():
                 # 點擊波紋特效（任何畫面均觸發，無條件生成）
                 _click_spawn(_tpos(ev.pos)[0], _tpos(ev.pos)[1], pygame.time.get_ticks())
 
-                # 全螢幕切換按鈕（最高優先，任何畫面均有效）
-                if fs_btn.collidepoint(_tpos(ev.pos)):
+                # 全螢幕切換按鈕（WASM 停用，桌面才有效）
+                import sys as _sys_fs
+                if fs_btn.collidepoint(_tpos(ev.pos)) and _sys_fs.platform != "emscripten":
                     if _is_fullscreen[0]:
                         # ── 退出全螢幕 ──────────────────────────────
                         screen = pygame.display.set_mode((WIN_W, WIN_H))
@@ -1608,14 +1774,14 @@ async def run_ui():
                         _play_sfx("start_click")
                         _click_reg[(end_btn.centerx, end_btn.centery)] = pygame.time.get_ticks()
                         _phase[0] = "start"
-                        _request_bgm("Music-Morning_Rain.mp3")
+                        _request_bgm("Music-Morning_Rain.ogg")
                         _restart_ready[0] = True
                 elif _phase[0] == "gameover":
                     if go_btn and go_btn.collidepoint(_tpos(ev.pos)):
                         _play_sfx("start_click")
                         _click_reg[(go_btn.centerx, go_btn.centery)] = pygame.time.get_ticks()
                         _phase[0] = "start"
-                        _request_bgm("Music-Morning_Rain.mp3")
+                        _request_bgm("Music-Morning_Rain.ogg")
                         _restart_ready[0] = True
                 else:
                     # ── 遊戲中 ────────────────────────────────
@@ -1998,5 +2164,6 @@ async def run_ui():
         clock.tick(30)
 
     pygame.quit()
-    sys.exit()
+    if sys.platform != "emscripten":
+        sys.exit()
 

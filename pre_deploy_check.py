@@ -83,6 +83,7 @@ GAME_PY = [p for p in ROOT.glob("*.py")
                               "convert_assets.py",
                               "check_ui_state.py",
                               "check_pygbag_compat.py",
+                              "build.py",      # build 工具，在開發機執行，不進 WASM
                               "ui_draw.py")    # 重構前舊版整合檔，已不再被 import
            and "_origin" not in p.stem]   # 排除 *_origin.py 備份檔
 
@@ -887,8 +888,6 @@ _WASM_BANNED: dict[str, str] = {
     "cv2":             "OpenCV 未包含於 pygbag WASM 環境",
 }
 
-# 排除純 build 工具（在開發機執行，不打入 WASM）
-_X_SKIP = {"build.py"}
 # Windows/Mac 平台限定模組：若包在 sys.platform 判斷內則降為警告
 _PLATFORM_GUARDED = {"ctypes", "winreg", "winsound", "fcntl", "termios"}
 
@@ -900,8 +899,6 @@ def _is_platform_guarded(src: str, lineno: int) -> bool:
 
 _x_found = False
 for _pyf in GAME_PY:
-    if _pyf.name in _X_SKIP:
-        continue
     _src = _pyf.read_text(encoding="utf-8", errors="replace")
     try:
         _tree = ast.parse(_src)
@@ -955,11 +952,8 @@ _THREAD_CALL_RE = re.compile(
 # 阻塞式佇列（asyncio 環境應改用 asyncio.Queue）
 _BLOCKING_QUEUE_RE = re.compile(r'\bqueue\.(Queue|SimpleQueue|LifoQueue|PriorityQueue)\s*\(')
 
-_Y_SKIP = {"build.py"}   # build 工具允許用 threading
 _y_found = False
 for _pyf in GAME_PY:
-    if _pyf.name in _Y_SKIP:
-        continue
     _src = _pyf.read_text(encoding="utf-8", errors="replace")
     # import threading 是否仍存在
     for _m in re.finditer(r'^(?:import threading|from threading import)', _src, re.MULTILINE):

@@ -142,22 +142,22 @@ BGM_FADE_MS    = 1500        # 淡出 / 淡入各 1.5 秒
 
 # 週次 → BGM 對照表（None = 待定，播放時靜音）
 _WEEK_BGM: dict = {
-    1:  "Music-Town_Day.mp3",
-    2:  "Music-Town_Day.mp3",
-    3:  "Music-Ocean_Day.mp3",
-    4:  "Music-Ocean_Day.mp3",
-    5:  "Music-Skeletron.mp3",
-    6:  "Music-Skeletron.mp3",
-    7:  "Music-Deerclops.mp3",
-    8:  "Music-Rainbow_Boulder_(loop).mp3",
-    9:  "Music-Forest_Day_(Otherworldly).mp3",
-    10: "Music-Forest_Day_(Otherworldly).mp3",
-    11: "Music-Ice_biome.mp3",
-    12: "Music-Ice_biome.mp3",
-    13: "Music-Storm.mp3",
-    14: "Music-Storm.mp3",
-    15: "Music-Lunar_Boss.mp3",
-    16: "Terraria Calamity Soundtrack  Scourge of The Universe (Devourer of Gods' Theme) Extended - Tritrons138 (youtube) (mp3cut.net).mp3",
+    1:  "Music-Town_Day.ogg",
+    2:  "Music-Town_Day.ogg",
+    3:  "Music-Ocean_Day.ogg",
+    4:  "Music-Ocean_Day.ogg",
+    5:  "Music-Skeletron.ogg",
+    6:  "Music-Skeletron.ogg",
+    7:  "Music-Deerclops.ogg",
+    8:  "Music-Rainbow_Boulder_loop.ogg",
+    9:  "Music-Forest_Day_Otherworldly.ogg",
+    10: "Music-Forest_Day_Otherworldly.ogg",
+    11: "Music-Ice_biome.ogg",
+    12: "Music-Ice_biome.ogg",
+    13: "Music-Storm.ogg",
+    14: "Music-Storm.ogg",
+    15: "Music-Lunar_Boss.ogg",
+    16: "final_bgm.ogg",
 }
 
 # ── 遊戲背景 crossfade ─────────────────────────────────────────
@@ -165,22 +165,22 @@ BG_FADE_MS  = 800         # crossfade 時長（ms）
 
 # 週次 → 背景圖檔名對照表（None = 待補圖，保持當前背景）
 _WEEK_BG: dict = {
-    1:  "1234_background.webp",
-    2:  "1234_background.webp",
-    3:  "34_background.webp",
-    4:  "34_background.webp",
-    5:  "56_background.webp",
-    6:  "56_background.webp",
-    7:  "7_background.webp",      # 待補
-    8:  "mid_background.webp",    # 待補
-    9:  "910_background.webp",
-    10: "910_background.webp",
-    11: "1112_background.webp",
-    12: "1112_background.webp",
-    13: "1314_background.webp",
-    14: "1314_background.webp",
-    15: "15_background.webp",     # 待補
-    16: "fin_background.webp",    # 待補
+    1:  "1234_background.jpg",
+    2:  "1234_background.jpg",
+    3:  "34_background.jpg",
+    4:  "34_background.jpg",
+    5:  "56_background.jpg",
+    6:  "56_background.jpg",
+    7:  "7_background.jpg",
+    8:  "7_background.jpg",
+    9:  "910_background.jpg",
+    10: "910_background.jpg",
+    11: "1112_background.jpg",
+    12: "1112_background.jpg",
+    13: "1314_background.jpg",
+    14: "1314_background.jpg",
+    15: "15_background.jpg",
+    16: "15_background.jpg",
 }
 
 SHOP_SLIDE_MS   = 370        # 單向滑動時長（ms）
@@ -278,15 +278,15 @@ _ACTION_INFO = {
 
 # ── 行動按鈕 Icon ──────────────────────────────────────────────
 _ACTION_ICON_FILES = {
-    "認真讀書": "study_icon.webp",
-    "正常上課": "class_icon.webp",
-    "社團活動": "club_icon.webp",
-    "打工賺錢": "work_icon.webp",
-    "好好休息": "rest_icon.webp",
-    "幫助朋友": "friend_icon.webp",
-    "熬夜":     "night_icon.webp",
-    "翹課":     "escape_icon.webp",
-    "進食":     "eat_icon.webp",
+    "認真讀書": "study_icon.png",
+    "正常上課": "class_icon.png",
+    "社團活動": "club_icon.png",
+    "打工賺錢": "work_icon.png",
+    "好好休息": "rest_icon.png",
+    "幫助朋友": "friend_icon.png",
+    "熬夜":     "night_icon.png",
+    "翹課":     "escape_icon.png",
+    "進食":     "eat_icon.png",
 }
 
 # ── 側邊資訊面板常數 ──────────────────────────────────────────

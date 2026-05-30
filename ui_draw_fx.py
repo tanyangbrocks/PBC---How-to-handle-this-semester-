@@ -607,7 +607,7 @@ def _ripple_rings(surf: pygame.Surface, elapsed: int) -> None:
         alpha = int(215 * (1.0 - lt_e) ** 1.7)
         thick = max(2, int(26 * (1.0 - lt_e) + 2))
         if r > 0 and alpha > 4:
-            pygame.draw.circle(ov, (190, 225, 255, alpha), (cx, cy), r, thick)
+            pygame.draw.circle(ov, (255, 240, 210, alpha), (cx, cy), r, thick)
     surf.blit(ov, (0, 0))
 
 def _draw_action_flash(surf: pygame.Surface, ms: int) -> None:
@@ -1215,13 +1215,13 @@ def _draw_end_report(surf, fm, fs, mpos, data, ms, elapsed):
         if not _ending_bgm_triggered[0]:
             _ending_bgm_triggered[0] = True
             if comment.startswith("平衡型結局"):
-                _request_bgm("Music-Journey's_End.mp3")
+                _request_bgm("Music-Journeys_End.ogg")
             elif comment.startswith("及格快樂結局"):
-                _request_bgm("Music-Contest_Winner.mp3")
+                _request_bgm("Music-Contest_Winner.ogg")
             elif comment.startswith("成績過了但身心崩潰"):
-                _request_bgm("blendertimer-the-last-echo-410567 (mp3cut.net).mp3")
+                _request_bgm("blendertimer-the-last-echo-410567.ogg")
             else:
-                _request_bgm("prettyjohn1-sad-background-music_29sec-489884.mp3")
+                _request_bgm("prettyjohn1-sad-background-music_29sec-489884.ogg")
 
     # ── 再來一次 圓形按鈕（米灰色，同開始畫面設計） ───────────────
     btn_rect = None
