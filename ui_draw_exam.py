@@ -42,20 +42,20 @@ ROUND_MS = 30_000   # 每回合 30 秒
 
 # 第二回合可用背景清單
 _SMG_BG_FILES = [
-    "1234_background.webp",
-    "34_background.webp",
-    "56_background.webp",
-    "910_background.webp",
-    "1112_background.webp",
-    "1314_background.webp",
+    "1234_background.jpg",
+    "34_background.jpg",
+    "56_background.jpg",
+    "910_background.jpg",
+    "1112_background.jpg",
+    "1314_background.jpg",
 ]
 
 # 第二回合形狀 → icon 檔名對應
 _SMG_ICON_FILES = {
-    "circle":   "class_icon.webp",
-    "cross":    "club_icon.webp",
-    "triangle": "work_icon.webp",
-    "diamond":  "rest_icon.webp",
+    "circle":   "class_icon.png",
+    "cross":    "club_icon.png",
+    "triangle": "work_icon.png",
+    "diamond":  "rest_icon.png",
 }
 
 _BG_DIR   = resource_path("asset", "picture", "background")

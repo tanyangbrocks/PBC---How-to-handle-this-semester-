@@ -691,7 +691,7 @@ _TT_DEFAULT_COLOR = (198, 136, 76)
 
 def _draw_modal_timetable(surf, fm, fs, courses, mpos):
     """
-    格狀週課表 modal（仿 sheet.webp 佈局，遊戲暖色調）。
+    格狀週課表 modal（仿 sheet.png 佈局，遊戲暖色調）。
     courses: [{"name":str, "day":str, "time":str, "credits":int}, ...]
     回傳「確認」按鈕 Rect。
     """

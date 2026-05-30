@@ -12,8 +12,8 @@ class SpritePlayer:
     Frame-folder video player — no cv2 required.
 
     Expects a directory produced by scripts/extract_video_frames.py:
-        <frames_dir>/00000.webp
-        <frames_dir>/00001.webp
+        <frames_dir>/00000.png
+        <frames_dir>/00001.png
         ...
         <frames_dir>/meta.json   {"fps": 15.0, "frame_count": 120}
 
@@ -40,7 +40,7 @@ class SpritePlayer:
         self._ms_per_frame:  float = 1000.0 / 15.0
         self._idx:           int   = 0
         self._last_adv_ms:   float = -1.0    # -1 = not started yet
-        self._ext:           str   = ".webp"
+        self._ext:           str   = ".png"
 
         # ── Read metadata ────────────────────────────────────
         meta_path = os.path.join(frames_dir, "meta.json")
@@ -55,7 +55,7 @@ class SpritePlayer:
 
         # ── Count frames from filesystem (fallback) ──────────
         if self._frame_count == 0 and os.path.isdir(frames_dir):
-            for ext in (".webp", ".jpg", ".png"):
+            for ext in (".png", ".jpg", ".png"):
                 cnt = sum(1 for f in os.listdir(frames_dir)
                           if f.lower().endswith(ext))
                 if cnt > 0:
@@ -85,7 +85,7 @@ class SpritePlayer:
             fp = os.path.join(self.frames_dir, fn)
             if not os.path.isfile(fp):
                 # Try alternate extensions
-                for ext in (".webp", ".jpg", ".png"):
+                for ext in (".png", ".jpg", ".png"):
                     alt = os.path.join(self.frames_dir, f"{idx:05d}{ext}")
                     if os.path.isfile(alt):
                         fp = alt

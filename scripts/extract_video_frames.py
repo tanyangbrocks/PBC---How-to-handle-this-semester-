@@ -126,10 +126,10 @@ for vid in VIDEOS:
         if not ret:
             break
         if read_count % step == 0:
-            out_path = out_dir / f"{frame_count:05d}.webp"
+            out_path = out_dir / f"{frame_count:05d}.png"
             # cv2.imwrite 在含中文字的 Windows 路徑下會靜默失敗；
             # 改用 imencode 編碼至記憶體，再由 Python 寫入（支援 Unicode 路徑）
-            ok, buf = cv2.imencode(".webp", frame,
+            ok, buf = cv2.imencode(".png", frame,
                                    [cv2.IMWRITE_WEBP_QUALITY, quality])
             if ok:
                 out_path.write_bytes(buf.tobytes())

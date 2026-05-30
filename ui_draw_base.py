@@ -12,12 +12,12 @@ from ui_const import *
 from ui_state  import *
 
 def _play_sfx(name: str) -> None:
-    """播放指定音效；key 不在 _sfx 時嘗試以 name 當檔名自動載入（.mp3 / .wav）。"""
+    """播放指定音效；key 不在 _sfx 時嘗試以 name 當檔名自動載入（.ogg / .wav）。"""
     if name not in _sfx:
         # ── 按需自動載入：把 name 當作 asset/audio/se/ 內的檔名（無副檔名）────
         _se_base = resource_path("asset", "audio", "se")
         _loaded = None
-        for _ext in (".mp3", ".wav"):
+        for _ext in (".ogg", ".wav"):
             _fp = os.path.join(_se_base, name + _ext)
             if os.path.isfile(_fp):
                 try:
@@ -159,21 +159,98 @@ def _is_emoji_char(ch: str) -> bool:
     if 0xFF00 <= cp <= 0xFFEF:  return False   # 全形 / 半形
     return True                                # 其餘視為 Emoji / 符號
 
+# ── Emoji 個別著色表（NotoEmoji 單色字型的近似原色）────────────
+_EMOJI_COLORS: dict = {
+    "💰": (220, 180,  30),  "🏪": (255, 165,  50),  "👋": (220, 170, 110),
+    "📖": (100, 160, 220),  "📚": (100, 160, 220),  "🎓": (220, 180,  30),
+    "✍":  (130, 100,  60),  "📋": (100, 160, 220),  "📅": (100, 160, 220),
+    "🍀": ( 70, 200,  90),  "✨": (255, 215,  60),  "🌟": (255, 215,  60),
+    "🎉": (255, 180,  50),  "✅": ( 70, 200,  90),  "😊": (255, 215,  60),
+    "💪": (255, 130,  50),  "⚡": (255, 220,  30),  "🔥": (255, 100,  30),
+    "🏃": ( 80, 180, 230),  "🎮": (130, 100, 210),
+    "❌": (215,  68,  62),  "💀": (140, 130, 130),  "💔": (215,  68,  62),
+    "📉": (215,  68,  62),  "😞": (160, 148, 132),  "😔": (160, 148, 132),
+    "🤒": (130, 210, 235),  "⚠":  (255, 180,  30),  "💥": (255, 100,  30),
+    "😤": (255, 130,  50),  "😴": ( 80, 180, 230),  "❓": (160, 148, 132),
+}
+
 def _render_mixed(surf: pygame.Surface,
                   main_font, text: str, color: tuple,
                   x: int, y: int) -> int:
     """
-    以主字型繪製文字；Emoji 字元直接略去（_clean 過濾），避免渲染成 □。
+    逐段渲染文字：
+    - 無 emoji 的行走快速路徑（單次 render，效能與舊版相同）
+    - 有 emoji 的行逐字分段，emoji 以 _EMOJI_COLORS 著色
     回傳渲染後的總像素寬度。
     """
-    cleaned = _clean(text)
-    s = main_font.render(cleaned, True, color)
-    surf.blit(s, (x, y))
-    return s.get_width()
+    if not text:
+        return 0
+
+    # ── 快速路徑：無 emoji 字元 ──────────────────────────────────
+    has_emoji = any(_is_emoji_char(ch) for ch in text if ord(ch) != 0xFE0F)
+    if not has_emoji:
+        cleaned = _clean(text)
+        s = main_font.render(cleaned, True, color)
+        surf.blit(s, (x, y))
+        return s.get_width()
+
+    # ── 逐字路徑：含 emoji ────────────────────────────────────────
+    em_f = _get_emoji_font(main_font.get_height())
+    fh   = main_font.get_height()
+    cx   = x
+    seg  = []
+
+    def _flush():
+        nonlocal cx
+        if not seg:
+            return
+        s = main_font.render("".join(seg), True, color)
+        surf.blit(s, (cx, y))
+        cx += s.get_width()
+        seg.clear()
+
+    for ch in text:
+        cp = ord(ch)
+        if cp == 0xFE0F:
+            continue
+        if _is_emoji_char(ch) and em_f is not None:
+            _flush()
+            em_col = _EMOJI_COLORS.get(ch, color)
+            try:
+                es = em_f.render(ch, True, em_col)
+                surf.blit(es, (cx, y + (fh - es.get_height()) // 2))
+                cx += es.get_width()
+            except Exception:
+                pass
+        else:
+            seg.append(ch)
+    _flush()
+    return cx - x
 
 def _measure_mixed(main_font, text: str) -> int:
-    """計算文字渲染寬度（Emoji 已濾除），用於置中計算。"""
-    return main_font.size(_clean(text))[0]
+    """估算文字渲染寬度（含 emoji 佔位），用於置中計算。"""
+    em_f = _get_emoji_font(main_font.get_height())
+    w = 0
+    seg = []
+    def _flush():
+        nonlocal w
+        if seg:
+            w += main_font.size("".join(seg))[0]
+            seg.clear()
+    for ch in text:
+        cp = ord(ch)
+        if cp == 0xFE0F:
+            continue
+        if _is_emoji_char(ch) and em_f is not None:
+            _flush()
+            try:
+                w += em_f.size(ch)[0]
+            except Exception:
+                pass
+        else:
+            seg.append(ch)
+    _flush()
+    return w
 
 
 def _wrap(text: str, font, max_w: int) -> list:
@@ -210,7 +287,14 @@ def _load_cover(path: str, w: int, h: int) -> "pygame.Surface | None":
     """
     try:
         img = pygame.image.load(path).convert()
-    except Exception:
+        import os as _os
+        print(f"[圖片診斷] 載入成功: {_os.path.basename(path)}")
+    except Exception as _e:
+        import os as _os
+        _exists = _os.path.exists(path)
+        _size   = _os.path.getsize(path) if _exists else -1
+        print(f"[圖片診斷] 載入失敗: {_os.path.basename(path)}")
+        print(f"[圖片診斷]   存在:{_exists}  大小:{_size} bytes  錯誤:{_e}")
         return None
     iw, ih = img.get_size()
     scale  = max(w / iw, h / ih)
@@ -454,7 +538,7 @@ def _portrait_orig_load(key: str):
     """載入並快取原始立繪（未縮放）。"""
     if key in _portrait_orig:
         return _portrait_orig[key]
-    path = os.path.join(_CHAR_ART_DIR, f"{key}.webp")
+    path = os.path.join(_CHAR_ART_DIR, f"{key}.png")
     if not os.path.isfile(path):
         return None
     try:
@@ -582,7 +666,7 @@ def _get_shop_icon(item_id: str, diameter: int):
     if not fname:
         _shop_icon_cache[key] = None
         return None
-    path = os.path.join(_SHOP_ICON_DIR, fname + ".webp")
+    path = os.path.join(_SHOP_ICON_DIR, fname + ".png")
     try:
         raw = pygame.image.load(path).convert_alpha()
     except Exception:

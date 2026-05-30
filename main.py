@@ -7,40 +7,19 @@
 #   - print() 改為 ui.notify()；display_status 改為 ui.set_player()
 # ============================================================
 
-print("[DEBUG] main.py top-level start")
-
 import asyncio
 import random
 import pygame   # 必須在 main.py 直接 import，讓 pygbag 偵測到需要預載 pygame WebAssembly
+# numpy 在 pygbag 的 emscripten 環境不相容（僅支援 Pyodide wheel），已移除
+# 漣漪特效在 WASM 使用純 pygame 的 rings 退回版
 
-print("[DEBUG] stdlib imported OK")
-
-try:
-    import ui
-    print("[DEBUG] ui imported OK")
-except Exception as e:
-    print(f"[DEBUG] ui import FAILED: {e}")
-
-try:
-    from ui import notify_gameover
-    from character import Character, TALENTS, DRAWBACKS, DE_LEVELS
-    print("[DEBUG] character imported OK")
-except Exception as e:
-    print(f"[DEBUG] character import FAILED: {e}")
-
-try:
-    from turn_engine import TurnEngine
-    print("[DEBUG] turn_engine imported OK")
-except Exception as e:
-    print(f"[DEBUG] turn_engine import FAILED: {e}")
-
-try:
-    from event_system import EventSystem
-    from skill_system import SkillSystem
-    from shop_V03 import Shop
-    print("[DEBUG] event/skill/shop imported OK")
-except Exception as e:
-    print(f"[DEBUG] event/skill/shop import FAILED: {e}")
+import ui
+from ui import notify_gameover
+from character import Character, TALENTS, DRAWBACKS, DE_LEVELS
+from turn_engine import TurnEngine
+from event_system import EventSystem
+from skill_system import SkillSystem
+from shop_V03 import Shop
 
 # ── DEV 模式開關 ────────────────────────────────────────────────
 # 目前已關閉。還原方法：

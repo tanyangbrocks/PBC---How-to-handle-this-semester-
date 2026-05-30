@@ -4091,7 +4091,7 @@ def _portrait_orig_load(key: str):
     """載入並快取原始立繪（未縮放）。"""
     if key in _portrait_orig:
         return _portrait_orig[key]
-    path = os.path.join(_CHAR_ART_DIR, f"{key}.webp")
+    path = os.path.join(_CHAR_ART_DIR, f"{key}.png")
     if not os.path.isfile(path):
         return None
     try:
@@ -4558,7 +4558,7 @@ def _get_shop_icon(item_id: str, diameter: int):
     if not fname:
         _shop_icon_cache[key] = None
         return None
-    path = os.path.join(_SHOP_ICON_DIR, fname + ".webp")
+    path = os.path.join(_SHOP_ICON_DIR, fname + ".png")
     try:
         raw = pygame.image.load(path).convert_alpha()
     except Exception:

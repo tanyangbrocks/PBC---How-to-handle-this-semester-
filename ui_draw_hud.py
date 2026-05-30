@@ -20,6 +20,14 @@ _STATUS_EMOJI = {
     "激勵":    "💪",
     "幸運":    "🍀",
 }
+# 各狀態 emoji 的自訂渲染顏色（近似原色，彌補單色字型的限制）
+_STATUS_EMOJI_COLOR = {
+    "🤒": (130, 210, 235),   # 淡青藍 — 病懨懨
+    "😔": (160, 148, 132),   # 暖灰   — 無力
+    "✨": (255, 215,  60),   # 金黃   — 神采奕奕
+    "💪": (255, 130,  50),   # 橘     — 激勵
+    "🍀": ( 70, 200,  90),   # 嫩綠   — 幸運
+}
 # 正面/負面顏色區分
 _STATUS_POS = {"神采奕奕", "激勵", "幸運"}   # GREEN；其餘 RED
 _FW_DIGITS  = "０１２３４５６７８９"
@@ -77,7 +85,8 @@ def _draw_status(surf, fs, fm, player, rect):
             em_ch  = _STATUS_EMOJI.get(sname, "❓")
             num_ch = _fw_num(sv)
             col    = GREEN if sname in _STATUS_POS else RED
-            em_s   = em_f.render(em_ch, True, WHITE) if em_f else None
+            em_col = _STATUS_EMOJI_COLOR.get(em_ch, WHITE)
+            em_s   = em_f.render(em_ch, True, em_col) if em_f else None
             num_s  = fs.render(num_ch, True, col)
             if em_s:
                 surf.blit(em_s,  (ex, y + (num_s.get_height() - em_s.get_height()) // 2))

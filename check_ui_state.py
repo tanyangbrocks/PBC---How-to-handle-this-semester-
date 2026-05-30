@@ -245,17 +245,17 @@ def _sfx_file_exists(key: str, sym_map: dict[str, str]) -> tuple[bool, str]:
     判斷音效 key 對應的檔案是否存在。
     回傳 (exists: bool, resolved_filename: str)。
     - symbolic key（在 sym_map 中）→ 直接查 SE_DIR/filename
-    - filename-stem key → 嘗試 SE_DIR/{key}.mp3 / .wav
+    - filename-stem key → 嘗試 SE_DIR/{key}.ogg / .wav
     """
     if key in sym_map:
         fn = sym_map[key]
         return (SE_DIR / fn).exists(), fn
     # 自動載入路徑
-    for ext in (".mp3", ".wav"):
+    for ext in (".ogg", ".wav"):
         fn = key + ext
         if (SE_DIR / fn).exists():
             return True, fn
-    return False, key + ".mp3"   # 最可能的預期路徑
+    return False, key + ".ogg"   # 最可能的預期路徑
 
 
 def audit_play_sfx_availability(scan_files: list[Path]) -> None:
