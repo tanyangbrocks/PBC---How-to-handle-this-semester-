@@ -409,15 +409,20 @@ def end_char_create():
     _cmd_q.append(("phase", "game"))
 
 async def ask_cc_name(prompt: str) -> str:
-    """顯示姓名輸入 modal，回傳玩家輸入的字串。
-    使用 pygame cc_name 模式（WASM 和桌面統一）：
-    - 畫面中央顯示自訂輸入框（run_ui 的 _draw_cc_name）
-    - await asyncio.sleep(0) 模式與 ask_choice/ask_yn 完全相同，WASM 確認可用
-    - 原 HTML overlay 方案因 platform.window.eval() 在 await 後重入 JS 造成死鎖而廢棄
-    """
+    """顯示姓名輸入 modal，回傳玩家輸入的字串。"""
+    print(f"[DBG] ask_cc_name: 呼叫, prompt={prompt!r}")
     _cmd_q.append(("cc_name", prompt))
     _cc_reply_ready[0] = False
-    while not _cc_reply_ready[0]: await asyncio.sleep(0)
+    print("[DBG] ask_cc_name: cc_name 指令已進 queue，開始等待...")
+    _frame = 0
+    while not _cc_reply_ready[0]:
+        await asyncio.sleep(0)
+        _frame += 1
+        if _frame == 1:
+            print("[DBG] ask_cc_name: asyncio.sleep(0) 有 yield（第 1 幀）")
+        if _frame % 90 == 0:   # 每 ~3 秒印一次（30fps）
+            print(f"[DBG] ask_cc_name: 仍在等待... frame={_frame}")
+    print(f"[DBG] ask_cc_name: 收到回應 → {_cc_reply_val[0]!r}")
     return _cc_reply_val[0]
 
 async def ask_cc_portrait() -> str:
@@ -1071,12 +1076,15 @@ async def run_ui():
                 _settlement_data[0] = None
                 _request_bgm("Music-Morning_Rain.ogg")
             elif tag == "cc_name":
+                print("[DBG] run_ui: cc_name 指令收到，設定 _cc_mode='name'")
                 _cc_mode[0]      = "name"
                 _cc_data[0]      = tag
                 _cc_tvalue[0]    = ""
                 _cc_composing[0] = ""
                 _cc_caret_pos[0] = 0
+                print("[DBG] run_ui: 呼叫 pygame.key.start_text_input()")
                 pygame.key.start_text_input()
+                print("[DBG] run_ui: start_text_input() 完成")
                 # 告知 IME 輸入框位置，讓候選字清單出現在正確位置
                 pygame.key.set_text_input_rect(pygame.Rect(
                     (WIN_W - 520) // 2 + 30 + _fs_off[0],
