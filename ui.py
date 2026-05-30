@@ -155,6 +155,9 @@ def _wasm_input_setup(prompt: str, default: str = "") -> None:
   box.appendChild(p); box.appendChild(hint);
   box.appendChild(inp); box.appendChild(row);
   d.appendChild(box); document.body.appendChild(d);
+  // 停用 canvas 的 pointer-events，避免 canvas 事件攔截 overlay 的滑鼠點擊
+  var cv=document.getElementById('canvas');
+  if(cv){cv.dataset.oldPe=cv.style.pointerEvents||'';cv.style.pointerEvents='none';}
   // 延遲 focus 確保 DOM 已渲染
   setTimeout(function(){inp.focus();inp.select();},80);
 })();
@@ -169,9 +172,10 @@ def _wasm_input_teardown() -> None:
         "delete window._ask_text_prompt;"
         "delete window._ask_text_default;"
     )
-    # 恢復 canvas 焦點與 SDL2 文字輸入
+    # 恢復 canvas pointer-events、焦點與 SDL2 文字輸入
     _plt.window.eval(
-        "var c=document.getElementById('canvas');if(c)c.focus();"
+        "var c=document.getElementById('canvas');"
+        "if(c){c.style.pointerEvents=c.dataset.oldPe||'';delete c.dataset.oldPe;c.focus();}"
     )
     pygame.key.start_text_input()
 
@@ -403,11 +407,8 @@ async def ask_cc_name(prompt: str) -> str:
     if sys.platform == "emscripten":
         try:
             import platform as _plt
-            # 啟動角色創建畫面的 name 模式（這樣畫面會繪製輸入框）
-            _cmd_q.append(("cc_name", prompt))
-            await asyncio.sleep(0)   # 讓繪製更新一幀
-
-            # 建立 HTML overlay（pygame 畫面同時顯示，overlay 疊在上面）
+            # WASM：直接用 HTML overlay 收集輸入，不啟動 pygame cc_name 模式
+            # （避免 pygame 底部輸入框與 HTML overlay 同時存在造成衝突）
             _wasm_input_setup(prompt, default="")
 
             # 即時同步 HTML input → pygame 狀態（讓 CC 畫面顯示打字過程）
@@ -776,8 +777,8 @@ async def run_ui():
     # ── 初始化音效 ────────────────────────────────────────────
     try:
         import sys as _sys_m
-        # WASM：22050Hz 減半音訊處理量，緩解 ScriptProcessorNode 主線程競爭
-        _freq = 22050 if _sys_m.platform == "emscripten" else 44100
+        # 44100 Hz on all platforms; browser Web Audio API handles resampling natively
+        _freq = 44100
         _buf  = 2048  if _sys_m.platform == "emscripten" else 512
         pygame.mixer.init(frequency=_freq, size=-16, channels=2, buffer=_buf)
         # WASM：減少 channel 數量降低音訊處理負載
