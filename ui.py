@@ -410,47 +410,11 @@ def end_char_create():
 
 async def ask_cc_name(prompt: str) -> str:
     """顯示姓名輸入 modal，回傳玩家輸入的字串。
-    WASM：用 HTML overlay（支援中文 IME）；同時即時更新 _cc_tvalue/_cc_composing
-          讓角色創建畫面的輸入框能同步顯示（視覺與本地端一致）。
-    桌面：用 pygame cc_name 輸入框（SDL2 IME + 組字預覽）。
+    使用 pygame cc_name 模式（WASM 和桌面統一）：
+    - 畫面中央顯示自訂輸入框（run_ui 的 _draw_cc_name）
+    - await asyncio.sleep(0) 模式與 ask_choice/ask_yn 完全相同，WASM 確認可用
+    - 原 HTML overlay 方案因 platform.window.eval() 在 await 後重入 JS 造成死鎖而廢棄
     """
-    import sys
-    if sys.platform == "emscripten":
-        try:
-            import platform as _plt
-            # WASM：直接用 HTML overlay 收集輸入，不啟動 pygame cc_name 模式
-            # （避免 pygame 底部輸入框與 HTML overlay 同時存在造成衝突）
-            _wasm_input_setup(prompt, default="")
-
-            # 用 _ask_text_done flag 偵測提交；asyncio.sleep(0) 每幀 yield，
-            # 確保 run_ui 繼續跑（音樂、畫面不中斷），且不觸發瀏覽器「頁面無回應」
-            while True:
-                try:
-                    done = bool(_plt.window.eval("window._ask_text_done?1:0"))
-                except Exception:
-                    done = False
-                if done:
-                    break
-                await asyncio.sleep(0)
-
-            try:
-                final = str(_plt.window.eval("window._ask_text_result||''")).strip() or "無名氏"
-            except Exception:
-                final = "無名氏"
-
-            _wasm_input_teardown()
-            # 把結果填入 CC 狀態
-            _cc_tvalue[0]     = final
-            _cc_composing[0]  = ""
-            _cc_reply_val[0]  = final
-            _cc_reply_ready[0] = True
-            return final
-        except Exception as _e:
-            try: _wasm_input_teardown()
-            except Exception: pass
-            print(f"[ask_cc_name WASM] 失敗：{_e}")
-            return "無名氏"   # WASM 出錯時直接回傳預設值，不 fallthrough 到桌面模式
-    # 桌面環境
     _cmd_q.append(("cc_name", prompt))
     _cc_reply_ready[0] = False
     while not _cc_reply_ready[0]: await asyncio.sleep(0)
