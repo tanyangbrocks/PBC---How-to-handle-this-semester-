@@ -86,16 +86,16 @@ async def ask_withdrawal_popup(options: list) -> str:
 def _wasm_input_setup(prompt: str, default: str = "") -> None:
     """WASM 專用：建立支援中文 IME 的 HTML 輸入框，同時安全地讓它取得鍵盤焦點。
     採用 tabindex 屬性切換（不觸發 blur/focus 事件），避免 SDL2 崩潰。
+    不呼叫 pygame.key.stop_text_input()：HTML input focus 後瀏覽器自動攔截鍵盤，
+    無需停用 SDL2 text input；停用反而可能破壞 emscripten 事件迴圈。
     """
     import platform as _plt
-    # 停止 SDL2 IME 捕獲，讓瀏覽器 IME 可接管
-    pygame.key.stop_text_input()
     import json as _json
     _plt.window.eval(f"window._ask_text_prompt={_json.dumps(prompt)};")
     _plt.window.eval(f"window._ask_text_default={_json.dumps(default)};")
     _plt.window.eval(f"window._ask_text_hint={_json.dumps('（支援繁體中文輸入法）')};")
     _plt.window.eval(f"window._ask_text_btn={_json.dumps('確認')};")
-    _plt.window.eval("window._ask_text_result=null;")
+    _plt.window.eval("window._ask_text_result=null;window._ask_text_done=false;")
     _plt.window.eval("""
 (function(){
   var d=document.createElement('div');
@@ -134,7 +134,7 @@ def _wasm_input_setup(prompt: str, default: str = "") -> None:
     +'cursor:pointer;font-weight:bold;';
   function ok(){
     var v=document.getElementById('__py_inp');
-    if(v)window._ask_text_result=v.value;
+    if(v){window._ask_text_result=v.value;window._ask_text_done=true;}
   }
   btn.onclick=ok;
   inp.addEventListener('keydown',function(e){
@@ -164,20 +164,21 @@ def _wasm_input_setup(prompt: str, default: str = "") -> None:
 """)
 
 def _wasm_input_teardown() -> None:
-    """WASM 專用：移除輸入框 overlay，恢復 canvas 鍵盤焦點與 SDL2 IME。"""
+    """WASM 專用：移除輸入框 overlay，恢復 canvas 鍵盤焦點。"""
     import platform as _plt
     _plt.window.eval(
         "var e=document.getElementById('__py_input_ov');if(e)e.remove();"
         "delete window._ask_text_result;"
+        "delete window._ask_text_done;"
         "delete window._ask_text_prompt;"
         "delete window._ask_text_default;"
     )
-    # 恢復 canvas pointer-events、焦點與 SDL2 文字輸入
+    # 恢復 canvas pointer-events 與焦點
     _plt.window.eval(
         "var c=document.getElementById('canvas');"
         "if(c){c.style.pointerEvents=c.dataset.oldPe||'';delete c.dataset.oldPe;c.focus();}"
     )
-    pygame.key.start_text_input()
+    # 不呼叫 pygame.key.start_text_input()：交由 run_ui 在 cc_name 指令中管理
 
 async def ask_text(prompt: str, default: str = "") -> str:
     """取代自由文字輸入的 input()：顯示輸入框，確認後回傳字串。
@@ -189,17 +190,26 @@ async def ask_text(prompt: str, default: str = "") -> str:
         try:
             _wasm_input_setup(prompt, default)
             import platform as _plt
+            # 用 _ask_text_done flag 偵測提交，每幀 yield 確保遊戲迴圈繼續運行
             while True:
-                result = _plt.window._ask_text_result
-                if result is not None:
+                try:
+                    done = bool(_plt.window.eval("!!window._ask_text_done"))
+                except Exception:
+                    done = False
+                if done:
                     break
-                await asyncio.sleep(0.05)
+                await asyncio.sleep(0)   # yield every frame — 不用 0.05 避免計時器實作差異
+            try:
+                result = str(_plt.window.eval("window._ask_text_result||''") or "")
+            except Exception:
+                result = ""
             _wasm_input_teardown()
-            return str(result)
+            return result
         except Exception as _e:
             try: _wasm_input_teardown()
             except Exception: pass
             print(f"[ask_text WASM] 失敗：{_e}")
+            return default   # 出錯時不 fallthrough 到桌面模式
     # 桌面環境
     _cmd_q.append(("text", prompt, default))
     _reply_ready[0] = False
@@ -411,36 +421,34 @@ async def ask_cc_name(prompt: str) -> str:
             # （避免 pygame 底部輸入框與 HTML overlay 同時存在造成衝突）
             _wasm_input_setup(prompt, default="")
 
-            # 即時同步 HTML input → pygame 狀態（讓 CC 畫面顯示打字過程）
+            # 用 _ask_text_done flag 偵測提交；asyncio.sleep(0) 每幀 yield，
+            # 確保 run_ui 繼續跑（音樂、畫面不中斷），且不觸發瀏覽器「頁面無回應」
             while True:
-                result = _plt.window._ask_text_result
-                if result is not None:
-                    break
-                # 讀取當前輸入值，更新 pygame CC 輸入框狀態
                 try:
-                    val  = _plt.window.eval(
-                        "var i=document.getElementById('__py_inp');i?i.value:''")
-                    comp = _plt.window.eval(
-                        "window._cc_composing_wasm||''")
-                    if val  is not None: _cc_tvalue[0]    = str(val)
-                    if comp is not None: _cc_composing[0]  = str(comp)
-                    _cc_caret_pos[0] = len(_cc_tvalue[0])
+                    done = bool(_plt.window.eval("!!window._ask_text_done"))
                 except Exception:
-                    pass
-                await asyncio.sleep(0.05)
+                    done = False
+                if done:
+                    break
+                await asyncio.sleep(0)
+
+            try:
+                final = str(_plt.window.eval("window._ask_text_result||''")).strip() or "無名氏"
+            except Exception:
+                final = "無名氏"
 
             _wasm_input_teardown()
-            final = str(result).strip() or "無名氏"
-            # 確認：把結果填入 CC 狀態，觸發回覆
-            _cc_tvalue[0]    = final
-            _cc_composing[0] = ""
-            _cc_reply_val[0] = final
+            # 把結果填入 CC 狀態
+            _cc_tvalue[0]     = final
+            _cc_composing[0]  = ""
+            _cc_reply_val[0]  = final
             _cc_reply_ready[0] = True
             return final
         except Exception as _e:
             try: _wasm_input_teardown()
             except Exception: pass
             print(f"[ask_cc_name WASM] 失敗：{_e}")
+            return "無名氏"   # WASM 出錯時直接回傳預設值，不 fallthrough 到桌面模式
     # 桌面環境
     _cmd_q.append(("cc_name", prompt))
     _cc_reply_ready[0] = False
