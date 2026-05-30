@@ -319,10 +319,8 @@ def _draw_shape_minigame(
     # ── 繪製背景 ─────────────────────────────────────────
     if _smg_round[0] == 2 and _smg_bg_surf[0] is not None:
         surf.blit(_smg_bg_surf[0], (0, 0))
-        # 淡奶油遮罩：讓深色文字在任何背景圖上均可讀
-        ov = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
-        ov.fill((*_SMG_BG, 160))
-        surf.blit(ov, (0, 0))
+        # 淡奶油遮罩（快取）
+        _blit_ov(surf, _SMG_BG[0], _SMG_BG[1], _SMG_BG[2], 160)
     else:
         surf.fill(_SMG_BG)
 
@@ -415,9 +413,7 @@ def _draw_memory_question(
     # 背景：奶油色；第二回合延續背景圖 + 奶油遮罩
     if _smg_round[0] == 2 and _smg_bg_surf[0] is not None:
         surf.blit(_smg_bg_surf[0], (0, 0))
-        overlay = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
-        overlay.fill((*_SMG_BG, 200))
-        surf.blit(overlay, (0, 0))
+        _blit_ov(surf, _SMG_BG[0], _SMG_BG[1], _SMG_BG[2], 200)
     else:
         surf.fill(_SMG_BG)
 
@@ -591,9 +587,7 @@ def _draw_pregame_countdown(surf: "pygame.Surface", fm, ms: int) -> bool:
     elapsed = ms - _pcd_t0[0]
 
     # 深色半透明遮罩（疊在所有遊戲 UI 之上）
-    ov = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
-    ov.fill((0, 0, 0, 165))
-    surf.blit(ov, (0, 0))
+    _blit_ov(surf, 0, 0, 0, 165)
 
     cx, cy   = WIN_W // 2, WIN_H // 2
     fc_big   = _extra_fonts.get("creative_84b") or fm   # 大號倒數數字

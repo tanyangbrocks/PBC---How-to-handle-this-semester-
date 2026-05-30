@@ -11,6 +11,41 @@ import os
 from ui_const import *
 from ui_state  import *
 
+# ── WASM 記憶體安全：共用 Surface 快取（所有 draw 模組共用）─────────────────
+# 全螢幕遮罩：用 set_alpha 代替 SRCALPHA，避免每幀分配 3.7 MB
+_ov_cache: dict = {}
+def _blit_ov(surf: pygame.Surface, r: int, g: int, b: int, a: int) -> None:
+    """全螢幕遮罩（快取重用），比 SRCALPHA 省記憶體，任何 draw 模組皆可呼叫。"""
+    key = (r, g, b, a)
+    if key not in _ov_cache:
+        s = pygame.Surface((WIN_W, WIN_H))
+        s.fill((r, g, b))
+        s.set_alpha(a)
+        _ov_cache[key] = s
+    surf.blit(_ov_cache[key], (0, 0))
+
+# 可重用的 WIN_W×WIN_H SRCALPHA Surface 池（天氣/FX 等動畫使用）
+# 模式：_get_sfx_surf(name) → 清空後重用，每個名稱只建立一次
+_sfx_pool: dict = {}
+def _get_sfx_surf(name: str) -> pygame.Surface:
+    """取得具名的可重用 SRCALPHA Surface（首次建立，後續 fill 清空重用）。"""
+    if name not in _sfx_pool:
+        _sfx_pool[name] = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
+    s = _sfx_pool[name]
+    s.fill((0, 0, 0, 0))
+    return s
+
+# 彈窗圓角投影陰影快取
+_popup_sh_cache: dict = {}
+def _get_popup_sh(w: int, h: int, alpha: int) -> pygame.Surface:
+    """圓角 drop-shadow Surface，按 (w,h,alpha) 快取，同尺寸只建立一次。"""
+    key = (w, h, alpha)
+    if key not in _popup_sh_cache:
+        s = pygame.Surface((w, h), pygame.SRCALPHA)
+        pygame.draw.rect(s, (0, 0, 0, alpha), pygame.Rect(0, 0, w, h), border_radius=18)
+        _popup_sh_cache[key] = s
+    return _popup_sh_cache[key]
+
 def _play_sfx(name: str) -> None:
     """播放指定音效；key 不在 _sfx 時嘗試以 name 當檔名自動載入（.ogg / .wav）。"""
     if name not in _sfx:

@@ -60,8 +60,8 @@ def _draw_cc_particles(surf: pygame.Surface, ms: int) -> None:
             _cc_ptcl.append(_cc_ptcl_new(full_screen=True))
         _cc_ptcl_ready[0] = True
 
-    # ── 每幀繪製到 SRCALPHA Surface 再合成 ───────────────────────
-    pt_surf = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
+    # ── 每幀繪製到 SRCALPHA Surface 再合成（重用，不重建）──────
+    pt_surf = _get_sfx_surf("cc_ptcl")
 
     survived: list = []
     for p in _cc_ptcl:
@@ -844,9 +844,7 @@ def _draw_cc_summary(surf, fm, fs, mpos, game_mode=False):
 
     # ── 背景 ────────────────────────────────────────────────────
     if game_mode:
-        ov = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
-        ov.fill((0, 0, 0, 160))
-        surf.blit(ov, (0, 0))
+        _blit_ov(surf, 0, 0, 0, 160)
     else:
         _draw_cc_bg(surf)
 

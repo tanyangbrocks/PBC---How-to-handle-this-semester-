@@ -119,78 +119,69 @@ def _draw_icon_cart(surf: pygame.Surface, cx: int, cy: int, r: int) -> None:
     pygame.draw.circle(surf, (200, 170, 130),(bx + body_w // 4,         whl_y), max(1, whl_r - 1))
     pygame.draw.circle(surf, (200, 170, 130),(bx + body_w * 3 // 4,     whl_y), max(1, whl_r - 1))
 
+_cal_surf_cache: dict = {}   # {week: pygame.Surface} — 週次不變就不重建
+
 def _draw_week_calendar(surf: pygame.Surface,
                         fm, cx: int, cy: int, week: int) -> None:
     """
     日曆式週次顯示器：以翻頁日曆造型大字呈現當前週次。
     頂部深紅標題列 + 裝訂環 + 主體白底大字。
+    週次相同時直接重用快取 Surface（不重新分配 SRCALPHA）。
     """
     fb_xl = _font_bold_xl[0] or fm
     fmic  = _font_micro[0]
 
-    CAL_W  = 108   # 日曆卡片寬度
-    CAL_H  = 112   # 日曆卡片高度
-    HDR_H  = 28    # 頂部紅色標題列高度
+    CAL_W  = 108
+    CAL_H  = 112
+    HDR_H  = 28
     RADIUS = 8
-    RING_R = 5     # 裝訂環半徑
+    RING_R = 5
 
-    sx = cx - CAL_W // 2
-    sy = cy - CAL_H // 2
+    sx    = cx - CAL_W // 2
+    sy    = cy - CAL_H // 2
     outer = pygame.Rect(sx, sy, CAL_W, CAL_H)
 
-    cal = pygame.Surface((CAL_W, CAL_H), pygame.SRCALPHA)
+    # ── 週次相同時直接使用快取（節省 SRCALPHA 重建）──────────
+    if week not in _cal_surf_cache:
+        cal = pygame.Surface((CAL_W, CAL_H), pygame.SRCALPHA)
 
-    # ── 主體（米白）────────────────────────────────────────────
-    pygame.draw.rect(cal, (255, 249, 237, 255),
-                     pygame.Rect(0, 0, CAL_W, CAL_H), border_radius=RADIUS)
+        pygame.draw.rect(cal, (255, 249, 237, 255),
+                         pygame.Rect(0, 0, CAL_W, CAL_H), border_radius=RADIUS)
+        pygame.draw.rect(cal, (188, 50, 40, 255),
+                         pygame.Rect(0, 0, CAL_W, HDR_H), border_radius=RADIUS)
+        pygame.draw.rect(cal, (188, 50, 40, 255),
+                         pygame.Rect(0, RADIUS, CAL_W, HDR_H - RADIUS))
 
-    # ── 頂部標題列（深紅，僅上方圓角）─────────────────────────
-    pygame.draw.rect(cal, (188, 50, 40, 255),
-                     pygame.Rect(0, 0, CAL_W, HDR_H), border_radius=RADIUS)
-    # 蓋掉標題列下方多餘的圓角（讓下邊緣平整）
-    pygame.draw.rect(cal, (188, 50, 40, 255),
-                     pygame.Rect(0, RADIUS, CAL_W, HDR_H - RADIUS))
+        if fmic is not None:
+            hdr_t = fmic.render("本  週", True, (255, 215, 195))
+            cal.blit(hdr_t, ((CAL_W - hdr_t.get_width()) // 2,
+                             (HDR_H - hdr_t.get_height()) // 2))
 
-    # 標題文字「本週」
-    if fmic is not None:
-        hdr_t = fmic.render("本  週", True, (255, 215, 195))
-        cal.blit(hdr_t, ((CAL_W - hdr_t.get_width()) // 2,
-                         (HDR_H - hdr_t.get_height()) // 2))
+        for ring_cx in [CAL_W // 3, CAL_W * 2 // 3]:
+            ring_cy = RING_R + 1
+            pygame.draw.rect(cal, (70, 46, 25),
+                             pygame.Rect(ring_cx - 3, 0, 6, ring_cy + RING_R))
+            pygame.draw.circle(cal, (110, 78, 44), (ring_cx, ring_cy), RING_R)
+            pygame.draw.circle(cal, (35, 20, 10), (ring_cx, ring_cy), max(2, RING_R - 2))
 
-    # ── 裝訂環（位於頂邊，橫跨標題列上緣）─────────────────────
-    for ring_cx in [CAL_W // 3, CAL_W * 2 // 3]:
-        ring_cy = RING_R + 1
-        # 環柱（深棕色小矩形）
-        pygame.draw.rect(cal, (70, 46, 25),
-                         pygame.Rect(ring_cx - 3, 0, 6, ring_cy + RING_R))
-        # 外環
-        pygame.draw.circle(cal, (110, 78, 44), (ring_cx, ring_cy), RING_R)
-        # 孔洞
-        pygame.draw.circle(cal, (35, 20, 10), (ring_cx, ring_cy), max(2, RING_R - 2))
+        body_y = HDR_H
+        body_h = CAL_H - HDR_H
+        week_t = fb_xl.render(f"第{week}週", True, (72, 38, 18))
+        if week_t.get_width() > CAL_W - 8:
+            _fb_lg = _font_bold_lg[0] or fm
+            week_t = _fb_lg.render(f"第{week}週", True, (72, 38, 18))
+        cal.blit(week_t, ((CAL_W - week_t.get_width()) // 2,
+                          body_y + (body_h - week_t.get_height()) // 2 - 2))
 
-    # ── 週次大字（置中於主體區域）──────────────────────────────
-    body_y = HDR_H
-    body_h = CAL_H - HDR_H
-    week_t = fb_xl.render(f"第{week}週", True, (72, 38, 18))
-    # 若文字超寬則改用 fb_lg
-    if week_t.get_width() > CAL_W - 8:
-        _fb_lg = _font_bold_lg[0] or fm
-        week_t = _fb_lg.render(f"第{week}週", True, (72, 38, 18))
-    cal.blit(week_t, ((CAL_W - week_t.get_width()) // 2,
-                      body_y + (body_h - week_t.get_height()) // 2 - 2))
-
-    # ── 底部細線裝飾（模擬日曆頁格線）─────────────────────────
-    deco_y = CAL_H - 9
-    pygame.draw.line(cal, (210, 195, 175),
-                     (12, deco_y), (CAL_W - 12, deco_y))
-
-    # ── 卡片邊框 ────────────────────────────────────────────────
-    pygame.draw.rect(cal, (148, 108, 70, 255),
-                     pygame.Rect(0, 0, CAL_W, CAL_H), 1, border_radius=RADIUS)
+        deco_y = CAL_H - 9
+        pygame.draw.line(cal, (210, 195, 175), (12, deco_y), (CAL_W - 12, deco_y))
+        pygame.draw.rect(cal, (148, 108, 70, 255),
+                         pygame.Rect(0, 0, CAL_W, CAL_H), 1, border_radius=RADIUS)
+        _cal_surf_cache[week] = cal
 
     # ── 投影 + 貼圖 ─────────────────────────────────────────────
     _soft_shadow(surf, outer, radius=RADIUS, alpha=52, offset=(0, 5))
-    surf.blit(cal, (sx, sy))
+    surf.blit(_cal_surf_cache[week], (sx, sy))
 
 def _get_intel_level_ui(intel: int) -> int:
     """根據智力數值回傳等階索引（0–4），供狀態欄顯示用。"""
@@ -344,17 +335,10 @@ def _draw_status_v2(surf, fm, fs, player, rect, mpos):
     pr = pygame.Rect(rect.x + M, rect.y + M,
                      rect.width - M * 2, rect.height - M * 2)
 
-    # ── 投影 ──────────────────────────────────────────────────
-    sh = pygame.Surface((pr.width, pr.height), pygame.SRCALPHA)
-    pygame.draw.rect(sh, (0, 0, 0, 52),
-                     pygame.Rect(0, 0, pr.width, pr.height), border_radius=14)
-    surf.blit(sh, (pr.x + 4, pr.y + 4))
-
-    # ── 卡片底色 ──────────────────────────────────────────────
-    card = pygame.Surface((pr.width, pr.height), pygame.SRCALPHA)
-    pygame.draw.rect(card, (255, 244, 228, 238),
-                     pygame.Rect(0, 0, pr.width, pr.height), border_radius=14)
-    surf.blit(card, pr.topleft)
+    # ── 投影（快取圓角陰影）+ 卡片底色（直接畫不透明矩形）──────
+    surf.blit(_get_popup_sh(pr.width, pr.height, 52), (pr.x + 4, pr.y + 4))
+    pygame.draw.rect(surf, (255, 244, 228),
+                     pygame.Rect(pr.x, pr.y, pr.width, pr.height), border_radius=14)
     pygame.draw.rect(surf, CYAN, pr, 2, border_radius=14)
 
     if player is None:

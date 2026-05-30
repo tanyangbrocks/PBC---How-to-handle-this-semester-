@@ -148,8 +148,8 @@ def _wx_draw_sun(surf: pygame.Surface, ms: int) -> None:
     sy   = -55
     dist = WIN_W + WIN_H
 
-    # ── 光柱（用單張 SRCALPHA 面，只建一次可接受）────────────
-    ray_surf = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
+    # 重用 SRCALPHA Surface（不重新分配，只清空）
+    ray_surf = _get_sfx_surf("wx_ray")
     # (中心角度, 半角寬, 基礎透明度)
     RAY_DEFS = [
         (52,   7,  38),
@@ -170,7 +170,7 @@ def _wx_draw_sun(surf: pygame.Surface, ms: int) -> None:
     surf.blit(ray_surf, (0, 0))
 
     # ── 光源暈圈 ─────────────────────────────────────────────
-    halo = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
+    halo = _get_sfx_surf("wx_halo")
     halo_cy = sy + 65
     for r in range(180, 0, -18):
         ha = int(18 * (1.0 - r / 180.0) * (0.85 + 0.15 * math.sin(t * 1.1)))
@@ -179,7 +179,7 @@ def _wx_draw_sun(surf: pygame.Surface, ms: int) -> None:
     surf.blit(halo, (0, 0))
 
     # ── 光塵粒子 ─────────────────────────────────────────────
-    dust_surf = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
+    dust_surf = _get_sfx_surf("wx_dust")
     for p in _weather_pts:
         p["x"]    += p["vx"]
         p["y"]    += p["vy"]
@@ -195,8 +195,8 @@ def _wx_draw_sun(surf: pygame.Surface, ms: int) -> None:
 
 def _wx_draw_leaves(surf: pygame.Surface) -> None:
     """葉子 / 花瓣飄落：純多邊形旋轉，不建立額外 Surface。"""
-    # 用一張共用 SRCALPHA Surface 支援透明度
-    leaf_surf = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
+    # 重用 SRCALPHA Surface（不重新分配，只清空）
+    leaf_surf = _get_sfx_surf("wx_leaf")
 
     for p in _weather_pts:
         # ── 更新位置 ─────────────────────────────────────────
@@ -251,12 +251,10 @@ def _wx_draw_leaves(surf: pygame.Surface) -> None:
 
 def _wx_draw_fog(surf: pygame.Surface) -> None:
     """濃霧繚繞：大型半透明橢圓霧團緩慢漂移，疊加淡灰色氛圍遮罩。"""
-    # 整體氛圍遮罩（輕描淡寫的冷灰調）
-    atm = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
-    atm.fill((210, 215, 225, 30))
-    surf.blit(atm, (0, 0))
+    # 整體氛圍遮罩（快取）
+    _blit_ov(surf, 210, 215, 225, 30)
 
-    fog_surf = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
+    fog_surf = _get_sfx_surf("wx_fog")
     for p in _weather_pts:
         p["x"]        += p["vx"]
         p["y"]        += p["vy"]
@@ -288,8 +286,8 @@ def _wx_draw_fog(surf: pygame.Surface) -> None:
 
     surf.blit(fog_surf, (0, 0))
 
-    # 底部地面霧（靜態漸層帶，增強霧氣厚重感）
-    ground_fog = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
+    # 底部地面霧（重用 Surface）
+    ground_fog = _get_sfx_surf("wx_ground_fog")
     for row in range(60):
         layer_a = int(22 * (1.0 - row / 60.0) ** 1.6)
         y_row   = WIN_H - row * 3
@@ -299,13 +297,11 @@ def _wx_draw_fog(surf: pygame.Surface) -> None:
 
 def _wx_draw_rain(surf: pygame.Surface) -> None:
     """陰雨綿綿：深灰半透明遮罩 + 斜向雨滴線條。"""
-    # 陰暗遮罩
-    ov = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
-    ov.fill((45, 50, 65, 95))
-    surf.blit(ov, (0, 0))
+    # 陰暗遮罩（快取）
+    _blit_ov(surf, 45, 50, 65, 95)
 
-    # 雨滴
-    rain_surf = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
+    # 雨滴（重用 Surface）
+    rain_surf = _get_sfx_surf("wx_rain")
     slant     = -0.32   # 斜度（偏左）
     for p in _weather_pts:
         p["y"] += p["speed"]
@@ -348,7 +344,7 @@ def _draw_click_effects(surf: pygame.Surface, ms: int) -> None:
     if not _click_effects:
         return
 
-    fx = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
+    fx = _get_sfx_surf("click_fx")
     dead: list = []
 
     for ef in _click_effects:
@@ -584,14 +580,15 @@ def _ripple_warp(surf: pygame.Surface, elapsed: int) -> None:
     # ── 最初的白色閃光（模擬石頭落水的瞬間衝擊）────────────────
     if t < 0.10:
         flash_a = int(210 * (1.0 - t / 0.10) ** 2.2)
-        _fl = pygame.Surface((W, H), pygame.SRCALPHA)
+        _fl = _get_sfx_surf("ripple_flash")
         _fl.fill((255, 255, 255, flash_a))
         surf.blit(_fl, (0, 0))
 
 def _ripple_rings(surf: pygame.Surface, elapsed: int) -> None:
     """退回版：numpy 不可用時，退回同心擴散環效果。"""
     t  = elapsed / RIPPLE_DURATION
-    ov = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
+    ov = _get_sfx_surf("ripple_rings")
+    ov.fill((0, 0, 0, 0))
     if t < 0.13:
         ft = t / 0.13
         ov.fill((255, 255, 255, int(125 * (1.0 - ft) ** 2)))
@@ -623,7 +620,7 @@ def _draw_action_flash(surf: pygame.Surface, ms: int) -> None:
         return
     t     = elapsed / _ACTION_FLASH_MS          # 0 → 1
     alpha = int(210 * (1.0 - t) ** 1.6)         # 快速指數衰退
-    flash = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
+    flash = _get_sfx_surf("action_flash")
     flash.fill((255, 255, 255, alpha))
     surf.blit(flash, (0, 0))
 
@@ -826,8 +823,8 @@ def _draw_start(surf, fm, fl, mpos):
     _bdy  = mpos[1] - btn_cy
     hover = (_bdx * _bdx + _bdy * _bdy) <= (BTN_R * BTN_R)
 
-    # — 光環粒子（SRCALPHA surface，避免蓋住背景）—
-    halo_sf = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
+    # — 光環粒子（重用 SRCALPHA Surface）—
+    halo_sf = _get_sfx_surf("start_halo")
 
     # 靜態光暈圈
     pygame.draw.circle(halo_sf, (*BTN_N, 40),  (btn_cx, btn_cy), BTN_R + 16, 14)
@@ -1024,12 +1021,12 @@ def _draw_end_anim(surf, fm, fs, elapsed):
         fb     = _font_bold[0] or fm
 
         pulse  = 0.5 + 0.5 * math.sin(elapsed * 0.0025)
-        halo_s = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
+        halo_s = _get_sfx_surf("end_halo")
         pygame.draw.circle(halo_s, (*BTN_N, int(70 * pulse)),  (cx, cy), 80, 14)
         pygame.draw.circle(halo_s, (*BTN_N, int(35 * pulse)),  (cx, cy), 108, 5)
         surf.blit(halo_s, (0, 0))
 
-        dot_s = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
+        dot_s = _get_sfx_surf("end_dots")
         for i in range(8):
             ang = elapsed * 0.0025 + i * math.tau / 8
             px  = cx + int(math.cos(ang) * 52)
@@ -1099,9 +1096,8 @@ def _draw_end_report(surf, fm, fs, mpos, data, ms, elapsed):
 
     CARD_X, CARD_Y, CARD_W, CARD_H = 100, 12, 760, 590
     card_r = pygame.Rect(CARD_X, CARD_Y, CARD_W, CARD_H)
-    card_s = pygame.Surface((CARD_W, CARD_H), pygame.SRCALPHA)
-    pygame.draw.rect(card_s, (255, 250, 240, 255), (0, 0, CARD_W, CARD_H), border_radius=14)
-    surf.blit(card_s, card_r.topleft)
+    # 直接畫不透明圓角矩形（alpha=255 不需要 SRCALPHA）
+    pygame.draw.rect(surf, (255, 250, 240), card_r, border_radius=14)
     pygame.draw.rect(surf, (165, 135, 95), card_r, 2, border_radius=14)
 
     cx = CARD_X + CARD_W // 2
@@ -1236,8 +1232,8 @@ def _draw_end_report(surf, fm, fs, mpos, data, ms, elapsed):
         _bdy  = mpos[1] - btn_cy
         hover = (_bdx * _bdx + _bdy * _bdy) <= BTN_R * BTN_R
 
-        # 光環
-        halo_sf = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
+        # 光環（重用 Surface）
+        halo_sf = _get_sfx_surf("end_btn_halo")
         pygame.draw.circle(halo_sf, (*_END_BTN_COL, 40),  (btn_cx, btn_cy), BTN_R + 16, 14)
         pygame.draw.circle(halo_sf, (*_END_BTN_COL, 18),  (btn_cx, btn_cy), BTN_R + 32, 6)
         ang0 = (ms * 0.001) * math.tau
@@ -1427,7 +1423,7 @@ def _draw_sick_vignette(surf: pygame.Surface, player) -> None:
     DEPTH  = 88      # 向內最深 px
     MAX_A  = 175     # 最邊緣層的最大 alpha
 
-    ov = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
+    ov = _get_sfx_surf("sick_vignette")
     for i in range(LAYERS):
         ratio  = ((LAYERS - i) / LAYERS) ** 2.0   # 二次方淡出
         alpha  = int(MAX_A * pulse * ratio)
@@ -1462,7 +1458,7 @@ def _draw_low_sat_vignette(surf: pygame.Surface, player) -> None:
 
     max_alpha = min(60, int(30 + (60 - max(sat, 0)) * 0.5))
 
-    ov = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
+    ov = _get_sfx_surf("low_sat_vignette")
     cx, cy = WIN_W // 2, WIN_H // 2
 
     # ── 橢圓輪廓漸層（外暗內亮）────────────────────────────────

@@ -690,8 +690,8 @@ def _draw_exam_stress_fx(surf: pygame.Surface) -> None:
         (pygame.Rect(M,             STATUS_H + CHAR_H + M, WIN_W - M*2, ACTION_H - M*2), 14),
     ]
 
-    # 單張合併疊加 Surface → 只 blit 一次，效能最佳
-    overlay = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
+    # 單張合併疊加 Surface → 只 blit 一次（重用，不重建）
+    overlay = _get_sfx_surf("ap_exam_overlay")
 
     # dist == 1：全畫面底色微微泛紅
     if dist == 1:

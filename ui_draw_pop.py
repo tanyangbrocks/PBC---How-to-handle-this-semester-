@@ -13,30 +13,7 @@ from ui_state  import *
 from ui_draw_base import *
 from ui_draw_hud import _draw_icon_coin
 
-# ── WASM 記憶體安全：避免每幀重新分配大型 SRCALPHA Surface ───────────────
-# 全螢幕半透明遮罩：改用 set_alpha 代替 SRCALPHA，不需每幀分配 3.7 MB
-_ov_cache: dict = {}
-def _blit_ov(surf: pygame.Surface, r: int, g: int, b: int, a: int) -> None:
-    """全螢幕遮罩，快取重用，避免每幀建立大型 SRCALPHA Surface → WASM heap 爆炸。"""
-    key = (r, g, b, a)
-    if key not in _ov_cache:
-        s = pygame.Surface((WIN_W, WIN_H))
-        s.fill((r, g, b))
-        s.set_alpha(a)
-        _ov_cache[key] = s
-    surf.blit(_ov_cache[key], (0, 0))
-
-# 彈窗圓角投影陰影：SRCALPHA 只在同尺寸首次出現時建立，後續重用
-_popup_sh_cache: dict = {}
-def _get_popup_sh(w: int, h: int, alpha: int) -> pygame.Surface:
-    """圓角 drop-shadow Surface，按 (w,h,alpha) 快取，同尺寸只建立一次。"""
-    key = (w, h, alpha)
-    if key not in _popup_sh_cache:
-        s = pygame.Surface((w, h), pygame.SRCALPHA)
-        pygame.draw.rect(s, (0, 0, 0, alpha), pygame.Rect(0, 0, w, h), border_radius=18)
-        _popup_sh_cache[key] = s
-    return _popup_sh_cache[key]
-
+# _blit_ov / _get_popup_sh / _get_sfx_surf 已移至 ui_draw_base.py（import * 引入）
 # 翹課印章快取：每種印章只建立一次
 _stamp_cache: dict = {}
 
