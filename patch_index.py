@@ -151,6 +151,20 @@ AUDIO_FIX_JS = """
 html = html.replace("</body>", AUDIO_FIX_JS, 1)
 print("[patch_index] ✓ Page Visibility 音訊修復注入成功")
 
+# ── 修復 pygbag template bug：cdn 結尾 / + 路徑開頭 / = 雙斜線 ──────────
+# CDN 上沒有 browserfs，改用 jsdelivr（穩定，不會 404）
+import re as _re
+html = _re.sub(
+    r'https://pygame-web\.github\.io/cdn/[^"\']*//browserfs\.min\.js',
+    "https://cdn.jsdelivr.net/npm/browserfs@1.4.3/dist/browserfs.min.js",
+    html,
+)
+html = html.replace(
+    "https://pygame-web.github.io/cdn/0.9.3/browserfs.min.js",
+    "https://cdn.jsdelivr.net/npm/browserfs@1.4.3/dist/browserfs.min.js",
+)
+print("[patch_index] ✓ browserfs URL 修復（pygame-web CDN 404 → jsdelivr）")
+
 with open(INDEX_PATH, "w", encoding="utf-8") as f:
     f.write(html)
 
