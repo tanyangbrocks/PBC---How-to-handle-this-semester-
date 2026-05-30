@@ -262,7 +262,7 @@ class EventSystem:
         """熬夜後增加睡過頭額外觸發機率（可累加，最高 100%）。"""
         self.allnighter_risk = min(1.0, self.allnighter_risk + chance)
 
-    def roll_event_after_action(self, week: int) -> bool:
+    async def roll_event_after_action(self, week: int) -> bool:
         """
         每次行動結束後呼叫。
         觸發規則：
@@ -287,12 +287,12 @@ class EventSystem:
                 notify(popup_text)
                 trigger_screen_shake()
                 play_event_sfx(False)
-                ask_ok(popup_text)
+                await ask_ok(popup_text)
                 start_notify_capture()
                 _oversleep_effect(player)
                 captured = stop_notify_capture()
                 if captured:
-                    ask_ok("📋 效果：【睡過頭】\n" + "\n".join(captured))
+                    await ask_ok("📋 效果：【睡過頭】\n" + "\n".join(captured))
                 self.events_this_week += 1
             self.allnighter_risk = 0.0
 
@@ -343,11 +343,11 @@ class EventSystem:
         else:
             return False
 
-        self._fire_event(event_type, event)
+        await self._fire_event(event_type, event)
         self.events_this_week += 1
         return True
 
-    def roll_green_hat(self, week: int) -> None:
+    async def roll_green_hat(self, week: int) -> None:
         """
         週末呼叫：「被戴綠帽」固定 5% 機率（週次 > 8）。
         不受 events_this_week 計數影響。
@@ -356,7 +356,7 @@ class EventSystem:
             if (se["id"] == "green_hat"
                     and se["trigger_condition"](self.player, week)
                     and random.random() < se["prob"]):
-                self._fire_event("special", se)
+                await self._fire_event("special", se)
                 break
 
     def tick_debuffs(self) -> None:
@@ -367,7 +367,7 @@ class EventSystem:
 
     # ── 內部方法 ──────────────────────────────────────────────────
 
-    def _fire_event(self, event_type: str, event):
+    async def _fire_event(self, event_type: str, event):
         """執行單一事件：彈窗通知 → 效果 → 旗標處理。"""
         player = self.player
 
@@ -377,12 +377,12 @@ class EventSystem:
             notify(popup_text)
             trigger_screen_shake()
             play_event_sfx(False)
-            ask_ok(popup_text)
+            await ask_ok(popup_text)
             start_notify_capture()
             _hangover_effect(player)
             captured = stop_notify_capture()
             if captured:
-                ask_ok("📋 效果：【宿醉發作】\n" + "\n".join(captured))
+                await ask_ok("📋 效果：【宿醉發作】\n" + "\n".join(captured))
             return
 
         prefix = "💥 特殊事件" if event_type == "special" else "⚡ 突發事件"
@@ -391,13 +391,13 @@ class EventSystem:
         notify(f"  {event['desc']}")
         trigger_screen_shake()
         play_event_sfx(event.get("is_positive", False))
-        ask_ok(popup_text, event.get("btn_label", "確認"))
+        await ask_ok(popup_text, event.get("btn_label", "確認"))
 
         start_notify_capture()
         result = event["effect"](player)
         captured = stop_notify_capture()
         if captured:
-            ask_ok(f"📋 效果：【{event['name']}】\n" + "\n".join(captured))
+            await ask_ok(f"📋 效果：【{event['name']}】\n" + "\n".join(captured))
 
         if result == "TRIGGER_HANGOVER":
             self.pending_hangover = True

@@ -129,16 +129,16 @@ class Character:
     #  工廠方法：角色創建精靈
     # ────────────────────────────────────────────────────────
     @classmethod
-    def create_new(cls) -> "Character":
+    async def create_new(cls) -> "Character":
         # ── 切換到角色創建專屬畫面 ──────────────────────────────
         begin_char_create()
 
         while True:
             # 1. 輸入名字
-            name = ask_cc_name("請輸入角色名字").strip() or "無名大學生"
+            name = (await ask_cc_name("請輸入角色名字")).strip() or "無名大學生"
 
             # 1.5. 選擇人物外觀
-            portrait_prefix = ask_cc_portrait()
+            portrait_prefix = await ask_cc_portrait()
 
             # 2. 選擇系級
             departments = [
@@ -146,28 +146,28 @@ class Character:
                 "工學院", "生物資源暨農學院", "管理學院", "公共衛生學院",
                 "電機資訊學院", "法律學院", "生命科學院",
             ]
-            dept_idx    = ask_cc_dept(departments) - 1
+            dept_idx    = (await ask_cc_dept(departments)) - 1
             department  = departments[dept_idx]
 
             # 2.5. 選擇年級
-            de_level = ask_cc_de_level(DE_LEVELS)
+            de_level = await ask_cc_de_level(DE_LEVELS)
 
             # 3. 選擇負面特質（最多 2 個）
             base_pts         = random.randint(30, 70)
-            chosen_drawbacks = ask_cc_drawbacks(DRAWBACKS, 2)
+            chosen_drawbacks = await ask_cc_drawbacks(DRAWBACKS, 2)
             bonus_pts        = sum(d["bonus_pts"] for d in chosen_drawbacks)
             total_pts        = base_pts + bonus_pts
 
             # 4. 拉霸機抽天賦（3 槽，玩家觀看動畫）
             slot_results    = cls._draw_slots()
-            ask_cc_talent(slot_results)                           # 觸發動畫，不需回傳值
+            await ask_cc_talent(slot_results)                     # 觸發動畫，不需回傳值
             combined_talent = cls._combine_talents(slot_results)
             talent_base_pts = sum(t.get("base_pts_bonus", 0)
                                   for t in slot_results if t["name"] != "無天賦")
             total_pts += talent_base_pts
 
             # 5. 分配能力點（天賦 + 年級加成顯示在面板上）
-            stamina, intel, luck = ask_cc_stats(total_pts, base_pts, combined_talent, de_level)
+            stamina, intel, luck = await ask_cc_stats(total_pts, base_pts, combined_talent, de_level)
             remaining = total_pts - stamina - intel - luck
             money = 300 + remaining * 10 + combined_talent.get("money", 0)
 
@@ -175,7 +175,7 @@ class Character:
             final_intel = (intel
                            + combined_talent.get("intel", 0)
                            + de_level.get("intel", 0))
-            extra_evs = ask_cc_extra_events(EXTRA_EVENTS, final_intel)
+            extra_evs = await ask_cc_extra_events(EXTRA_EVENTS, final_intel)
 
             # 7. 玩家資訊一覽（確認或重新創建）
             summary = {
@@ -194,7 +194,7 @@ class Character:
                 "extra_ev_ids":    extra_evs,
                 "extra_ev_data":   EXTRA_EVENTS,
             }
-            result = ask_cc_summary(summary)
+            result = await ask_cc_summary(summary)
             if result == "start":
                 break
             # result == "restart"：清除資料，重新從姓名輸入
@@ -418,73 +418,53 @@ class Character:
         return combined
 
     @staticmethod
-    def _pick_talent() -> dict:
+    async def _pick_talent() -> dict:
         candidates = random.sample(TALENTS, k=3)
-        # print("\n【天賦選擇】抽到以下三張，請選一張：")  # 因套用pygame而調整
         notify("\n【天賦選擇】抽到以下三張，請選一張：")
-        # for i, t in enumerate(candidates, start=1):  # 因套用pygame而調整
-        #     print(f"  {i}. {t['name']}：{t['desc']}")
-        # idx = Character._safe_int_input("選擇：", 1, 3) - 1  # 因套用pygame而調整
         for t in candidates:
             notify(f"  • {t['name']}：{t['desc']}")
         while True:
-            choice = ask_choice([f"{t['name']}：{t['desc']}" for t in candidates])
+            choice = await ask_choice([f"{t['name']}：{t['desc']}" for t in candidates])
             if choice > 0:
                 return candidates[choice - 1]
             notify("  請選擇一個天賦！")
 
     @staticmethod
-    def _pick_drawbacks(base_pts: int) -> list:
+    async def _pick_drawbacks(base_pts: int) -> list:
         chosen = []
-        # print("\n【負面特質】選擇負面特質可換取額外點數（最多 2 個，直接按 Enter 跳過）：")  # 因套用pygame而調整
         notify("\n【負面特質】選擇負面特質可換取額外點數（最多 2 個）：")
         for d in DRAWBACKS:
             if len(chosen) >= 2:
                 break
-            # print(f"  {d['id']}. {d['name']}：{d['desc']}")  # 因套用pygame而調整
             notify(f"  {d['id']}. {d['name']}：{d['desc']}")
-            # ans = input("要選嗎？(y/N)：").strip().lower()  # 因套用pygame而調整
-            ans = ask_yn(f"要選擇「{d['name']}」嗎？")
+            ans = await ask_yn(f"要選擇「{d['name']}」嗎？")
             if ans:
                 chosen.append(d)
                 notify(f"  ✔ 選擇了【{d['name']}】，可獲得 {d['bonus_pts']} 點。")
         return chosen
 
     @staticmethod
-    def _distribute_points(total: int) -> tuple:
-        # print(f"\n【能力點分配】共 {total} 點，分配到體力 / 智力 / 運氣")  # 因套用pygame而調整
+    async def _distribute_points(total: int) -> tuple:
         notify(f"\n【能力點分配】共 {total} 點，分配到體力 / 智力 / 運氣")
         while True:
-            # stamina = Character._safe_int_input("體力（建議 10~40）：", 0, total)  # 因套用pygame而調整
-            stamina = Character._safe_int_input(f"體力（建議 10~40）", 0, total)
-            # intel   = Character._safe_int_input("智力（建議 10~40）：", 0, total - stamina)  # 因套用pygame而調整
-            intel   = Character._safe_int_input(f"智力（建議 10~40）", 0, total - stamina)
-            # luck    = Character._safe_int_input("運氣（建議 10~40）：", 0, total - stamina - intel)  # 因套用pygame而調整
-            luck    = Character._safe_int_input(f"運氣（建議 10~40）", 0, total - stamina - intel)
+            stamina = await Character._safe_int_input(f"體力（建議 10~40）", 0, total)
+            intel   = await Character._safe_int_input(f"智力（建議 10~40）", 0, total - stamina)
+            luck    = await Character._safe_int_input(f"運氣（建議 10~40）", 0, total - stamina - intel)
             remaining = total - stamina - intel - luck
-            # print(f"  ➜ 剩餘 {remaining} 點將轉換為初始金錢（+{remaining * 10} 元）")  # 因套用pygame而調整
             notify(f"  ➜ 剩餘 {remaining} 點將轉換為初始金錢（+{remaining * 10} 元）")
-            # confirm = input("確認？(Y/n)：").strip().lower()  # 因套用pygame而調整
-            confirm = ask_yn("確認這樣分配嗎？")
+            confirm = await ask_yn("確認這樣分配嗎？")
             if confirm:
                 return stamina, intel, luck, remaining
             notify("  重新分配點數。")
 
     @staticmethod
-    def _safe_int_input(prompt: str, lo: int, hi: int) -> int:
+    async def _safe_int_input(prompt: str, lo: int, hi: int) -> int:
         # 若範圍只有一個值，直接回傳，不需要詢問
         if lo == hi:
             notify(f"  {prompt}：{lo}（自動填入）")
             return lo
         while True:
-            # try:  # 因套用pygame而調整
-            #     val = int(input(prompt))
-            #     if lo <= val <= hi:
-            #         return val
-            #     print(f"  請輸入 {lo} ~ {hi} 之間的整數。")
-            # except ValueError:
-            #     print("  請輸入數字！")
-            raw = ask_text(f"{prompt}（請輸入 {lo}~{hi} 的整數）")
+            raw = await ask_text(f"{prompt}（請輸入 {lo}~{hi} 的整數）")
             try:
                 val = int(raw)
                 if lo <= val <= hi:

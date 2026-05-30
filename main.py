@@ -7,16 +7,40 @@
 #   - print() 改為 ui.notify()；display_status 改為 ui.set_player()
 # ============================================================
 
-import threading
-import random
+print("[DEBUG] main.py top-level start")
 
-import ui
-from ui import notify_gameover
-from character import Character, TALENTS, DRAWBACKS, DE_LEVELS
-from turn_engine import TurnEngine
-from event_system import EventSystem
-from skill_system import SkillSystem
-from shop_V03 import Shop
+import asyncio
+import random
+import pygame   # 必須在 main.py 直接 import，讓 pygbag 偵測到需要預載 pygame WebAssembly
+
+print("[DEBUG] stdlib imported OK")
+
+try:
+    import ui
+    print("[DEBUG] ui imported OK")
+except Exception as e:
+    print(f"[DEBUG] ui import FAILED: {e}")
+
+try:
+    from ui import notify_gameover
+    from character import Character, TALENTS, DRAWBACKS, DE_LEVELS
+    print("[DEBUG] character imported OK")
+except Exception as e:
+    print(f"[DEBUG] character import FAILED: {e}")
+
+try:
+    from turn_engine import TurnEngine
+    print("[DEBUG] turn_engine imported OK")
+except Exception as e:
+    print(f"[DEBUG] turn_engine import FAILED: {e}")
+
+try:
+    from event_system import EventSystem
+    from skill_system import SkillSystem
+    from shop_V03 import Shop
+    print("[DEBUG] event/skill/shop imported OK")
+except Exception as e:
+    print(f"[DEBUG] event/skill/shop import FAILED: {e}")
 
 # ── DEV 模式開關 ────────────────────────────────────────────────
 # 目前已關閉。還原方法：
@@ -26,16 +50,15 @@ from shop_V03 import Shop
 DEBUG = False
 
 
-def game_main():
+async def game_main():
     """
-    遊戲邏輯主函式，在背景執行緒中執行。
-    所有 ui.notify() / ui.ask_*() 呼叫都是執行緒安全的阻塞呼叫，
-    邏輯順序與原版完全相同。
+    遊戲邏輯主協程，與 run_ui() 協程並行運行。
+    所有 ui.ask_*() 呼叫都是 async 函式，透過 await 讓出控制權給 UI 迴圈。
     外層 while 迴圈支援「再來一次」重玩。
     """
     while True:
         # ── 等待玩家點擊「開始遊戲」────────────────────────
-        ui.wait_start()
+        await ui.wait_start()
 
         # print("=" * 50)  # 因套用pygame而調整
         ui.notify("=" * 50)
@@ -81,12 +104,12 @@ def game_main():
             if not game_over:
                 engine.final_settlement()
             ui.notify_end()
-            ui.wait_restart()
+            await ui.wait_restart()
             ui.reset_ui()
             continue
 
         # ── 步驟 1：建立角色 ──────────────────────────────────
-        player = Character.create_new()
+        player = await Character.create_new()
         ui.set_player(player)
 
         # ── 步驟 2：建立各大子系統 ───────────────────────────
@@ -101,7 +124,7 @@ def game_main():
         )
 
         # ── 步驟 2.5：詢問是否跳過新手教學 ──────────────────
-        skip_tutorial = ui.ask_yn(
+        skip_tutorial = await ui.ask_yn(
             "要跳過新手教學嗎？",
             yes_label="直接開始",
             no_label="觀看教學",
@@ -125,7 +148,7 @@ def game_main():
             ui.set_week(week)
             if week > 1:
                 ui.trigger_ripple()   # 週次切換漣漪轉場
-            game_over = engine.run_week(week)
+            game_over = await engine.run_week(week)
 
             if game_over:
                 # print("\n💀 遊戲結束：你沒能撐過這學期……")  # 因套用pygame而調整
@@ -135,21 +158,20 @@ def game_main():
 
         else:
             # ── 步驟 4：期末結算（16 週正常完成）────────────
-            engine.final_settlement()
+            await engine.final_settlement()
 
         # ── 步驟 5：切換結束畫面，等待玩家決定────────────
         if premature_gameover:
             ui.notify_gameover()   # Game Over 畫面（黑幕 → 背景圖 + 剪影）
         else:
             ui.notify_end()        # 正常結算畫面
-        ui.wait_restart()
+        await ui.wait_restart()
         ui.reset_ui()   # 清除 log 與狀態，準備下一局
 
 
-if __name__ == "__main__":
-    # 遊戲邏輯跑在 daemon 執行緒：視窗關閉時自動結束
-    t = threading.Thread(target=game_main, daemon=True)
-    t.start()
+async def main():
+    """頂層協程：同時啟動遊戲邏輯與 UI 迴圈。"""
+    asyncio.ensure_future(game_main())   # 遊戲邏輯協程進入排程
+    await ui.run_ui()                    # UI 主迴圈（每幀 await asyncio.sleep(0)）
 
-    # 主執行緒交給 pygame（必須在主執行緒，pygame 的限制）
-    ui.run_ui()
+asyncio.run(main())

@@ -104,13 +104,13 @@ class Shop:
             }
         ]
 
-    def open_shop(self):
+    async def open_shop(self):
         """
         開啟商店介面（使用 pygame 圖形化 UI）。
         購買邏輯由 ui.py 事件處理器直接套用，此處只負責啟動與結束。
         """
         notify("\n🏪 前往道具店選購！")
-        open_shop_ui(self.items, event_sys=self.event_sys)
+        await open_shop_ui(self.items, event_sys=self.event_sys)
         notify("👋 謝謝光臨道具店，歡迎下次再來！")
 
     def _buy_item(self, item):

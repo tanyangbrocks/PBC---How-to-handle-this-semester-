@@ -3,12 +3,13 @@
 # ============================================================
 # 與 turn_engine_origin.py 的差異：
 #   - 所有 print() 改為 notify()
-#   - 所有 input() 改為 ask_yn() / ask_choice() / ask_text()
+#   - 所有 input() 改為 await ask_yn() / await ask_choice() / ask_text()
 #   - 移除 time.sleep()（pygame 不需要假暫停）
 #   - 不需要狀態機：執行緒模型下 ask_* 本身就是阻塞等待，
 #     線性流程完全保留
 # ============================================================
 
+import asyncio
 import random
 
 from character import Character
@@ -159,22 +160,22 @@ class TurnEngine:
 
         self.show_tutorial = True  # 第一週是否顯示新手教學（由 main.py 設定）
 
-    def run_week(self, week: int) -> bool:
+    async def run_week(self, week: int) -> bool:
         player = self.player
 
         self.event_sys.reset_weekly_count()   # 每週開始重置突發事件計數
 
         if week == 8:
-            self._midterm_week()
+            await self._midterm_week()
         elif week == 16:
-            self._final_week()
+            await self._final_week()
         else:
-            self._normal_week(week)
-            self.event_sys.roll_green_hat(week)   # 被戴綠帽：週末獨立觸發
+            await self._normal_week(week)
+            await self.event_sys.roll_green_hat(week)   # 被戴綠帽：週末獨立觸發
 
         self.event_sys.tick_debuffs()             # 週末 debuff 計時（所有週）
         game_over = player.is_game_over()         # 在週末結語回復滿足感前先擷取
-        self._end_of_week_reflection(week)
+        await self._end_of_week_reflection(week)
         player.tick_status_effects()
 
         return game_over
@@ -182,7 +183,7 @@ class TurnEngine:
     # ============================================================
     # 普通週
     # ============================================================
-    def _apply_extra_events(self) -> int:
+    async def _apply_extra_events(self) -> int:
         """週開始時觸發所有額外事件；回傳本週額外時間消耗總量。"""
         from character import EXTRA_EVENTS
         player  = self.player
@@ -210,11 +211,11 @@ class TurnEngine:
                 play_sfx("benkirb-shine-11-268907")
             elif ev_id == "club":
                 play_sfx("benkirb-shine-6-268910")
-            show_extra_event_popup(lines or ["（本週生效）"], ev["name"],
+            await show_extra_event_popup(lines or ["（本週生效）"], ev["name"],
                                    ev.get("popup_color", (155, 100, 50)))
         return total_t
 
-    def _normal_week(self, week: int):
+    async def _normal_week(self, week: int):
         player = self.player
 
         # 每週開始體力回滿
@@ -223,12 +224,12 @@ class TurnEngine:
         notify(f"\n📅 【第 {week} 週 行事曆提示】")
 
         # ── 週前劇情（台詞、選擇、事件）──────────────────────
-        self._pre_action_narrative(week)
+        await self._pre_action_narrative(week)
 
         # ── 額外事件（第 2 週起）──────────────────────────
         extra_cost = 0
         if week > 1:
-            extra_cost = self._apply_extra_events()
+            extra_cost = await self._apply_extra_events()
 
         # ── 點名事件（特定週次：額外事件後、滿意度判定前）────
         roll_call_course = None
@@ -247,7 +248,7 @@ class TurnEngine:
                 play_sfx("freesound_community-power-down-7103")
             elif name == "神采奕奕":
                 play_sfx("faith_mulato-shine-193240")
-            show_extra_event_popup([msg], f"【{name}】", color)
+            await show_extra_event_popup([msg], f"【{name}】", color)
 
         # ── 計算本週可支配時間（狀態乘數已套用）──────────────
         time_units = max(1, player.get_effective_time() - extra_cost)
@@ -270,7 +271,7 @@ class TurnEngine:
             set_time(remaining_time)
 
             # choice = get_player_choice(ACTIONS)  # 因套用pygame而調整
-            choice = ask_choice(ACTIONS)
+            choice = await ask_choice(ACTIONS)
 
             if choice == 0:
                 break
@@ -295,13 +296,13 @@ class TurnEngine:
                         for c in all_courses
                     )
                     if _all_done:
-                        show_extra_event_popup(
+                        await show_extra_event_popup(
                             ["你已經沒有課可以翹啦！"],
                             "翹課",
                             (200, 80, 80),
                         )
                         continue
-                    chosen_course = ask_skip_class_popup(
+                    chosen_course = await ask_skip_class_popup(
                         all_courses, skipped_this_week, attended_this_week
                     )
                     if chosen_course is None:
@@ -317,7 +318,7 @@ class TurnEngine:
                 # ── 熬夜：每週上限 5 次 ───────────────────────────
                 if sa["id"] == "pull_allnighter":
                     if allnighter_count >= 5:
-                        show_extra_event_popup(
+                        await show_extra_event_popup(
                             ["你已經連續熬了好幾天，身體再也撐不住了。"],
                             "你沒辦法再熬夜了！",
                             (200, 80, 50),
@@ -325,7 +326,7 @@ class TurnEngine:
                         continue
                     # ── 低體力警告 ────────────────────────────────
                     if player.stamina < 10:
-                        if not ask_yn(
+                        if not await ask_yn(
                             "體力不足，繼續熬夜將會生病！確定要繼續嗎？",
                             yes_label="硬撐到底",
                             no_label="算了",
@@ -351,13 +352,13 @@ class TurnEngine:
 
             # 道具店：不消耗時間單位，直接開店再回到行動選單
             if action["id"] == "shop":
-                self.shop.open_shop()
+                await self.shop.open_shop()
                 continue
 
             # 時間即將耗盡（本行動會使時間變成負數）→ 警告確認
             if remaining_time - 1 < 0:
                 trigger_time_overflow_warning()   # 震動 + damage6
-                confirm = ask_yn(
+                confirm = await ask_yn(
                     "本週時間已耗盡",
                     yes_label="稍等一下",
                     no_label="結束本週",
@@ -379,7 +380,7 @@ class TurnEngine:
                 break
 
             if action["stamina_cost"] > player.stamina:
-                confirm = ask_yn(
+                confirm = await ask_yn(
                     f"體力剩餘 {player.stamina} 點，執行此行動可能會導致生病！",
                     yes_label="仍要執行",
                     no_label="還是算了",
@@ -388,7 +389,7 @@ class TurnEngine:
                 if not confirm:
                     continue
 
-            _chosen_subj = self._execute_action(action)
+            _chosen_subj = await self._execute_action(action)
             if action["id"] == "attend_class":
                 attended_class = True
                 if _chosen_subj:
@@ -397,7 +398,7 @@ class TurnEngine:
                 if roll_call_course and not roll_call_skipped:
                     if roll_call_course in attended_this_week:
                         set_roll_call_attended(True)
-            self.event_sys.roll_event_after_action(week)   # 行動後突發事件
+            await self.event_sys.roll_event_after_action(week)   # 行動後突發事件
             remaining_time -= 1
             set_time(remaining_time)
 
@@ -424,7 +425,7 @@ class TurnEngine:
                     notify(f"⚠️  【{roll_call_course}】翹課缺席！課堂參與度 -10。")
                 else:
                     notify(f"⚠️  【{roll_call_course}】點名缺席！課堂參與度 -10。")
-                ask_ok(
+                await ask_ok(
                     f"⚠️ 你沒有去【{roll_call_course}】點名，被扣出席分！\n課堂參與度 -10"
                 )
             clear_roll_call()
@@ -465,15 +466,15 @@ class TurnEngine:
                  + random.randint(*rand_range))
         return max(0, min(100, score))
 
-    def _pre_action_narrative(self, week: int):
+    async def _pre_action_narrative(self, week: int):
         """每週行動選單出現前的劇情、台詞與互動選擇。"""
         player = self.player
 
         if week == 1:
-            tell_story(["新的一學期又開始了，帶著暑假的好心情來上課。"])
-            notify_timetable(self._WEEK1_TIMETABLE)
+            await tell_story(["新的一學期又開始了，帶著暑假的好心情來上課。"])
+            await notify_timetable(self._WEEK1_TIMETABLE)
             if self.show_tutorial:
-                show_extra_event_popup(
+                await show_extra_event_popup(
                     [
                         "左側面板是本週可選的行動。",
                         "每次行動消耗 1 個時間格。",
@@ -485,7 +486,7 @@ class TurnEngine:
                     "新手教學①：行動系統",
                     (70, 55, 130),
                 )
-                show_extra_event_popup(
+                await show_extra_event_popup(
                     [
                         "體力：執行行動的消耗來源。",
                         "  歸零會生病，效率大幅下降。",
@@ -498,7 +499,7 @@ class TurnEngine:
                     "新手教學②：主要數值",
                     (70, 55, 130),
                 )
-                show_extra_event_popup(
+                await show_extra_event_popup(
                     [
                         "第 8 週有期中考、第 16 週有期末考。",
                         "各占總成績 30%，是決定結局的關鍵。",
@@ -512,51 +513,51 @@ class TurnEngine:
                     "新手教學③：考試與目標",
                     (70, 55, 130),
                 )
-            tell_story([
+            await tell_story([
                 "「吼呦，雖然大部分的課是我自己選的，不過這學期的課表看起來也太無聊了吧！」",
                 "上課時太無聊，眼睛快要闔起來了，下課時要不要去商店裡繞一繞？",
             ])
-            if ask_yn("要前往道具店嗎？"):
-                self.shop.open_shop()
-            tell_story(["「天啊這禮拜忘記去加簽了，只能下禮拜再去了TT」"])
+            if await ask_yn("要前往道具店嗎？"):
+                await self.shop.open_shop()
+            await tell_story(["「天啊這禮拜忘記去加簽了，只能下禮拜再去了TT」"])
 
         elif week == 2:
-            tell_story([
+            await tell_story([
                 "因為上週忘記去加簽，加簽大地開始！",
                 "「太晚才想到了，目前還能加簽的課還有這些，要去簽什麼課啊？」",
             ])
             labels = [f"{c['name']}（{c['credits']} 學分）" for c in self._WEEK2_COURSES]
-            choice = ask_choice(labels)
+            choice = await ask_choice(labels)
             if choice > 0:
                 course = self._WEEK2_COURSES[choice - 1]
                 self._week2_course = course
                 # 將加簽科目納入熟練度系統（若尚未存在則以 0 初始化）
                 if course["name"] not in player.subject_exp:
                     player.subject_exp[course["name"]] = 0
-                tell_story([f"努力跑了好多課程，最後加簽成功科目有：{course['name']}。"])
+                await tell_story([f"努力跑了好多課程，最後加簽成功科目有：{course['name']}。"])
                 if course["name"] == "資訊管理導論":
                     self.skill_sys.gain_exp("綜合", 5)
             else:
                 self._week2_course = {"name": "（無）", "credits": 0}
-                tell_story(["猶豫了一下，最後還是沒有加任何課。"])
+                await tell_story(["猶豫了一下，最後還是沒有加任何課。"])
 
         elif week == 3:
-            tell_story([
+            await tell_story([
                 "開始進入學期節奏。",
                 "「課表看起來還可以，但每天還是莫名很累。」",
                 "「有人已經默默開始翹課了。」",
             ])
 
         elif week == 4:
-            tell_story([
+            await tell_story([
                 "⚠️ 小考來臨(1)！",
                 "「原本想說作業應該不難，結果一打開發現要求比想像中還多。」",
                 "「都忘記這份作業居然要交三千字讀書心得，我完了。」",
                 "「等一下，居然還有兩個小考嗎！根本讀不完啊！」",
                 "「這幾天都要熬夜了，要先去商店看一下有什麼道具可以用嗎？」",
             ])
-            if ask_yn("要前往道具店嗎？"):
-                self.shop.open_shop()
+            if await ask_yn("要前往道具店嗎？"):
+                await self.shop.open_shop()
             # 計算並儲存小考一分數
             self._quiz1_score = self._calc_quiz_score(base=40, rand_range=(-5, 5))
             player.grades["小考"] = max(player.grades["小考"], float(self._quiz1_score))
@@ -564,24 +565,24 @@ class TurnEngine:
                 player.change_satisfaction(5)
             else:
                 player.change_satisfaction(-8)
-            tell_story(["助教：『小考成績約兩週後公布，請大家到時候留意 NTU COOL 的通知。』"])
+            await tell_story(["助教：『小考成績約兩週後公布，請大家到時候留意 NTU COOL 的通知。』"])
 
         elif week == 5:
-            tell_story([
+            await tell_story([
                 "⚡ 緊急狀況：作業和小考成績公布(1)！",
                 "「行事曆上的待辦事項開始變多，每次都覺得有東西快到期了。」",
                 "「原本以為還很閒，結果發現突然多了好多事情。欸？等等。」",
             ])
             self._hw_scores.append(90.0)
             player.grades["作業"] = sum(self._hw_scores) / len(self._hw_scores)
-            notify_grade_report([
+            await notify_grade_report([
                 {"name": "小考一", "score": self._quiz1_score},
                 {"name": "作業一", "score": 90},
             ], sfx="grade_reveal")
             player.revealed_grades.update(["作業", "小考"])
 
         elif week == 6:
-            tell_story([
+            await tell_story([
                 "系上聚餐。",
                 "「朋友突然拉你去參加系上聚餐，原本只想待一下，結果不知不覺玩到很晚。」",
             ])
@@ -589,51 +590,51 @@ class TurnEngine:
             player.consume_stamina(5)
 
         elif week == 7:
-            tell_story([
+            await tell_story([
                 "期中前夕，備考中。",
                 "「明明早八遲到了二十分鐘，但我居然是第五個到教室的。」",
                 "「來上課的人真的少了好多，而且圖書館變得好難找位置。」",
             ])
-            show_extra_event_popup(
+            await show_extra_event_popup(
                 ["下週就要考試了，建議考前保留體力，避免考前出現意外！"],
                 "📋 期中考前提醒",
                 (180, 130, 30),
             )
 
         elif week == 9:
-            tell_story([
+            await tell_story([
                 "🎉 系學會會長在群組裡公告招工事宜。",
                 "「好朋友問你想不想一起當工人。」",
             ])
-            if ask_yn("要答應幫忙辦活動嗎？"):
+            if await ask_yn("要答應幫忙辦活動嗎？"):
                 player.luck += 10
                 player.consume_stamina(8)
-                job_choice = ask_choice(["美宣：畫超級漂亮的圖",
+                job_choice = await ask_choice(["美宣：畫超級漂亮的圖",
                                          "公關：寫文案、和廠商對接",
                                          "現場工人：搬東西、場佈、場復"])
                 if job_choice == 1:
                     self._week9_job = "美宣"
                     player.change_satisfaction(10)
-                    tell_story(["✨ 答應成為工人！運氣 +10，體力 -8。",
+                    await tell_story(["✨ 答應成為工人！運氣 +10，體力 -8。",
                                  "「你運用了你的美術天分，大家都說你畫的圖很棒！滿足感 +10。」"])
                 elif job_choice == 2:
                     self._week9_job = "公關"
                     player.luck += 5
                     player.change_satisfaction(8)
-                    tell_story(["✨ 答應成為工人！運氣 +10，體力 -8。",
+                    await tell_story(["✨ 答應成為工人！運氣 +10，體力 -8。",
                                  "「你動用了你的社交技能，和廠商對接超順利！運氣 +5，滿足感 +8。」"])
                 else:
                     self._week9_job = "現場工人"
                     player.consume_stamina(5)
                     player.change_satisfaction(5)
-                    tell_story(["✨ 答應成為工人！運氣 +10，體力 -8。",
+                    await tell_story(["✨ 答應成為工人！運氣 +10，體力 -8。",
                                  "「你負責搬東西、場佈、場復，累翻了但活動很成功！體力 -5，滿足感 +5。」"])
             else:
-                tell_story(["🛏️ 決定把時間留給自己，好好休息。"])
+                await tell_story(["🛏️ 決定把時間留給自己，好好休息。"])
                 player.change_satisfaction(3)
 
         elif week == 10:
-            tell_story([
+            await tell_story([
                 "學期已經過了一半，大家開始討論暑假的規劃。",
                 "「朋友已經開始在討論暑假實習、雙主修和交換學生了。」",
                 "同學：「你有想好暑假要幹嘛了嗎？」",
@@ -641,14 +642,14 @@ class TurnEngine:
             ])
 
         elif week == 11:
-            tell_story([
+            await tell_story([
                 "分組報告地獄開始。",
                 "「組員想要約時間討論，但大家的空堂完全對不上。」",
                 "「有人完全消失，在群組裡潛水，也有人凌晨兩點還在改簡報。」",
             ])
 
         elif week == 12:
-            tell_story([
+            await tell_story([
                 "⚠️ 小考來臨(2)！",
                 "「最近常常一邊吃飯一邊看 NTU COOL，深怕又漏掉什麼公告。」",
                 "「睡眠時間太混亂了，有時甚至不知道今天星期幾。」",
@@ -661,17 +662,17 @@ class TurnEngine:
                 player.change_satisfaction(5)
             else:
                 player.change_satisfaction(-8)
-            tell_story([
+            await tell_story([
                 "「考完小考後，大家開始討論題目。」",
                 "「欸？我剛才有寫到這題嗎？」",
             ])
 
         elif week == 13:
-            tell_story([
+            await tell_story([
                 "⚠️ 停修期限截止在即！",
                 "「天啊我的成績看起來超不妙，還是在停修截止前，趕快停修呢？」",
             ])
-            if ask_yn("要停修嗎？"):
+            if await ask_yn("要停修嗎？"):
                 # 動態建立選項清單：固定科目查表，加簽課使用通用說明
                 _fixed_courses = set(_WITHDRAWAL_DESC.keys()) - {"_ADDON"}
                 _opts = [
@@ -680,19 +681,19 @@ class TurnEngine:
                     for cname in player.subject_exp
                     if cname != "綜合"
                 ]
-                chosen_course = ask_withdrawal_popup(_opts)
+                chosen_course = await ask_withdrawal_popup(_opts)
                 del player.subject_exp[chosen_course]
                 player.withdrawn_courses.append(chosen_course)
                 player.restore_stamina(10)
                 player.luck = max(0, player.luck - 10)
-                tell_story([f"💥 停修【{chosen_course}】完成！體力 +10，但運氣 -10。"])
+                await tell_story([f"💥 停修【{chosen_course}】完成！體力 +10，但運氣 -10。"])
             else:
                 player.change_satisfaction(5)
-                tell_story(["💪 決定硬著頭皮撐下去！自我滿意度 +5。"])
-            tell_story(["「無論是否停修，每堂課教授都在提醒：『距離期末只剩幾週了，大家要開始讀書囉！』」"])
+                await tell_story(["💪 決定硬著頭皮撐下去！自我滿意度 +5。"])
+            await tell_story(["「無論是否停修，每堂課教授都在提醒：『距離期末只剩幾週了，大家要開始讀書囉！』」"])
 
         elif week == 14:
-            tell_story([
+            await tell_story([
                 "🔥 期末報告和作業爆炸！",
                 "「簡報、報告、期末作業突然一起出現，行事曆被排得密密麻麻。」",
                 "「到底要先處理什麼東西啊！」",
@@ -700,7 +701,7 @@ class TurnEngine:
             _w14_costs    = [10, 20, 5]   # 各選項體力消耗（依選項順序）
             _w14_disabled = {i + 1 for i, c in enumerate(_w14_costs)
                              if player.stamina < c}
-            ans = ask_choice([
+            ans = await ask_choice([
                 "製作小組簡報：從零開始排版，完成後作業 70 分，體力 -10",
                 "撰寫個人五千字書面報告：最困難的部分還等著你，完成後作業 85 分，體力 -20",
                 "撰寫個人三千字觀影心得：要先重看一遍電影才能寫，完成後作業 65 分，體力 -5",
@@ -710,31 +711,31 @@ class TurnEngine:
                 player.grades["作業"] = sum(self._hw_scores) / len(self._hw_scores)
                 player.consume_stamina(10)
                 player.change_satisfaction(-3)
-                tell_story(["🤝 順利完成小組簡報，至少不會被組員罵。"])
+                await tell_story(["🤝 順利完成小組簡報，至少不會被組員罵。"])
             elif ans == 2:
                 self._hw_scores.append(85.0)
                 player.grades["作業"] = sum(self._hw_scores) / len(self._hw_scores)
                 player.consume_stamina(20)
                 player.change_satisfaction(-8)
-                tell_story(["📝 瘋狂趕工完成五千字報告！作業成績提升。"])
+                await tell_story(["📝 瘋狂趕工完成五千字報告！作業成績提升。"])
             else:
                 self._hw_scores.append(65.0)
                 player.grades["作業"] = sum(self._hw_scores) / len(self._hw_scores)
                 player.consume_stamina(5)
                 player.change_satisfaction(-2)
-                tell_story(["🎬 重看了一遍電影，心得總算寫完了。"])
-            tell_story(["「唉，小考成績出來了，該來的還是來了。」"])
-            notify_grade_report([{"name": "小考二", "score": self._quiz2_score}], sfx="grade_reveal")
+                await tell_story(["🎬 重看了一遍電影，心得總算寫完了。"])
+            await tell_story(["「唉，小考成績出來了，該來的還是來了。」"])
+            await notify_grade_report([{"name": "小考二", "score": self._quiz2_score}], sfx="grade_reveal")
             player.revealed_grades.add("小考")
 
         elif week == 15:
-            tell_story([
+            await tell_story([
                 "最後衝刺！",
                 "「總圖、社科圖都沒位子，到處都有人在趕報告，去系館看看好了。」",
                 "「系館半夜依然燈火通明，平常大家此起彼落的聊天聲，都變成了敲擊鍵盤的聲音。」",
                 "「大家見面的第一句話從『要一起吃飯嗎』變成『你做完了嗎』。」",
             ])
-            show_extra_event_popup(
+            await show_extra_event_popup(
                 ["下週就要考試了，建議考前保留體力，避免考前出現意外！"],
                 "📋 期末考前提醒",
                 (180, 130, 30),
@@ -742,9 +743,9 @@ class TurnEngine:
 
         else:
             # 其餘週（無特定劇情）
-            tell_story(["🍃 本週校園風平浪靜，照著自己的步調前進吧。"])
+            await tell_story(["🍃 本週校園風平浪靜，照著自己的步調前進吧。"])
 
-    def _execute_action(self, action: dict) -> "str | None":
+    async def _execute_action(self, action: dict) -> "str | None":
         """
         執行普通行動並回傳選定的科目名稱（若無科目選擇則回傳 None）。
         回傳值供 _normal_week 追蹤 attended_this_week。
@@ -811,7 +812,7 @@ class TurnEngine:
             # 讓玩家選擇本次要加強哪一科
             _subj_opts = [s for s in player.subject_exp.keys() if s != "綜合"]
             if _subj_opts:
-                _idx = ask_subject_popup("這次要集中精力在哪一科？", _subj_opts)
+                _idx = await ask_subject_popup("這次要集中精力在哪一科？", _subj_opts)
                 # _idx == 0 表示異常情況，預設第一科
                 _chosen = _subj_opts[(_idx - 1) if _idx > 0 else 0]
             else:
@@ -923,7 +924,7 @@ class TurnEngine:
     # ============================================================
     # 期中 / 期末考
     # ============================================================
-    def _pre_exam_check(self) -> float:
+    async def _pre_exam_check(self) -> float:
         """考前狀態檢測：依體力與運氣以彈窗形式依序提示，玩家確認後才進入考試。"""
         player   = self.player
         modifier = 1.0
@@ -934,7 +935,7 @@ class TurnEngine:
                 and random.random() < 0.4):
             player.change_satisfaction(-15)
             modifier *= 0.5
-            show_extra_event_popup(
+            await show_extra_event_popup(
                 ["趕到考場時時間只剩一半，本次考試總分打 5 折。",
                  "自我滿意度 -15"],
                 "💀 考前熬夜體力不支，睡過頭",
@@ -946,7 +947,7 @@ class TurnEngine:
         if player.luck < 40 and random.random() < 0.3:
             player.change_satisfaction(-8)
             modifier *= 0.85
-            show_extra_event_popup(
+            await show_extra_event_popup(
                 ["滿頭大汗跑進考場，思緒混亂，考試總分打 85 折。",
                  "自我滿意度 -8"],
                 "🔧 騎腳踏車去考場路上爆胎",
@@ -955,14 +956,14 @@ class TurnEngine:
             return modifier
 
         # ── 順利抵達 ─────────────────────────────────────────
-        show_extra_event_popup(
+        await show_extra_event_popup(
             ["發揮出最好的水準吧！"],
             "🍀 一切順利，坐在考場座位上",
             (40, 180, 80),
         )
         return modifier
 
-    def _run_exam_mini_game(self, exam_type: str) -> float:
+    async def _run_exam_mini_game(self, exam_type: str) -> float:
         """考試知識問答：每題以乾淨彈窗呈現（不含 log 背景），
         答題後右側彈出結果訊息並立即播放音效。"""
 
@@ -1004,7 +1005,7 @@ class TurnEngine:
 
         for i, q in enumerate(selected_qs, start=1):
             # 題目以乾淨彈窗呈現：僅顯示題幹，不附帶任何 log
-            ans = ask_exam_question(q["q"], q["options"])
+            ans = await ask_exam_question(q["q"], q["options"])
             if ans == q["a"]:
                 correct_count += 1
                 play_exam_sfx(True)                                       # 答對音效
@@ -1015,7 +1016,7 @@ class TurnEngine:
 
         return correct_count / len(selected_qs)
 
-    def _pre_minigame_ceremony(self, exam_type: str) -> None:
+    async def _pre_minigame_ceremony(self, exam_type: str) -> None:
         """
         形狀小遊戲前的預備儀式：
           1. 切換立繪到考試壓力版（{prefix}_9）
@@ -1025,43 +1026,42 @@ class TurnEngine:
           5. 倒數動畫（準備提示 → 3 → 2 → 1 → 開始！）
           6. 解除立繪覆寫
         """
-        import time
         prefix = get_portrait_prefix()
 
         # 切換立繪（_9 = 考試壓力版；若檔案不存在則保持前一張立繪）
         set_portrait_override(f"{prefix}_9")
-        time.sleep(0.5)   # 遊戲執行緒暫停，pygame 主執行緒持續運行
+        await asyncio.sleep(0.5)   # 讓出控制權給 UI 迴圈，讓立繪淡入後才顯示文字
 
         # 第一句台詞（會自動收起行動面板）
-        tell_story(["即便已經做足準備，考試壓力仍逼得你喘不過氣……"])
+        await tell_story(["即便已經做足準備，考試壓力仍逼得你喘不過氣……"])
 
         # 震動後接第二句台詞（trigger_screen_shake 非阻塞，與 story cmd 同幀觸發）
         trigger_screen_shake()
-        tell_story(["此時考驗的是你的臨場發揮能力！"])
+        await tell_story(["此時考驗的是你的臨場發揮能力！"])
 
         # 倒數動畫（阻塞直到「開始！」淡出）
-        run_pregame_countdown()
+        await run_pregame_countdown()
 
         # 解除立繪覆寫（形狀小遊戲進行中恢復自動選擇邏輯）
         set_portrait_override(None)
 
-    def _midterm_week(self):
+    async def _midterm_week(self):
         player = self.player
 
         notify("\n📋 ═══ 期中考週！═══")
         notify("「每天都有人在便利商店熬夜念書，校園裡瀰漫著咖啡味。」")
         notify("「考完一科後發現下一科根本還沒讀完。」")
 
-        ask_exam_start("準備期中考")
+        await ask_exam_start("準備期中考")
 
-        exam_modifier    = self._pre_exam_check()
+        exam_modifier    = await self._pre_exam_check()
         base_stats_score = self._calculate_exam_score("期中") * 0.5
-        mini_game_rate   = self._run_exam_mini_game("期中")
+        mini_game_rate   = await self._run_exam_mini_game("期中")
         qa_score         = mini_game_rate * 100 * 0.25
         # ── 形狀小遊戲前的預備儀式（立繪 _9 + 台詞 + 倒數）──────
-        self._pre_minigame_ceremony("期中")
+        await self._pre_minigame_ceremony("期中")
         # ─────────────────────────────────────────────────────────
-        minigame_rate    = run_shape_minigame("期中")
+        minigame_rate    = await run_shape_minigame("期中")
         minigame_score   = minigame_rate * 100 * 0.25
 
         total_score = (base_stats_score + qa_score + minigame_score) * exam_modifier
@@ -1071,31 +1071,31 @@ class TurnEngine:
         # ── 週末：成績彈窗公佈 ─────────────────────────────────
         score   = player.grades["期中"]
         sfx_key = "midterm_pass" if score >= 60 else "midterm_fail"
-        notify_grade_report([{"name": "期中考", "score": score}], sfx=sfx_key)
+        await notify_grade_report([{"name": "期中考", "score": score}], sfx=sfx_key)
 
         if score >= 60:
-            tell_story(["「期中考及格了，看來這幾週的努力果然還是有成果！」"])
+            await tell_story(["「期中考及格了，看來這幾週的努力果然還是有成果！」"])
             player.change_satisfaction(10)
         else:
-            tell_story(["「期中考沒有及格，接下來應該怎麼辦呢……」"])
+            await tell_story(["「期中考沒有及格，接下來應該怎麼辦呢……」"])
             player.change_satisfaction(-15)
 
-    def _final_week(self):
+    async def _final_week(self):
         player = self.player
 
         # print("\n🎯 ═══ 期末考週！（最終關卡）═══")  # 因套用pygame而調整
         notify("\n🎯 ═══ 期末考週！（最終關卡）═══")
 
-        ask_exam_start("準備期末考")
+        await ask_exam_start("準備期末考")
 
-        exam_modifier    = self._pre_exam_check()
+        exam_modifier    = await self._pre_exam_check()
         base_stats_score = self._calculate_exam_score("期末") * 0.5
-        mini_game_rate   = self._run_exam_mini_game("期末")
+        mini_game_rate   = await self._run_exam_mini_game("期末")
         qa_score         = mini_game_rate * 100 * 0.25
         # ── 形狀小遊戲前的預備儀式（立繪 _9 + 台詞 + 倒數）──────
-        self._pre_minigame_ceremony("期末")
+        await self._pre_minigame_ceremony("期末")
         # ─────────────────────────────────────────────────────────
-        minigame_rate    = run_shape_minigame("期末")
+        minigame_rate    = await run_shape_minigame("期末")
         minigame_score   = minigame_rate * 100 * 0.25
 
         total_score = (base_stats_score + qa_score + minigame_score) * exam_modifier
@@ -1162,7 +1162,7 @@ class TurnEngine:
         16: "這學期終於結束了，好感動。",
     }
 
-    def _end_of_week_reflection(self, week: int):
+    async def _end_of_week_reflection(self, week: int):
         notify("\n💭 【週末內心總結】")
         player = self.player
 
@@ -1197,9 +1197,9 @@ class TurnEngine:
         if quote:
             story_lines.append(f"「{quote}」")
         story_lines.append(f"「{outcome_text}」")
-        tell_story(story_lines)
+        await tell_story(story_lines)
 
-    def final_settlement(self):
+    async def final_settlement(self):
         player      = self.player
         final_score = player.calculate_final_score()
 
