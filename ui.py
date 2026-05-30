@@ -807,11 +807,11 @@ async def run_ui():
     # ── 初始化音效 ────────────────────────────────────────────
     try:
         import sys as _sys_m
-        # 44100 Hz on all platforms; browser Web Audio API handles resampling natively
-        # WASM 用 22050 Hz：OGG 檔以 22050 Hz 編碼，不需 resample，避免 decoder 失真
-        # 桌面用 44100 Hz：標準高品質
+        # 所有 OGG 原始編碼為 44100Hz（已驗證，dropping.ogg 為 48000Hz）。
+        # WASM 和桌面都用 44100Hz：pygame 無需 resample，SDL2 → Web Audio API 直送。
+        # （之前誤設 22050Hz，導致 pygame 把 44100→22050 降頻 → 失真）
         # tab 切換造成的 AudioContext suspend/resume 由 patch_index.py 的 Page Visibility fix 處理
-        _freq = 22050 if _sys_m.platform == "emscripten" else 44100
+        _freq = 44100
         _buf  = 2048  if _sys_m.platform == "emscripten" else 512
         pygame.mixer.init(frequency=_freq, size=-16, channels=2, buffer=_buf)
         # WASM：減少 channel 數量降低音訊處理負載
@@ -1531,9 +1531,13 @@ async def run_ui():
             )
             if _draw_cp:
                 _choice_popup_rects.clear()
-                _choice_popup_rects.extend(
-                    _draw_choice_popup(screen, fm, fs, _mode[0], _choices,
-                                       _log, _prompt[0], _yn_labels, mpos))
+                try:
+                    _choice_popup_rects.extend(
+                        _draw_choice_popup(screen, fm, fs, _mode[0], _choices,
+                                           _log, _prompt[0], _yn_labels, mpos))
+                except Exception as _e:
+                    print(f"[DBG] _draw_choice_popup ERROR: {type(_e).__name__}: {_e}")
+                    import traceback; traceback.print_exc()
             else:
                 _choice_popup_rects.clear()
             # 行動結果彈出視窗（上方由上而下滑入，畫在考試遮罩之上）
@@ -1541,8 +1545,12 @@ async def run_ui():
             # 突發事件通知彈窗（單按鈕，最上層）
             if _mode[0] == "event_ok":
                 _event_ok_popup_rects.clear()
-                _event_ok_popup_rects.extend(
-                    _draw_event_ok_popup(screen, fm, fs, mpos))
+                try:
+                    _event_ok_popup_rects.extend(
+                        _draw_event_ok_popup(screen, fm, fs, mpos))
+                except Exception as _e:
+                    print(f"[DBG] _draw_event_ok_popup ERROR: {type(_e).__name__}: {_e}")
+                    import traceback; traceback.print_exc()
             else:
                 _event_ok_popup_rects.clear()
             # 翹課選課彈出視窗（蓋在所有遊戲 UI 之上）

@@ -256,12 +256,25 @@ function __cc_show(prompt) {
   ov.style.zIndex   = '2147483647';  // INT_MAX：確保蓋過 canvas
   var cv = document.getElementById('canvas');
   if (cv) {
-    cv._oldPe = cv.style.pointerEvents;
-    cv._oldZ  = cv.style.zIndex;
+    cv._oldPe  = cv.style.pointerEvents;
+    cv._oldZ   = cv.style.zIndex;
+    cv._oldTab = cv.getAttribute('tabindex');
     cv.style.pointerEvents = 'none';
-    cv.style.zIndex = '1';  // 強制 canvas 沉底
+    cv.style.zIndex = '1';        // 強制 canvas 沉底（視覺層）
+    cv.setAttribute('tabindex', '-1');  // 移出 tab 焦點鏈（阻止 SDL2 搶鍵盤）
+    // 阻截 canvas 的鍵盤事件（IME composition 時 SDL2 不要搶走）
+    cv._imeKeyBlock = function(e){ e.stopPropagation(); };
+    cv.addEventListener('keydown',  cv._imeKeyBlock, true);
+    cv.addEventListener('keypress', cv._imeKeyBlock, true);
+    cv.addEventListener('keyup',    cv._imeKeyBlock, true);
+    cv.blur();  // 強制 canvas 失焦
   }
-  setTimeout(function(){ inp.focus(); inp.select(); }, 80);
+  // 延遲 focus：確保 canvas blur 生效後再聚焦 input
+  setTimeout(function(){
+    inp.focus();
+    inp.click();   // 在部分瀏覽器觸發 IME 啟動
+    inp.select();
+  }, 120);
 }
 function __cc_submit() {
   var val = (document.getElementById('__cc_inp').value || '').trim();
@@ -270,7 +283,20 @@ function __cc_submit() {
   var cv = document.getElementById('canvas');
   if (cv) {
     cv.style.pointerEvents = cv._oldPe || '';
-    cv.style.zIndex = cv._oldZ || '';  // 還原 canvas z-index
+    cv.style.zIndex = cv._oldZ || '';
+    // 移除 IME 期間的鍵盤攔截
+    if (cv._imeKeyBlock) {
+      cv.removeEventListener('keydown',  cv._imeKeyBlock, true);
+      cv.removeEventListener('keypress', cv._imeKeyBlock, true);
+      cv.removeEventListener('keyup',    cv._imeKeyBlock, true);
+      delete cv._imeKeyBlock;
+    }
+    // 還原 tabindex，讓 SDL2 重新接管鍵盤
+    if (cv._oldTab !== null && cv._oldTab !== undefined) {
+      cv.setAttribute('tabindex', cv._oldTab);
+    } else {
+      cv.removeAttribute('tabindex');
+    }
     cv.focus();
   }
   try {
