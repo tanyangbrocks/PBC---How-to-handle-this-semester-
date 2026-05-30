@@ -165,6 +165,66 @@ html = html.replace(
 )
 print("[patch_index] ✓ browserfs URL 修復（pygame-web CDN 404 → jsdelivr）")
 
+# ── 注入中文 IME overlay（FS bridge 方案，不用 eval polling）────────────
+# Python 呼叫 __cc_show() 一次（await 前），JS 按鈕觸發時直接寫 /tmp/__cc_result.txt
+# Python polling 只用 open() 讀檔，完全不在 await 後呼叫任何 JS，避免死鎖
+IME_OVERLAY = """
+<div id="__cc_ov" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;
+  background:rgba(0,0,0,0.52);z-index:99999;align-items:center;justify-content:center;">
+  <div style="background:#fff9f0;border-radius:16px;padding:30px 36px;min-width:340px;
+    text-align:center;font-family:sans-serif;box-shadow:0 6px 28px rgba(0,0,0,.35);
+    border:2px solid #e8c898;">
+    <p id="__cc_prm" style="font-size:17px;margin:0 0 8px;color:#4a3020;font-weight:bold;"></p>
+    <p style="font-size:12px;margin:0 0 10px;color:#a08060;">（支援繁體中文輸入法）</p>
+    <input type="text" id="__cc_inp" lang="zh-TW" autocomplete="off" spellcheck="false"
+      style="font-size:18px;width:220px;padding:8px 12px;border:2px solid #d0a870;
+      border-radius:8px;background:#fffdf6;color:#3a2010;outline:none;
+      font-family:sans-serif;letter-spacing:2px;">
+    <div style="margin-top:16px;">
+      <button onclick="__cc_submit()" style="padding:8px 30px;font-size:15px;
+        background:#FF9460;color:#fff;border:none;border-radius:8px;
+        cursor:pointer;font-weight:bold;">確認</button>
+    </div>
+  </div>
+</div>
+<script>
+function __cc_show(prompt) {
+  var ov  = document.getElementById('__cc_ov');
+  var inp = document.getElementById('__cc_inp');
+  document.getElementById('__cc_prm').textContent = prompt;
+  inp.value = '';
+  ov.style.display = 'flex';
+  var cv = document.getElementById('canvas');
+  if (cv) { cv._oldPe = cv.style.pointerEvents; cv.style.pointerEvents = 'none'; }
+  setTimeout(function(){ inp.focus(); inp.select(); }, 80);
+}
+function __cc_submit() {
+  var val = (document.getElementById('__cc_inp').value || '').trim();
+  var ov  = document.getElementById('__cc_ov');
+  ov.style.display = 'none';
+  var cv = document.getElementById('canvas');
+  if (cv) { cv.style.pointerEvents = cv._oldPe || ''; cv.focus(); }
+  try {
+    // emscripten FS bridge：直接寫入 WASM 虛擬檔案系統，Python 用 open() 讀取
+    Module.FS.writeFile('/tmp/__cc_result.txt', val);
+  } catch(e) {
+    // fallback：寫到 window property（Python 不需要在 await 後讀，只作備用）
+    window.__cc_result_fb = val;
+    console.warn('[cc_ime] FS.writeFile failed, using fallback:', e);
+  }
+}
+document.addEventListener('DOMContentLoaded', function(){
+  var inp = document.getElementById('__cc_inp');
+  if (inp) inp.addEventListener('keydown', function(e){
+    if (e.key === 'Enter' && !e.isComposing) __cc_submit();
+  });
+});
+</script>
+</body>"""
+
+html = html.replace("</body>", IME_OVERLAY, 1)
+print("[patch_index] ✓ 中文 IME overlay 注入成功（FS bridge 方案）")
+
 with open(INDEX_PATH, "w", encoding="utf-8") as f:
     f.write(html)
 

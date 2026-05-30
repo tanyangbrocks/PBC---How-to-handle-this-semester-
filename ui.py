@@ -409,8 +409,52 @@ def end_char_create():
     _cmd_q.append(("phase", "game"))
 
 async def ask_cc_name(prompt: str) -> str:
-    """顯示姓名輸入 modal，回傳玩家輸入的字串。"""
-    print(f"[DBG] ask_cc_name: 呼叫, prompt={prompt!r}")
+    """顯示姓名輸入 modal，回傳玩家輸入的字串。
+    WASM：FS bridge 方案——JS 寫 /tmp/__cc_result.txt，Python 用 open() 讀（無 eval polling 死鎖）。
+    桌面：pygame cc_name 輸入框（SDL2 IME）。
+    """
+    import sys as _sys_ccn
+    if _sys_ccn.platform == "emscripten":
+        import os
+        _RESULT_FILE = "/tmp/__cc_result.txt"
+        # 清除上次殘留結果
+        try: os.remove(_RESULT_FILE)
+        except FileNotFoundError: pass
+
+        # ① 呼叫 JS 顯示 overlay — 唯一一次 eval()，在任何 await 之前執行
+        _shown = False
+        try:
+            import platform as _plt
+            import json as _jj
+            _plt.window.eval(f"__cc_show({_jj.dumps(prompt)})")
+            _shown = True
+            print("[DBG] ask_cc_name WASM: overlay __cc_show() 呼叫成功")
+        except Exception as _e:
+            print(f"[DBG] ask_cc_name WASM: __cc_show 失敗 {_e}，回退 cc_name 模式")
+
+        if _shown:
+            # ② polling：純 Python open()，不呼叫任何 JS — 無死鎖風險
+            _frame = 0
+            while True:
+                try:
+                    with open(_RESULT_FILE, "r", encoding="utf-8") as _f:
+                        _raw = _f.read()
+                    final = _raw.strip() or "無名氏"
+                    print(f"[DBG] ask_cc_name WASM: 讀到結果 {final!r}（frame={_frame}）")
+                    _cc_reply_val[0]  = final
+                    _cc_reply_ready[0] = True
+                    return final
+                except (FileNotFoundError, OSError):
+                    pass
+                await asyncio.sleep(0)
+                _frame += 1
+                if _frame == 1:
+                    print("[DBG] ask_cc_name WASM: asyncio yield 正常（第 1 幀）")
+                if _frame % 90 == 0:
+                    print(f"[DBG] ask_cc_name WASM: 等待輸入中... frame={_frame}")
+
+    # 桌面（及 WASM overlay 顯示失敗時的 fallback）
+    print(f"[DBG] ask_cc_name: 使用 cc_name 模式, prompt={prompt!r}")
     _cmd_q.append(("cc_name", prompt))
     _cc_reply_ready[0] = False
     print("[DBG] ask_cc_name: cc_name 指令已進 queue，開始等待...")
@@ -420,7 +464,7 @@ async def ask_cc_name(prompt: str) -> str:
         _frame += 1
         if _frame == 1:
             print("[DBG] ask_cc_name: asyncio.sleep(0) 有 yield（第 1 幀）")
-        if _frame % 90 == 0:   # 每 ~3 秒印一次（30fps）
+        if _frame % 90 == 0:
             print(f"[DBG] ask_cc_name: 仍在等待... frame={_frame}")
     print(f"[DBG] ask_cc_name: 收到回應 → {_cc_reply_val[0]!r}")
     return _cc_reply_val[0]
@@ -765,7 +809,7 @@ async def run_ui():
         import sys as _sys_m
         # 44100 Hz on all platforms; browser Web Audio API handles resampling natively
         _freq = 44100
-        _buf  = 2048  if _sys_m.platform == "emscripten" else 512
+        _buf  = 512   # 512 on all platforms — smaller buffer = lower latency, less crackling
         pygame.mixer.init(frequency=_freq, size=-16, channels=2, buffer=_buf)
         # WASM：減少 channel 數量降低音訊處理負載
         if _sys_m.platform == "emscripten":
