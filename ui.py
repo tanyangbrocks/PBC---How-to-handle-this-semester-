@@ -2,9 +2,9 @@
 #  ui_new.py -- Public API + run_ui main loop
 #  by refactor_ui.py  --  rename to ui.py when verified
 # ============================================================
+from __future__ import annotations
 import pygame
-import threading
-import queue
+import asyncio
 import sys
 import os
 import math
@@ -23,7 +23,7 @@ from ui_draw_exam import *
 
 def notify(msg: str):
     """取代 print()：把訊息推入 UI 訊息區。"""
-    _cmd_q.put(("msg", str(msg)))
+    _cmd_q.append(("msg", str(msg)))
     if _notify_capturing[0]:
         _notify_capture_buf.append(str(msg))
 
@@ -41,9 +41,9 @@ def stop_notify_capture() -> list:
 
 def set_player(player):
     """把角色物件傳給 UI，讓狀態欄即時更新。"""
-    _cmd_q.put(("player", player))
+    _cmd_q.append(("player", player))
 
-def ask_choice(options, disabled: set = None) -> int:
+async def ask_choice(options, disabled: set = None) -> int:
     """
     取代 get_player_choice()。
     options:  字串列表 或 帶 'name' key 的字典列表。
@@ -52,24 +52,24 @@ def ask_choice(options, disabled: set = None) -> int:
     回傳：0 = 返回/結束，1..n = 玩家選擇的編號（1-based）。
     """
     labels = [opt["name"] if isinstance(opt, dict) else str(opt) for opt in options]
-    _cmd_q.put(("choices", labels, disabled or set()))
-    _reply_event.clear()
-    _reply_event.wait()
+    _cmd_q.append(("choices", labels, disabled or set()))
+    _reply_ready[0] = False
+    while not _reply_ready[0]: await asyncio.sleep(0)
     return _reply_val[0]
 
-def ask_subject_popup(title: str, options: list) -> int:
+async def ask_subject_popup(title: str, options: list) -> int:
     """
     在畫面中央顯示科目選擇彈出視窗。
     options: 字串列表（或帶 'name' key 的 dict 列表）。
     回傳：1-based 選擇索引（不提供「返回」選項，玩家必須選一科）。
     """
     labels = [opt["name"] if isinstance(opt, dict) else str(opt) for opt in options]
-    _cmd_q.put(("subj_popup", title, labels))
-    _reply_event.clear()
-    _reply_event.wait()
+    _cmd_q.append(("subj_popup", title, labels))
+    _reply_ready[0] = False
+    while not _reply_ready[0]: await asyncio.sleep(0)
     return _reply_val[0]
 
-def ask_withdrawal_popup(options: list) -> str:
+async def ask_withdrawal_popup(options: list) -> str:
     """
     顯示停修選課彈出視窗。阻塞直到玩家選取一科。
     options: [(課程名稱, 說明文字), ...] 清單。
@@ -78,19 +78,19 @@ def ask_withdrawal_popup(options: list) -> str:
     _withdrawal_popup_opts.clear()
     _withdrawal_popup_opts.extend(options)
     _withdrawal_popup_rects.clear()
-    _cmd_q.put(("withdrawal_popup_open",))
-    _reply_event.clear()
-    _reply_event.wait()
+    _cmd_q.append(("withdrawal_popup_open",))
+    _reply_ready[0] = False
+    while not _reply_ready[0]: await asyncio.sleep(0)
     return _reply_val[0]
 
-def ask_text(prompt: str, default: str = "") -> str:
+async def ask_text(prompt: str, default: str = "") -> str:
     """取代自由文字輸入的 input()：顯示輸入框，確認後回傳字串。"""
-    _cmd_q.put(("text", prompt, default))
-    _reply_event.clear()
-    _reply_event.wait()
+    _cmd_q.append(("text", prompt, default))
+    _reply_ready[0] = False
+    while not _reply_ready[0]: await asyncio.sleep(0)
     return _reply_val[0]
 
-def ask_yn(prompt: str,
+async def ask_yn(prompt: str,
            yes_label:  str = "是",
            no_label:   str = "否",
            show_ctx:   bool = True,
@@ -98,47 +98,47 @@ def ask_yn(prompt: str,
            no_color=None) -> bool:
     """取代 y/N 型的 input()：顯示自定義標籤按鈕，回傳 True / False。
     show_ctx=False 時不附帶 log 背景，只顯示 prompt 本身。"""
-    _cmd_q.put(("yn", prompt, yes_label, no_label, show_ctx, yes_color, no_color))
-    _reply_event.clear()
-    _reply_event.wait()
+    _cmd_q.append(("yn", prompt, yes_label, no_label, show_ctx, yes_color, no_color))
+    _reply_ready[0] = False
+    while not _reply_ready[0]: await asyncio.sleep(0)
     return _reply_val[0]
 
-def ask_ok(text: str, btn_label: str = "確認") -> None:
+async def ask_ok(text: str, btn_label: str = "確認") -> None:
     """顯示突發事件通知彈窗（單一按鈕），block 直到玩家確認。
     text 格式：「前綴：【事件名】\\n描述文字」"""
-    _cmd_q.put(("event_ok", text, btn_label))
-    _reply_event.clear()
-    _reply_event.wait()
+    _cmd_q.append(("event_ok", text, btn_label))
+    _reply_ready[0] = False
+    while not _reply_ready[0]: await asyncio.sleep(0)
 
-def ask_exam_start(exam_name: str) -> None:
+async def ask_exam_start(exam_name: str) -> None:
     """在底部行動面板顯示單一「準備期中考」/「準備期末考」大按鈕，
     阻塞直到玩家點擊後才繼續（進入考試流程）。"""
-    _reply_event.clear()
-    _cmd_q.put(("exam_ready", exam_name))
-    _reply_event.wait()
+    _reply_ready[0] = False
+    _cmd_q.append(("exam_ready", exam_name))
+    while not _reply_ready[0]: await asyncio.sleep(0)
 
-def ask_exam_question(prompt: str, options: list) -> int:
+async def ask_exam_question(prompt: str, options: list) -> int:
     """考試題目選擇彈窗：只顯示題幹與選項，不附帶任何 log 背景。
     回傳 1-based 選擇編號。"""
     labels = [opt["name"] if isinstance(opt, dict) else str(opt) for opt in options]
     _exam_q_prompt[0] = prompt
-    _cmd_q.put(("exam_q", labels))
-    _reply_event.clear()
-    _reply_event.wait()
+    _cmd_q.append(("exam_q", labels))
+    _reply_ready[0] = False
+    while not _reply_ready[0]: await asyncio.sleep(0)
     return _reply_val[0]
 
 def play_exam_sfx(correct: bool) -> None:
     """播放考試答題音效（答對/答錯）。可從遊戲執行緒直接呼叫。"""
     _play_sfx("exam_correct" if correct else "event_bad")
 
-def run_shape_minigame(exam_type: str = "期中") -> float:
+async def run_shape_minigame(exam_type: str = "期中") -> float:
     """執行形狀小遊戲，阻塞直到兩回合結束，回傳 0.0–1.0。"""
-    _reply_event.clear()
-    _cmd_q.put(("shape_minigame", exam_type))
-    _reply_event.wait()
+    _reply_ready[0] = False
+    _cmd_q.append(("shape_minigame", exam_type))
+    while not _reply_ready[0]: await asyncio.sleep(0)
     return float(_reply_val[0])
 
-def tell_story(lines: list) -> None:
+async def tell_story(lines: list) -> None:
     """顯示劇情對話框，每次點擊推進一行，全部結束後解除阻塞。
     lines: list of str 或 {"speaker": str, "text": str}。
     傳入 str 時自動偵測說話者：「開頭→我；X：開頭→X；其他→旁白。"""
@@ -152,39 +152,39 @@ def tell_story(lines: list) -> None:
         if 0 < colon_pos <= 5:
             return {"speaker": t[:colon_pos], "text": t}
         return {"speaker": "旁白", "text": t}
-    _cmd_q.put(("story", [_normalize(e) for e in lines]))
-    _reply_event.clear()
-    _reply_event.wait()
+    _cmd_q.append(("story", [_normalize(e) for e in lines]))
+    _reply_ready[0] = False
+    while not _reply_ready[0]: await asyncio.sleep(0)
 
-def wait_start():
+async def wait_start():
     """遊戲執行緒呼叫：阻塞直到玩家點擊「開始遊戲」。"""
-    _start_event.clear()
-    _start_event.wait()
+    _start_ready[0] = False
+    while not _start_ready[0]: await asyncio.sleep(0)
 
 def notify_end():
     """遊戲結束後呼叫：切換到結束畫面。"""
-    _cmd_q.put(("phase", "end"))
+    _cmd_q.append(("phase", "end"))
 
 def notify_gameover():
     """提前 Game Over 時呼叫：切換到 Game Over 畫面（黑幕 → 背景圖 + 剪影）。"""
-    _cmd_q.put(("phase", "gameover"))
+    _cmd_q.append(("phase", "gameover"))
 
 def set_settlement_data(data: dict) -> None:
     """傳入期末結算資料（grades / final_score / comment）供成績單畫面使用。"""
-    _cmd_q.put(("settlement_data", data))
+    _cmd_q.append(("settlement_data", data))
 
-def wait_restart():
+async def wait_restart():
     """阻塞直到玩家點擊「再來一次」。"""
-    _restart_event.clear()
-    _restart_event.wait()
+    _restart_ready[0] = False
+    while not _restart_ready[0]: await asyncio.sleep(0)
 
 def reset_ui():
     """清除上一局的 log 與狀態，供下一局使用。"""
-    _cmd_q.put(("reset", None))
+    _cmd_q.append(("reset", None))
 
 def set_time(n: int):
     """更新底部標籤列的剩餘時間點數字。"""
-    _cmd_q.put(("set_time", n))
+    _cmd_q.append(("set_time", n))
 
 def trigger_time_overflow_warning():
     """
@@ -192,11 +192,11 @@ def trigger_time_overflow_warning():
     剩餘時間點文字紅色閃動 + 左右震動，同時播放 damage6 音效。
     由 turn_engine 在玩家即將將時間扣成負數時呼叫。
     """
-    _cmd_q.put(("time_overflow_warn", None))
+    _cmd_q.append(("time_overflow_warn", None))
 
 def trigger_screen_shake() -> None:
     """觸發全螢幕短暫劇烈晃動效果（突發事件出現時）。非阻塞。"""
-    _cmd_q.put(("screen_shake",))
+    _cmd_q.append(("screen_shake",))
 
 def play_sfx(name: str) -> None:
     """從遊戲執行緒播放指定音效（非阻塞）。"""
@@ -219,28 +219,28 @@ def play_event_sfx(is_positive: bool) -> None:
 
 def was_debug_skip() -> bool:
     """若本次開始是透過 DEV 跳關按鈕觸發，回傳 True 並清除旗標。"""
-    if _debug_skip_event.is_set():
-        _debug_skip_event.clear()
+    if _debug_skip_ready[0]:
+        _debug_skip_ready[0] = False
         return True
     return False
 
 def set_roll_call(course: str) -> None:
     """設定本週點名科目，在成績面板左側顯示警示便利貼。非阻塞。"""
-    _cmd_q.put(("roll_call_set", course))
+    _cmd_q.append(("roll_call_set", course))
 
 def clear_roll_call() -> None:
     """清除點名警示便利貼（週末結算後呼叫）。非阻塞。"""
-    _cmd_q.put(("roll_call_clear",))
+    _cmd_q.append(("roll_call_clear",))
 
 def set_roll_call_attended(attended: bool) -> None:
     """設定本週點名週次是否已執行「正常上課」（動態更新綠勾顯示）。非阻塞。"""
-    _cmd_q.put(("roll_call_attended", attended))
+    _cmd_q.append(("roll_call_attended", attended))
 
 def set_roll_call_xed(xed: bool) -> None:
     """設定點名課是否被翹掉（動態更新紅叉顯示）。非阻塞。"""
-    _cmd_q.put(("roll_call_xed", xed))
+    _cmd_q.append(("roll_call_xed", xed))
 
-def ask_skip_class_popup(courses: list, skipped: set, attended: set) -> "str | None":
+async def ask_skip_class_popup(courses: list, skipped: set, attended: set) -> "str | None":
     """
     顯示翹課選課彈出視窗。阻塞直到玩家選取課名或取消。
     courses: 所有課名清單
@@ -255,122 +255,122 @@ def ask_skip_class_popup(courses: list, skipped: set, attended: set) -> "str | N
     _skip_popup_attended.clear()
     _skip_popup_attended.update(attended)
     _skip_popup_result[0] = None
-    _skip_popup_event.clear()
-    _cmd_q.put(("skip_popup_open",))
-    _skip_popup_event.wait()
+    _skip_popup_ready[0] = False
+    _cmd_q.append(("skip_popup_open",))
+    while not _skip_popup_ready[0]: await asyncio.sleep(0)
     return _skip_popup_result[0]
 
 def set_special_disabled(names: dict) -> None:
     """更新特殊行動的停用狀態。names = {行動名: 倒數格數}（空 dict 表示清除全部）。"""
-    _cmd_q.put(("special_disabled", dict(names)))
+    _cmd_q.append(("special_disabled", dict(names)))
 
 def set_allnighter_count(n: int) -> None:
     """更新本週已熬夜次數（0-5），驅動按鈕右下角計數器。"""
-    _cmd_q.put(("allnighter_count", n))
+    _cmd_q.append(("allnighter_count", n))
 
 def set_week(w: int):
     """由遊戲執行緒呼叫，更新週次輪盤顯示並觸發對應 BGM。"""
     _week[0] = w
-    _cmd_q.put(("bgm_week", w))
+    _cmd_q.append(("bgm_week", w))
 
 def begin_char_create():
     """切換到角色創建畫面（隱藏一般遊戲 UI）。"""
-    _cmd_q.put(("phase", "char_create"))
+    _cmd_q.append(("phase", "char_create"))
 
 def end_char_create():
     """角色創建完成，切回遊戲畫面。"""
-    _cmd_q.put(("phase", "game"))
+    _cmd_q.append(("phase", "game"))
 
-def ask_cc_name(prompt: str) -> str:
+async def ask_cc_name(prompt: str) -> str:
     """顯示姓名輸入 modal，回傳玩家輸入的字串。"""
-    _cmd_q.put(("cc_name", prompt))
-    _cc_reply_event.clear()
-    _cc_reply_event.wait()
+    _cmd_q.append(("cc_name", prompt))
+    _cc_reply_ready[0] = False
+    while not _cc_reply_ready[0]: await asyncio.sleep(0)
     return _cc_reply_val[0]
 
-def ask_cc_portrait() -> str:
+async def ask_cc_portrait() -> str:
     """讓玩家選擇人物外觀（b1 / g1），回傳前綴字串。"""
-    _cc_reply_event.clear()
-    _cmd_q.put(("cc_portrait",))
-    _cc_reply_event.wait()
+    _cc_reply_ready[0] = False
+    _cmd_q.append(("cc_portrait",))
+    while not _cc_reply_ready[0]: await asyncio.sleep(0)
     return _cc_reply_val[0]
 
-def ask_cc_dept(options: list) -> int:
+async def ask_cc_dept(options: list) -> int:
     """顯示系級橫向卡片，回傳 1-based 選擇編號。"""
-    _cmd_q.put(("cc_dept", options))
-    _cc_reply_event.clear()
-    _cc_reply_event.wait()
+    _cmd_q.append(("cc_dept", options))
+    _cc_reply_ready[0] = False
+    while not _cc_reply_ready[0]: await asyncio.sleep(0)
     return _cc_reply_val[0]
 
-def ask_cc_drawbacks(drawbacks: list, max_sel: int = 2) -> list:
+async def ask_cc_drawbacks(drawbacks: list, max_sel: int = 2) -> list:
     """顯示負面特質切換卡片（最多 max_sel 個），回傳已選字典列表。"""
-    _cmd_q.put(("cc_drawbacks", drawbacks, max_sel))
-    _cc_reply_event.clear()
-    _cc_reply_event.wait()
+    _cmd_q.append(("cc_drawbacks", drawbacks, max_sel))
+    _cc_reply_ready[0] = False
+    while not _cc_reply_ready[0]: await asyncio.sleep(0)
     return _cc_reply_val[0]
 
-def ask_cc_stats(total_pts: int, base_pts: int = 0, talent: dict = None, de_level: dict = None) -> tuple:
+async def ask_cc_stats(total_pts: int, base_pts: int = 0, talent: dict = None, de_level: dict = None) -> tuple:
     """顯示能力點分配畫面，回傳 (stamina, intel, luck)。"""
-    _cmd_q.put(("cc_stats", total_pts, base_pts, talent or {}, de_level or {}))
-    _cc_reply_event.clear()
-    _cc_reply_event.wait()
+    _cmd_q.append(("cc_stats", total_pts, base_pts, talent or {}, de_level or {}))
+    _cc_reply_ready[0] = False
+    while not _cc_reply_ready[0]: await asyncio.sleep(0)
     return _cc_reply_val[0]
 
-def ask_cc_de_level(levels: list) -> dict:
+async def ask_cc_de_level(levels: list) -> dict:
     """顯示年級卡片（單選），回傳選中的年級字典。"""
-    _cmd_q.put(("cc_de_level", levels))
-    _cc_reply_event.clear()
-    _cc_reply_event.wait()
+    _cmd_q.append(("cc_de_level", levels))
+    _cc_reply_ready[0] = False
+    while not _cc_reply_ready[0]: await asyncio.sleep(0)
     return _cc_reply_val[0]
 
-def ask_cc_talent(slot_results: list) -> None:
+async def ask_cc_talent(slot_results: list) -> None:
     """觸發拉霸機天賦動畫，3 個結果由呼叫方預先決定。阻塞直到玩家點繼續。"""
-    _cmd_q.put(("cc_slot", list(slot_results)))
-    _cc_reply_event.clear()
-    _cc_reply_event.wait()
+    _cmd_q.append(("cc_slot", list(slot_results)))
+    _cc_reply_ready[0] = False
+    while not _cc_reply_ready[0]: await asyncio.sleep(0)
 
-def ask_cc_extra_events(events_data: list, intel: int) -> list:
+async def ask_cc_extra_events(events_data: list, intel: int) -> list:
     """顯示額外事件選擇畫面，回傳選中的事件 ID 列表。"""
-    _cmd_q.put(("cc_extra", list(events_data), intel))
-    _cc_reply_event.clear()
-    _cc_reply_event.wait()
+    _cmd_q.append(("cc_extra", list(events_data), intel))
+    _cc_reply_ready[0] = False
+    while not _cc_reply_ready[0]: await asyncio.sleep(0)
     return _cc_reply_val[0]
 
-def ask_cc_summary(data: dict) -> str:
+async def ask_cc_summary(data: dict) -> str:
     """顯示玩家資訊一覽卡片，回傳 'start' 或 'restart'。"""
-    _cmd_q.put(("cc_summary", dict(data)))
-    _cc_reply_event.clear()
-    _cc_reply_event.wait()
+    _cmd_q.append(("cc_summary", dict(data)))
+    _cc_reply_ready[0] = False
+    while not _cc_reply_ready[0]: await asyncio.sleep(0)
     return _cc_reply_val[0]
 
-def show_extra_event_popup(lines: list, title: str, border_color: tuple) -> None:
+async def show_extra_event_popup(lines: list, title: str, border_color: tuple) -> None:
     """顯示帶彩色邊框的事件通知彈窗，阻塞直到玩家點確認。"""
     body = "\n".join(str(l) for l in lines if l)
     text = f"{title}\n{body}" if body else title
-    _cmd_q.put(("event_ok_col", text, border_color))
-    _reply_event.clear()
-    _reply_event.wait()
+    _cmd_q.append(("event_ok_col", text, border_color))
+    _reply_ready[0] = False
+    while not _reply_ready[0]: await asyncio.sleep(0)
 
-def notify_timetable(courses: list):
+async def notify_timetable(courses: list):
     """
     顯示課表彈出畫面，阻塞直到玩家點確認。
     courses: [{"name": "統計學", "day": "週一", "time": "08:10", "credits": 3}, ...]
     """
-    _cmd_q.put(("timetable", courses))
-    _modal_event.clear()
-    _modal_event.wait()
+    _cmd_q.append(("timetable", courses))
+    _modal_ready[0] = False
+    while not _modal_ready[0]: await asyncio.sleep(0)
 
-def notify_grade_report(items: list, sfx: str = None):
+async def notify_grade_report(items: list, sfx: str = None):
     """
     顯示成績公告彈出畫面，阻塞直到玩家點確認。
     items: [{"name": "小考一", "score": 75}, ...]
     sfx:   彈窗出現時立即播放的音效 key（選填）
     """
-    _cmd_q.put(("grade_report", items, sfx))
-    _modal_event.clear()
-    _modal_event.wait()
+    _cmd_q.append(("grade_report", items, sfx))
+    _modal_ready[0] = False
+    while not _modal_ready[0]: await asyncio.sleep(0)
 
-def open_shop_ui(items: list, event_sys=None) -> None:
+async def open_shop_ui(items: list, event_sys=None) -> None:
     """
     開啟道具店圖形化介面，阻塞遊戲執行緒直到玩家離開商店。
     購買邏輯由 pygame 主執行緒的事件處理器直接套用（遊戲執行緒此時已暫停）。
@@ -382,34 +382,34 @@ def open_shop_ui(items: list, event_sys=None) -> None:
     _shop_msg[0]        = ""
     _shop_msg_time[0]   = 0
     _shop_scroll_y[0]   = 0   # 每次開店重置捲動位置
-    _shop_exit_event.clear()
-    _cmd_q.put(("phase", "shop"))
-    _shop_exit_event.wait()
-    _cmd_q.put(("phase", "game"))
+    _shop_exit_ready[0] = False
+    _cmd_q.append(("phase", "shop"))
+    while not _shop_exit_ready[0]: await asyncio.sleep(0)
+    _cmd_q.append(("phase", "game"))
 
 def trigger_ripple() -> None:
     """觸發漣漪轉場效果；由遊戲執行緒在週次切換時呼叫。"""
-    _cmd_q.put(("ripple",))
+    _cmd_q.append(("ripple",))
 
 def set_portrait_override(key: "str | None") -> None:
     """
     強制立繪顯示指定 key（e.g. 'b1_9'）。
     key=None 時解除強制，恢復 _get_portrait_key() 的自動選擇邏輯。非阻塞。
     """
-    _cmd_q.put(("portrait_override", key))
+    _cmd_q.append(("portrait_override", key))
 
 def get_portrait_prefix() -> str:
     """回傳當前角色立繪前綴（'b1' 或 'g1'）。可從遊戲執行緒直接讀取（無鎖）。"""
     return _portrait_prefix[0]
 
-def run_pregame_countdown() -> None:
+async def run_pregame_countdown() -> None:
     """
     在形狀小遊戲之前播放倒數動畫（準備提示 → 3 → 2 → 1 → 開始！）。
     阻塞直到「開始！」完全淡出後才繼續。
     """
-    _reply_event.clear()
-    _cmd_q.put(("pregame_countdown",))
-    _reply_event.wait()
+    _reply_ready[0] = False
+    _cmd_q.append(("pregame_countdown",))
+    while not _reply_ready[0]: await asyncio.sleep(0)
 
 def show_action_result(lines: list, title: str = "行動結果",
                        direction: str = "right") -> None:
@@ -460,7 +460,7 @@ def get_player_choice(options) -> int:
 def _handle_cc_action(ev_pos):
     """
     處理 char_create 階段的滑鼠點擊事件。
-    修改全域 _cc_* 狀態；若步驟完成則呼叫 _cc_reply_event.set()。
+    修改全域 _cc_* 狀態；若步驟完成則呼叫 _cc_reply_ready[0] = True。
     """
     mode = _cc_mode[0]
     data = _cc_data[0]
@@ -473,7 +473,7 @@ def _handle_cc_action(ev_pos):
             _cc_composing[0] = ""
             _cc_mode[0] = ""
             pygame.key.stop_text_input()
-            _cc_reply_event.set()
+            _cc_reply_ready[0] = True
 
     elif mode == "portrait":
         for (r, prefix) in (_cc_btn_cache.get("portrait_cards") or []):
@@ -481,7 +481,7 @@ def _handle_cc_action(ev_pos):
                 _portrait_prefix[0] = prefix
                 _cc_reply_val[0]    = prefix
                 _cc_mode[0]         = ""
-                _cc_reply_event.set()
+                _cc_reply_ready[0] = True
                 return
 
     elif mode == "dept":
@@ -489,7 +489,7 @@ def _handle_cc_action(ev_pos):
             if r.collidepoint(ev_pos):
                 _cc_reply_val[0] = idx
                 _cc_mode[0] = ""
-                _cc_reply_event.set()
+                _cc_reply_ready[0] = True
                 return
 
     elif mode == "drawbacks":
@@ -505,7 +505,7 @@ def _handle_cc_action(ev_pos):
         if ok and ok.collidepoint(ev_pos):
             _cc_reply_val[0] = [data[i] for i in _cc_sel]
             _cc_mode[0] = ""
-            _cc_reply_event.set()
+            _cc_reply_ready[0] = True
 
     elif mode == "stats":
         total = _cc_stat_total[0]
@@ -538,7 +538,7 @@ def _handle_cc_action(ev_pos):
                 _cc_reply_val[0] = tuple(_cc_stat_vals)
                 _cc_mode[0] = ""
                 _cc_active_stat[0] = None
-                _cc_reply_event.set()
+                _cc_reply_ready[0] = True
 
     elif mode == "extra":
         for (r, ev_id) in (_cc_btn_cache.get("extra_cards") or []):
@@ -561,14 +561,14 @@ def _handle_cc_action(ev_pos):
             _cc_reply_val[0] = list(_cc_extra_sel)
             _cc_mode[0]      = ""
             _cc_extra_sel.clear()
-            _cc_reply_event.set()
+            _cc_reply_ready[0] = True
 
     elif mode == "slot":
         ok = _cc_btn_cache.get("slot_ok")
         if ok and ok.collidepoint(ev_pos) and all(p == "done" for p in _slot_phase):
             _cc_mode[0] = ""
             _cc_confetti.clear()
-            _cc_reply_event.set()
+            _cc_reply_ready[0] = True
 
     elif mode == "summary":
         start_r   = _cc_btn_cache.get("summary_start")
@@ -576,11 +576,11 @@ def _handle_cc_action(ev_pos):
         if start_r and start_r.collidepoint(ev_pos):
             _cc_reply_val[0] = "start"
             _cc_mode[0] = ""
-            _cc_reply_event.set()
+            _cc_reply_ready[0] = True
         elif restart_r and restart_r.collidepoint(ev_pos):
             _cc_reply_val[0] = "restart"
             _cc_mode[0] = ""
-            _cc_reply_event.set()
+            _cc_reply_ready[0] = True
 
     elif mode == "de_level":
         for (r, idx) in (_cc_btn_cache.get("de_level_cards") or []):
@@ -593,7 +593,7 @@ def _handle_cc_action(ev_pos):
             if _cc_sel:
                 _cc_reply_val[0] = data[_cc_sel[0]]
                 _cc_mode[0] = ""
-                _cc_reply_event.set()
+                _cc_reply_ready[0] = True
 
     elif mode == "talent":
         for (r, idx) in (_cc_btn_cache.get("talent_cards") or []):
@@ -606,13 +606,15 @@ def _handle_cc_action(ev_pos):
             if _cc_sel:
                 _cc_reply_val[0] = data[_cc_sel[0]]
                 _cc_mode[0] = ""
-                _cc_reply_event.set()
+                _cc_reply_ready[0] = True
 
-def run_ui():
+async def run_ui():
     """啟動 pygame 視窗並進入主迴圈，直到視窗關閉。"""
     import os
+    print("[DEBUG] run_ui() started")
     os.environ["SDL_IME_SHOW_UI"] = "1"   # 啟用原生 IME 候選字清單與組字底線（須在 init 前設定）
     pygame.init()
+    print("[DEBUG] pygame.init() done")
     pygame.key.set_repeat(400, 50)  # 長按重複：400ms 後開始，每 50ms 一次（backspace 連刪）
 
     # ── 初始化音效 ────────────────────────────────────────────
@@ -838,8 +840,8 @@ def run_ui():
                         pass
 
         # ── 消化遊戲執行緒的命令 ─────────────────────────────
-        while not _cmd_q.empty():
-            cmd = _cmd_q.get_nowait()
+        while _cmd_q:
+            cmd = _cmd_q.popleft()
             tag = cmd[0]
             if tag == "msg":
                 _log.extend(_wrap(cmd[1], fs, WIN_W - 28))
@@ -896,7 +898,6 @@ def run_ui():
                     _end_video_done[0]       = False
                     _end_video_surf[0]       = None
                     _end_bg_surf[0]          = None
-                    _end_bg_last[0]          = 0
                     _end_bg_fade_t0[0]       = 0
                     _end_bg_key[0]           = None
                     # 結局背景影片倒帶，以供下一局重新播放
@@ -1116,6 +1117,7 @@ def run_ui():
         shop_exit_btn  = None
 
         if _phase[0] == "start":
+            print("[DEBUG] drawing start screen")
             start_btn, _debug_btn, _guide_btn = _draw_start(screen, fm, fl, mpos)
             if _guide_active[0]:
                 _guide_close_r, _guide_prev_r, _guide_next_r = \
@@ -1135,7 +1137,7 @@ def run_ui():
                 _yoff = int(-WIN_H * _ease_in_cubic(_rt))
                 if _rt >= 1.0:
                     _shop_slide_dir[0] = "out_done"
-                    _shop_exit_event.set()
+                    _shop_exit_ready[0] = True
             elif _sdir == "out_done":
                 _yoff = -WIN_H   # 完全滑走，等待 phase 切換
             else:
@@ -1386,8 +1388,9 @@ def run_ui():
         if _pcd_active[0]:
             _pcd_done = _draw_pregame_countdown(screen, fm, pygame.time.get_ticks())
             if _pcd_done:
-                _reply_val[0] = True
-                _reply_event.set()
+                _pcd_active[0]  = False
+                _reply_val[0]   = True
+                _reply_ready[0] = True
 
         # ── 形狀小遊戲覆蓋層（優先蓋過所有遊戲 UI）────────────
         if _smg_active[0]:
@@ -1434,6 +1437,7 @@ def run_ui():
                                    mpos[1] - _cur_img.get_height() + _cursor_glow_pad))
 
         pygame.display.flip()
+        print("[DEBUG] flip done")
 
         # ── IME 組字中方向鍵偵測（IME 攔截了 KEYDOWN，改用 GetAsyncKeyState 輪詢）──
         if _phase[0] == "char_create" and _cc_mode[0] == "name" and _cc_composing[0]:
@@ -1505,7 +1509,7 @@ def run_ui():
                     if _modal_ok_btn and _modal_ok_btn.collidepoint(_tpos(ev.pos)):
                         _modal[0]      = None
                         _modal_data[0] = None
-                        _modal_event.set()
+                        _modal_ready[0] = True
                     continue   # modal 開著時不處理底層按鈕
 
                 # ── 遊戲中資訊一覽 modal 攔截 ────────────────────
@@ -1557,12 +1561,12 @@ def run_ui():
                         _play_sfx("start_click")
                         _click_reg[(start_btn.centerx, start_btn.centery)] = pygame.time.get_ticks()
                         _phase[0] = "game"
-                        _start_event.set()
+                        _start_ready[0] = True
                     elif _debug_btn and _debug_btn.collidepoint(_tpos(ev.pos)):
                         _play_sfx("ui_click")
                         _phase[0] = "game"
-                        _debug_skip_event.set()
-                        _start_event.set()
+                        _debug_skip_ready[0] = True
+                        _start_ready[0] = True
                     elif _guide_btn and _guide_btn.collidepoint(_tpos(ev.pos)):
                         _play_sfx("ui_click")
                         _guide_active[0] = True
@@ -1605,14 +1609,14 @@ def run_ui():
                         _click_reg[(end_btn.centerx, end_btn.centery)] = pygame.time.get_ticks()
                         _phase[0] = "start"
                         _request_bgm("Music-Morning_Rain.mp3")
-                        _restart_event.set()
+                        _restart_ready[0] = True
                 elif _phase[0] == "gameover":
                     if go_btn and go_btn.collidepoint(_tpos(ev.pos)):
                         _play_sfx("start_click")
                         _click_reg[(go_btn.centerx, go_btn.centery)] = pygame.time.get_ticks()
                         _phase[0] = "start"
                         _request_bgm("Music-Morning_Rain.mp3")
-                        _restart_event.set()
+                        _restart_ready[0] = True
                 else:
                     # ── 遊戲中 ────────────────────────────────
 
@@ -1628,7 +1632,7 @@ def run_ui():
                                 _smg_final_score_t0[0] = 0
                                 _smg_final_ok_rect[0]  = None
                                 _reply_val[0]          = total / 200.0
-                                _reply_event.set()
+                                _reply_ready[0] = True
                             continue   # 最終分數畫面攔截所有點擊
                         if _smg_q_active[0]:
                             if not _smg_q_answered[0]:   # 防止重複點擊
@@ -1673,7 +1677,7 @@ def run_ui():
                         _story_index[0] += 1
                         if _story_index[0] >= len(_story_lines):
                             _mode[0] = None
-                            _reply_event.set()
+                            _reply_ready[0] = True
                             # ── 觸發三側面板展開動畫 ────────────────────────
                             _panel_slide_dir[0] = "in"
                             _panel_slide_t0[0]  = pygame.time.get_ticks()
@@ -1690,7 +1694,7 @@ def run_ui():
                                 _event_ok_popup_rects.clear()
                                 _event_ok_border_color[0] = None
                                 _event_ok_btn_label[0]    = "確認"
-                                _reply_event.set()
+                                _reply_ready[0] = True
                                 break
                         continue   # 彈窗開啟時阻擋所有點擊
 
@@ -1709,19 +1713,19 @@ def run_ui():
                                     _reply_val[0] = val
                                     _mode[0] = None
                                     _choices.clear()
-                                    _reply_event.set()
+                                    _reply_ready[0] = True
                                 elif _mode[0] == "exam_q":
                                     _play_sfx("ui_click")
                                     _reply_val[0] = val
                                     _mode[0] = None
                                     _choices.clear()
                                     _exam_q_prompt[0] = ""
-                                    _reply_event.set()
+                                    _reply_ready[0] = True
                                 else:  # yn
                                     _play_sfx("ui_click" if val else "back")
                                     _reply_val[0] = val
                                     _mode[0] = None
-                                    _reply_event.set()
+                                    _reply_ready[0] = True
                                 break
                         continue   # 彈窗開啟時所有點擊都不透傳
 
@@ -1734,7 +1738,7 @@ def run_ui():
                                 _skip_popup_result[0] = val
                                 _skip_popup_active[0] = False
                                 _skip_popup_rects.clear()
-                                _skip_popup_event.set()
+                                _skip_popup_ready[0] = True
                                 break
                         continue   # 無論有沒有點中按鈕，都不透傳到下方邏輯
 
@@ -1748,7 +1752,7 @@ def run_ui():
                                 _subj_popup_active[0] = False
                                 _subj_popup_opts.clear()
                                 _subj_popup_rects.clear()
-                                _reply_event.set()
+                                _reply_ready[0] = True
                                 break
                         continue   # 無論有沒有點中按鈕，都不透傳到下方邏輯
 
@@ -1762,7 +1766,7 @@ def run_ui():
                                 _withdrawal_popup_active[0] = False
                                 _withdrawal_popup_opts.clear()
                                 _withdrawal_popup_rects.clear()
-                                _reply_event.set()
+                                _reply_ready[0] = True
                                 break
                         continue   # 無論有沒有點中按鈕，都不透傳到下方邏輯
 
@@ -1790,7 +1794,7 @@ def run_ui():
                             _reply_val[0] = shop_idx
                             _mode[0] = None
                             _choices.clear()
-                            _reply_event.set()
+                            _reply_ready[0] = True
                         continue
 
                     # 結束本週按鈕（回傳 0）
@@ -1803,7 +1807,7 @@ def run_ui():
                         _mode[0] = None
                         _choices.clear()
                         _time_units[0] = 0
-                        _reply_event.set()
+                        _reply_ready[0] = True
                         continue
 
                     # 行動按鈕 / yn / text 確認
@@ -1816,7 +1820,7 @@ def run_ui():
                                 _mode[0] = None
                                 _composing[0] = ""
                                 pygame.key.stop_text_input()
-                                _reply_event.set()
+                                _reply_ready[0] = True
                             elif _mode[0] in ("choices", "yn"):
                                 # 決定音效
                                 if _mode[0] == "choices":
@@ -1847,13 +1851,13 @@ def run_ui():
                                 _reply_val[0] = val
                                 _mode[0] = None
                                 _choices.clear()
-                                _reply_event.set()
+                                _reply_ready[0] = True
                             elif _mode[0] == "exam_ready":
                                 _play_sfx("ui_click")
                                 _reply_val[0] = val
                                 _mode[0] = None
                                 _exam_ready_label[0] = ""
-                                _reply_event.set()
+                                _reply_ready[0] = True
 
                     # 若點到停用中的特殊行動按鈕（cooldown 中），播放 damage6
                     for _dsr in (_cc_btn_cache.get("sp_disabled_rects") or []):
@@ -1906,7 +1910,7 @@ def run_ui():
                             _cc_composing[0] = ""
                             _cc_mode[0] = ""
                             pygame.key.stop_text_input()
-                            _cc_reply_event.set()
+                            _cc_reply_ready[0] = True
                         elif ev.key == pygame.K_BACKSPACE:
                             if _cc_composing[0]:
                                 _cc_composing[0] = ""
@@ -1983,13 +1987,14 @@ def run_ui():
                         _mode[0] = None
                         _composing[0] = ""
                         pygame.key.stop_text_input()
-                        _reply_event.set()
+                        _reply_ready[0] = True
                     elif ev.key == pygame.K_BACKSPACE:
                         if _composing[0]:
                             _composing[0] = ""  # 先清組字預覽
                         else:
                             _tvalue[0] = _tvalue[0][:-1]
 
+        await asyncio.sleep(0)   # pygbag: yield to browser event loop each frame
         clock.tick(30)
 
     pygame.quit()
