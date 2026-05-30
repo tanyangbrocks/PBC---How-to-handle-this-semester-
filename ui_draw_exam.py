@@ -1,6 +1,7 @@
 # ============================================================
 #  ui_draw_exam.py -- 考試形狀小遊戲繪製
 # ============================================================
+from __future__ import annotations
 import os
 import pygame
 import random

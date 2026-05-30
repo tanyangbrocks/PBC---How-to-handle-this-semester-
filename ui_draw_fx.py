@@ -2,6 +2,7 @@
 #  ui_draw_fx.py -- Weather FX, click effects, ripple, BG, screens
 #  by refactor_ui.py
 # ============================================================
+from __future__ import annotations
 import pygame
 import math
 import random
@@ -946,7 +947,7 @@ def _draw_end(surf, fm, fs, mpos):
             _end_video_done[0] = False
         elif sub == "anim":
             # 影片播完 或 超過最長等待時間 → 推進至淡出
-            _anim_max = _EANIM_MS if _end_video_cap[0] is None else 30000
+            _anim_max = _EANIM_MS if (_end_player[0] is None or not _end_player[0].loaded) else 30000
             if _end_video_done[0] or elapsed >= _anim_max:
                 _end_sub[0] = "fade_out_2"; _end_t0[0] = ms
             else:

@@ -2,21 +2,19 @@
 #  ui_state.py -- Runtime mutable state
 #  by refactor_ui.py
 # ============================================================
-import threading
-import queue
+import collections
 import os
 import pygame
 
 from ui_const import *
 
 # ─────────────────────────────────────────
-#  執行緒通訊
+#  協程通訊（原 threading.Queue/Event 已換為 asyncio 相容的 flag）
 # ─────────────────────────────────────────
-_cmd_q       = queue.Queue()    # 遊戲執行緒 → pygame 主執行緒
+_cmd_q       = collections.deque()  # 遊戲協程 → pygame 主協程
 
-_reply_event = threading.Event()
-
-_reply_val   = [None]           # 用 list 讓內層函式可修改
+_reply_ready = [False]              # ask_* 系列：回覆是否就緒
+_reply_val   = [None]               # 用 list 讓內層函式可修改
 
 # ─────────────────────────────────────────
 #  UI 狀態（僅主執行緒讀寫）
@@ -112,7 +110,7 @@ _skip_popup_attended: set = set()  # 本週已上的課（正常上課選的科�
 
 _skip_popup_rects:   list = []
 
-_skip_popup_event         = threading.Event()
+_skip_popup_ready         = [False]
 
 _skip_popup_result        = [None]   # str (選定課名) 或 None (取消)
 
@@ -153,11 +151,11 @@ _gloss_cache:  dict = {}   # 光澤 Surface 快取
 # 畫面階段：start → 開始畫面，game → 遊戲中，end → 結束畫面
 _phase         = ["start"]
 
-_start_event   = threading.Event()   # 玩家點擊「開始遊戲」後被 set
+_start_ready   = [False]   # 玩家點擊「開始遊戲」後被設為 True
 
-_restart_event = threading.Event()   # 玩家點擊「再來一次」後被 set
+_restart_ready = [False]   # 玩家點擊「再來一次」後被設為 True
 
-_debug_skip_event = threading.Event()  # DEV 按鈕觸發：跳至最終結算
+_debug_skip_ready = [False]  # DEV 按鈕觸發：跳至最終結算
 
 # ── 角色創建專屬狀態（_phase == "char_create" 時使用）────────
 _cc_mode        = [""]          # "name"|"dept"|"drawbacks"|"stats"|"talent"
@@ -232,7 +230,7 @@ _info_btn_rect     = [None]  # 遊戲中「資訊一覽」按鈕 Rect（click ha
 
 _info_modal_close  = [None]  # modal 內「關閉」按鈕 Rect（每幀更新）
 
-_cc_reply_event = threading.Event()
+_cc_reply_ready = [False]
 
 _cc_reply_val   = [None]
 
@@ -241,7 +239,7 @@ _modal       = [None]   # "timetable" | "grade_report" | None
 
 _modal_data  = [None]   # modal 要顯示的資料
 
-_modal_event = threading.Event()
+_modal_ready = [False]
 
 # ── 道具店 UI 狀態 ───────────────────────────────────────────
 _notify_capture_buf: list = []   # notify 捕捉緩衝（遊戲執行緒專用）
@@ -258,7 +256,7 @@ _shop_msg_time   = [0]    # 訊息顯示的時間戳（ms）
 
 _shop_scroll_y   = [0]    # 商品格列表的垂直捲動偏移（px）
 
-_shop_exit_event = threading.Event()
+_shop_exit_ready = [False]
 
 _shop_icon_cache: dict = {}   # (item_id, diameter) → SRCALPHA Surface（圓形裁切）
 

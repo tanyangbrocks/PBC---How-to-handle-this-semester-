@@ -2,6 +2,7 @@
 #  ui_draw_hud.py -- Status bar, icons, log area, week calendar
 #  by refactor_ui.py
 # ============================================================
+from __future__ import annotations
 import pygame
 import math
 import random

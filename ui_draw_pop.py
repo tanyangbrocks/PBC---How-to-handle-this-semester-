@@ -2,6 +2,7 @@
 #  ui_draw_pop.py -- Popups, modals, shop
 #  by refactor_ui.py
 # ============================================================
+from __future__ import annotations
 import pygame
 import math
 import random

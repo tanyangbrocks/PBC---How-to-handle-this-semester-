@@ -2,6 +2,7 @@
 #  ui_draw_cc.py -- Character creation UI
 #  by refactor_ui.py
 # ============================================================
+from __future__ import annotations
 import pygame
 import math
 import random
