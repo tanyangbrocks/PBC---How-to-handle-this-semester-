@@ -223,8 +223,10 @@ IME_OVERLAY = """
     if (document.fullscreenElement || document.webkitFullscreenElement) return;
     var c = e.currentTarget;
     var rect = c.getBoundingClientRect();
-    var sx = (c.width  || 1280) / (rect.width  || 1);
-    var sy = (c.height || 720)  / (rect.height || 1);
+    // canvas.width 可能因 pygbag 縮放而不等於遊戲解析度（例如 960 而非 1280）
+    // BTN_X/BTN_Y 是遊戲邏輯座標（1280×720），必須用固定遊戲解析度換算
+    var sx = 1280 / (rect.width  || 1);
+    var sy = 720  / (rect.height || 1);
     var lx = (e.clientX - rect.left) * sx;
     var ly = (e.clientY - rect.top)  * sy;
     console.log('[fs] click lx=' + Math.round(lx) + ' ly=' + Math.round(ly)
