@@ -808,8 +808,11 @@ async def run_ui():
     try:
         import sys as _sys_m
         # 44100 Hz on all platforms; browser Web Audio API handles resampling natively
-        _freq = 44100
-        _buf  = 512   # 512 on all platforms — smaller buffer = lower latency, less crackling
+        # WASM 用 22050 Hz：OGG 檔以 22050 Hz 編碼，不需 resample，避免 decoder 失真
+        # 桌面用 44100 Hz：標準高品質
+        # tab 切換造成的 AudioContext suspend/resume 由 patch_index.py 的 Page Visibility fix 處理
+        _freq = 22050 if _sys_m.platform == "emscripten" else 44100
+        _buf  = 2048  if _sys_m.platform == "emscripten" else 512
         pygame.mixer.init(frequency=_freq, size=-16, channels=2, buffer=_buf)
         # WASM：減少 channel 數量降低音訊處理負載
         if _sys_m.platform == "emscripten":
