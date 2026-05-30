@@ -135,16 +135,14 @@ AUDIO_FIX_JS = """
         try { if (typeof Module !== 'undefined' && Module.SDL2 && Module.SDL2.audioContext) return Module.SDL2.audioContext; } catch(e){}
         return null;
     }
+    // 頁面重新可見時 resume（部分瀏覽器會自動 suspend 背景 tab）
+    // 不主動 suspend：背景 tab 因主執行緒節流，ScriptProcessorNode 反而跑得更順
     document.addEventListener('visibilitychange', function() {
-        var ctx = getAudioCtx();
-        if (!ctx) return;
-        if (document.visibilityState === 'hidden') {
-            ctx.suspend();
-        } else {
-            ctx.resume();
+        if (document.visibilityState === 'visible') {
+            var ctx = getAudioCtx();
+            if (ctx && ctx.state === 'suspended') ctx.resume();
         }
     });
-    // 前景重新取得焦點時強制 resume（確保 ScriptProcessorNode 重新同步）
     document.addEventListener('focus', function() {
         var ctx = getAudioCtx();
         if (ctx && ctx.state === 'suspended') ctx.resume();

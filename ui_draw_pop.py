@@ -13,6 +13,33 @@ from ui_state  import *
 from ui_draw_base import *
 from ui_draw_hud import _draw_icon_coin
 
+# ── WASM 記憶體安全：避免每幀重新分配大型 SRCALPHA Surface ───────────────
+# 全螢幕半透明遮罩：改用 set_alpha 代替 SRCALPHA，不需每幀分配 3.7 MB
+_ov_cache: dict = {}
+def _blit_ov(surf: pygame.Surface, r: int, g: int, b: int, a: int) -> None:
+    """全螢幕遮罩，快取重用，避免每幀建立大型 SRCALPHA Surface → WASM heap 爆炸。"""
+    key = (r, g, b, a)
+    if key not in _ov_cache:
+        s = pygame.Surface((WIN_W, WIN_H))
+        s.fill((r, g, b))
+        s.set_alpha(a)
+        _ov_cache[key] = s
+    surf.blit(_ov_cache[key], (0, 0))
+
+# 彈窗圓角投影陰影：SRCALPHA 只在同尺寸首次出現時建立，後續重用
+_popup_sh_cache: dict = {}
+def _get_popup_sh(w: int, h: int, alpha: int) -> pygame.Surface:
+    """圓角 drop-shadow Surface，按 (w,h,alpha) 快取，同尺寸只建立一次。"""
+    key = (w, h, alpha)
+    if key not in _popup_sh_cache:
+        s = pygame.Surface((w, h), pygame.SRCALPHA)
+        pygame.draw.rect(s, (0, 0, 0, alpha), pygame.Rect(0, 0, w, h), border_radius=18)
+        _popup_sh_cache[key] = s
+    return _popup_sh_cache[key]
+
+# 翹課印章快取：每種印章只建立一次
+_stamp_cache: dict = {}
+
 def _draw_choice_popup(surf, fm, fs, mode, choices, log, prompt_text,
                        yn_labels, mpos):
     """
@@ -23,10 +50,8 @@ def _draw_choice_popup(surf, fm, fs, mode, choices, log, prompt_text,
     """
     fb    = _font_bold[0]    or fs   # 粗體 size-17（題目 / 按鈕文字）
     fb_lg = _font_bold_lg[0] or fm  # 粗體 size-22（yn 按鈕）
-    # ── 全螢幕遮罩 ────────────────────────────────────────────
-    ov = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
-    ov.fill((0, 0, 0, 155))
-    surf.blit(ov, (0, 0))
+    # ── 全螢幕遮罩（快取，避免每幀分配 3.7 MB SRCALPHA）────────
+    _blit_ov(surf, 0, 0, 0, 155)
 
     PAD_X   = 32   # 視窗左右內距
     PAD_TOP = 22
@@ -87,15 +112,10 @@ def _draw_choice_popup(surf, fm, fs, mode, choices, log, prompt_text,
     px = (WIN_W - popup_w) // 2
     py = max(30, (WIN_H - total_h) // 2)
 
-    # ── 投影 + 卡片 ──────────────────────────────────────────
-    sh = pygame.Surface((popup_w, total_h), pygame.SRCALPHA)
-    pygame.draw.rect(sh, (0, 0, 0, 55),
-                     pygame.Rect(0, 0, popup_w, total_h), border_radius=18)
-    surf.blit(sh, (px + 4, py + 4))
-    card = pygame.Surface((popup_w, total_h), pygame.SRCALPHA)
-    pygame.draw.rect(card, (255, 248, 238, 248),
-                     pygame.Rect(0, 0, popup_w, total_h), border_radius=18)
-    surf.blit(card, (px, py))
+    # ── 投影 + 卡片（快取陰影，直接畫不透明卡片）────────────────
+    surf.blit(_get_popup_sh(popup_w, total_h, 55), (px + 4, py + 4))
+    pygame.draw.rect(surf, (255, 248, 238),
+                     pygame.Rect(px, py, popup_w, total_h), border_radius=18)
     pygame.draw.rect(surf, CYAN,
                      pygame.Rect(px, py, popup_w, total_h), 2, border_radius=18)
 
@@ -207,31 +227,22 @@ def _draw_event_ok_popup(surf: pygame.Surface, fm, fs, mpos) -> list:
     px = (WIN_W - popup_w) // 2
     py = max(30, (WIN_H - total_h) // 2)
 
-    # ── 全螢幕遮罩 ────────────────────────────────────────────
-    ov = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
-    ov.fill((0, 0, 0, 165))
-    surf.blit(ov, (0, 0))
+    # ── 全螢幕遮罩（快取）────────────────────────────────────
+    _blit_ov(surf, 0, 0, 0, 165)
 
-    # ── 投影 ──────────────────────────────────────────────────
-    sh = pygame.Surface((popup_w, total_h), pygame.SRCALPHA)
-    pygame.draw.rect(sh, (0, 0, 0, 60),
-                     pygame.Rect(0, 0, popup_w, total_h), border_radius=18)
-    surf.blit(sh, (px + 4, py + 4))
+    # ── 投影（快取圓角陰影）──────────────────────────────────
+    surf.blit(_get_popup_sh(popup_w, total_h, 60), (px + 4, py + 4))
 
-    # ── 主體（米白）──────────────────────────────────────────
-    card = pygame.Surface((popup_w, total_h), pygame.SRCALPHA)
-    pygame.draw.rect(card, (255, 248, 238, 252),
-                     pygame.Rect(0, 0, popup_w, total_h), border_radius=18)
-    surf.blit(card, (px, py))
+    # ── 主體（米白，直接畫不透明矩形）──────────────────────────
+    pygame.draw.rect(surf, (255, 248, 238),
+                     pygame.Rect(px, py, popup_w, total_h), border_radius=18)
 
-    # ── 標題列（深橙棕，僅上方圓角）─────────────────────────
+    # ── 標題列（深橙棕，直接畫，完全不透明）──────────────────
     _HDR_COL = (165, 88, 32)
-    hdr = pygame.Surface((popup_w, HDR_H), pygame.SRCALPHA)
-    pygame.draw.rect(hdr, (*_HDR_COL, 255),
-                     pygame.Rect(0, 0, popup_w, HDR_H), border_radius=18)
-    pygame.draw.rect(hdr, (*_HDR_COL, 255),
-                     pygame.Rect(0, 14, popup_w, HDR_H - 14))
-    surf.blit(hdr, (px, py))
+    pygame.draw.rect(surf, _HDR_COL,
+                     pygame.Rect(px, py, popup_w, HDR_H), border_radius=18)
+    pygame.draw.rect(surf, _HDR_COL,
+                     pygame.Rect(px, py + 14, popup_w, HDR_H - 14))
 
     # 標題文字（居中，亮米色）
     hdr_ty = py + (HDR_H - len(title_lines) * q_lh_lg) // 2
@@ -281,10 +292,8 @@ def _draw_subj_popup(surf, fm, fs, mpos):
     """
     fb    = _font_bold[0]    or fs   # 粗體 size-17（按鈕文字）
     fb_lg = _font_bold_lg[0] or fm  # 粗體 size-22（標題）
-    # ── 半透明暗色遮罩 ────────────────────────────────────────
-    ov = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
-    ov.fill((0, 0, 0, 160))
-    surf.blit(ov, (0, 0))
+    # ── 半透明暗色遮罩（快取）────────────────────────────────
+    _blit_ov(surf, 0, 0, 0, 160)
 
     n       = len(_subj_popup_opts)
     bw      = 460          # 按鈕寬度
@@ -342,10 +351,8 @@ def _draw_withdrawal_popup(surf, fm, fs, mpos):
     fb    = _font_bold[0]    or fs    # 粗體 size-17（課名）
     fb_lg = _font_bold_lg[0] or fm    # 粗體 size-22（標題）
 
-    # ── 半透明暗色遮罩 ────────────────────────────────────────
-    ov = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
-    ov.fill((0, 0, 0, 160))
-    surf.blit(ov, (0, 0))
+    # ── 半透明暗色遮罩（快取）────────────────────────────────
+    _blit_ov(surf, 0, 0, 0, 160)
 
     n       = len(_withdrawal_popup_opts)
     bw      = 640          # 按鈕寬度（比科目彈窗寬，容納說明文字）
@@ -410,10 +417,8 @@ def _draw_skip_class_popup(surf, fm, fs, mpos):
     fb    = _font_bold[0]    or fs
     fb_lg = _font_bold_lg[0] or fm
 
-    # ── 半透明暗色遮罩 ──────────────────────────────────────────
-    ov = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
-    ov.fill((0, 0, 0, 160))
-    surf.blit(ov, (0, 0))
+    # ── 半透明暗色遮罩（快取）────────────────────────────────
+    _blit_ov(surf, 0, 0, 0, 160)
 
     n    = len(_skip_popup_courses)
     COLS = 2
@@ -482,20 +487,22 @@ def _draw_skip_class_popup(surf, fm, fs, mpos):
             else:
                 stamp_col  = ( 40, 185,  75)
                 stamp_text = "已上課"
-            stamp_surf = pygame.Surface((CW, CH), pygame.SRCALPHA)
-            # 半透明底色渲染在 SRCALPHA 面
-            tint = pygame.Surface((CW, CH), pygame.SRCALPHA)
-            pygame.draw.rect(tint, (*stamp_col, 30),
-                             pygame.Rect(0, 0, CW, CH), border_radius=10)
-            stamp_surf.blit(tint, (0, 0))
-            # 旋轉文字（set_alpha 模擬半透明）
-            stx     = fb_lg.render(stamp_text, True, stamp_col)
-            stx.set_alpha(220)
-            str_rot = pygame.transform.rotate(stx, 18)
-            stamp_surf.blit(str_rot,
-                            ((CW - str_rot.get_width())  // 2,
-                             (CH - str_rot.get_height()) // 2))
-            surf.blit(stamp_surf, cr.topleft)
+            # 印章快取：(stamp_text, stamp_col) 只建立一次，避免每幀重建
+            _sk = (stamp_text, stamp_col)
+            if _sk not in _stamp_cache:
+                _ss = pygame.Surface((CW, CH), pygame.SRCALPHA)
+                _tn = pygame.Surface((CW, CH), pygame.SRCALPHA)
+                pygame.draw.rect(_tn, (*stamp_col, 30),
+                                 pygame.Rect(0, 0, CW, CH), border_radius=10)
+                _ss.blit(_tn, (0, 0))
+                _stx     = fb_lg.render(stamp_text, True, stamp_col)
+                _stx.set_alpha(220)
+                _str_rot = pygame.transform.rotate(_stx, 18)
+                _ss.blit(_str_rot,
+                         ((CW - _str_rot.get_width())  // 2,
+                          (CH - _str_rot.get_height()) // 2))
+                _stamp_cache[_sk] = _ss
+            surf.blit(_stamp_cache[_sk], cr.topleft)
             # 彩色邊框
             pygame.draw.rect(surf, stamp_col, cr, 2, border_radius=10)
         else:
@@ -648,10 +655,8 @@ def _draw_action_popup(surf, fs):
     surf.set_clip(_old_clip)
 
 def _draw_modal_overlay(surf):
-    """在畫面上覆蓋一層半透明暗幕，突顯 modal。"""
-    overlay = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
-    overlay.fill((80, 50, 20, 110))   # 暖棕半透明遮罩（比純黑更有溫度）
-    surf.blit(overlay, (0, 0))
+    """在畫面上覆蓋一層半透明暗幕，突顯 modal（快取，避免每幀分配 SRCALPHA）。"""
+    _blit_ov(surf, 80, 50, 20, 110)
 
 def _tt_parse_time(t_str: str):
     """
@@ -885,11 +890,9 @@ def _draw_shop(surf: pygame.Surface,
     """
     fb    = _font_bold[0]    or fs   # 粗體 size-17
     fb_lg = _font_bold_lg[0] or fm  # 粗體 size-22
-    # 背景
+    # 背景（快取暖色調遮罩，避免每幀分配 3.7 MB SRCALPHA）
     surf.blit(_grads.get("bg", pygame.Surface((WIN_W, WIN_H))), (0, 0))
-    ov = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
-    ov.fill((255, 238, 200, 55))
-    surf.blit(ov, (0, 0))
+    _blit_ov(surf, 255, 238, 200, 55)
 
     # ── 版面常數 ───────────────────────────────────────────────
     COLS   = 2
@@ -1214,30 +1217,21 @@ def _draw_guide_modal(surf, fm, fs, mpos):
     px = (WIN_W - popup_w) // 2
     py = max(30, (WIN_H - total_h) // 2)
 
-    # ── 全螢幕遮罩 ────────────────────────────────────────────
-    ov = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
-    ov.fill((0, 0, 0, 165))
-    surf.blit(ov, (0, 0))
+    # ── 全螢幕遮罩（快取）────────────────────────────────────
+    _blit_ov(surf, 0, 0, 0, 165)
 
-    # ── 投影 ──────────────────────────────────────────────────
-    sh = pygame.Surface((popup_w, total_h), pygame.SRCALPHA)
-    pygame.draw.rect(sh, (0, 0, 0, 60),
-                     pygame.Rect(0, 0, popup_w, total_h), border_radius=18)
-    surf.blit(sh, (px + 4, py + 4))
+    # ── 投影（快取圓角陰影）──────────────────────────────────
+    surf.blit(_get_popup_sh(popup_w, total_h, 60), (px + 4, py + 4))
 
-    # ── 主體（米白）──────────────────────────────────────────
-    card = pygame.Surface((popup_w, total_h), pygame.SRCALPHA)
-    pygame.draw.rect(card, (255, 248, 238, 252),
-                     pygame.Rect(0, 0, popup_w, total_h), border_radius=18)
-    surf.blit(card, (px, py))
+    # ── 主體（米白，直接畫不透明矩形）──────────────────────────
+    pygame.draw.rect(surf, (255, 248, 238),
+                     pygame.Rect(px, py, popup_w, total_h), border_radius=18)
 
-    # ── 標題列（教學紫色，僅上方圓角）───────────────────────
-    hdr = pygame.Surface((popup_w, HDR_H), pygame.SRCALPHA)
-    pygame.draw.rect(hdr, (*_GUIDE_BORDER, 255),
-                     pygame.Rect(0, 0, popup_w, HDR_H), border_radius=18)
-    pygame.draw.rect(hdr, (*_GUIDE_BORDER, 255),
-                     pygame.Rect(0, 14, popup_w, HDR_H - 14))
-    surf.blit(hdr, (px, py))
+    # ── 標題列（教學紫色，直接畫，完全不透明）───────────────
+    pygame.draw.rect(surf, _GUIDE_BORDER,
+                     pygame.Rect(px, py, popup_w, HDR_H), border_radius=18)
+    pygame.draw.rect(surf, _GUIDE_BORDER,
+                     pygame.Rect(px, py + 14, popup_w, HDR_H - 14))
 
     # 標題文字（居中，亮米色）
     hdr_ty = py + (HDR_H - len(title_lines) * q_lh_lg) // 2
