@@ -193,12 +193,13 @@ async def ask_text(prompt: str, default: str = "") -> str:
             # 用 _ask_text_done flag 偵測提交，每幀 yield 確保遊戲迴圈繼續運行
             while True:
                 try:
-                    done = bool(_plt.window.eval("!!window._ask_text_done"))
+                    # 回傳整數 1/0，避免 JS boolean→Python 橋接的型別不確定性
+                    done = bool(_plt.window.eval("window._ask_text_done?1:0"))
                 except Exception:
                     done = False
                 if done:
                     break
-                await asyncio.sleep(0)   # yield every frame — 不用 0.05 避免計時器實作差異
+                await asyncio.sleep(0)
             try:
                 result = str(_plt.window.eval("window._ask_text_result||''") or "")
             except Exception:
@@ -425,7 +426,7 @@ async def ask_cc_name(prompt: str) -> str:
             # 確保 run_ui 繼續跑（音樂、畫面不中斷），且不觸發瀏覽器「頁面無回應」
             while True:
                 try:
-                    done = bool(_plt.window.eval("!!window._ask_text_done"))
+                    done = bool(_plt.window.eval("window._ask_text_done?1:0"))
                 except Exception:
                     done = False
                 if done:
