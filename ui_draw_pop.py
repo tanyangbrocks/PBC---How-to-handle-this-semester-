@@ -735,13 +735,11 @@ def _draw_modal_timetable(surf, fm, fs, courses, mpos):
     COL_W   = GRID_W // N_DAYS
     ROW_H   = GRID_H / N_HOURS          # float，精確定位用
 
-    # ── 格子區背景（羊皮紙色）───────────────────────────────────
-    bg_s = pygame.Surface((TIME_COL_W + 3 + GRID_W, HEADER_H + GRID_H),
-                           pygame.SRCALPHA)
-    pygame.draw.rect(bg_s, (250, 241, 224, 255),
-                     (0, 0, TIME_COL_W + 3 + GRID_W, HEADER_H + GRID_H),
+    # ── 格子區背景（羊皮紙色，直接畫 — 不建立 SRCALPHA Surface）──
+    pygame.draw.rect(surf, (250, 241, 224),
+                     pygame.Rect(cx + PAD_L, cy + 50,
+                                 TIME_COL_W + 3 + GRID_W, HEADER_H + GRID_H),
                      border_radius=8)
-    surf.blit(bg_s, (cx + PAD_L, cy + 50))
 
     # ── 星期標頭 ────────────────────────────────────────────────
     for di, day in enumerate(DAYS):
@@ -803,12 +801,11 @@ def _draw_modal_timetable(surf, fm, fs, courses, mpos):
 
         col3 = _TT_COURSE_COLORS.get(course.get("name", ""), _TT_DEFAULT_COLOR)
 
-        # 圓角色塊（半透明）
-        blk = pygame.Surface((bw, bh), pygame.SRCALPHA)
-        pygame.draw.rect(blk, (*col3, 195), (0, 0, bw, bh), border_radius=5)
-        light = tuple(min(255, c + 55) for c in col3)
-        pygame.draw.rect(blk, (*light, 215), (0, 0, bw, bh), 1, border_radius=5)
-        surf.blit(blk, (bx, by))
+        # 圓角色塊（直接畫到 surf，不建立中間 SRCALPHA Surface — WASM 記憶體安全）
+        blk_rect  = pygame.Rect(bx, by, bw, bh)
+        light_col = tuple(min(255, c + 55) for c in col3)
+        pygame.draw.rect(surf, col3,      blk_rect, border_radius=5)
+        pygame.draw.rect(surf, light_col, blk_rect, 1, border_radius=5)
 
         # 課名（置中，空間不足時略過）
         name = course.get("name", "")

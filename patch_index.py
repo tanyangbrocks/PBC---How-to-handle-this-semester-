@@ -144,6 +144,15 @@ AUDIO_FIX_JS = """
             ctx.resume();
         }
     });
+    // 首次點擊時強制 suspend→resume，重置 AudioContext 初始狀態（修復載入後音質失真）
+    document.addEventListener('click', function _audioInit() {
+        document.removeEventListener('click', _audioInit);
+        setTimeout(function() {
+            var ctx = getAudioCtx();
+            if (!ctx || ctx.state !== 'running') return;
+            ctx.suspend().then(function() { ctx.resume(); });
+        }, 300);
+    }, { once: true });
 })();
 </script>
 </body>"""
@@ -175,7 +184,7 @@ IME_OVERLAY = """
     text-align:center;font-family:sans-serif;box-shadow:0 6px 28px rgba(0,0,0,.35);
     border:2px solid #e8c898;">
     <p id="__cc_prm" style="font-size:17px;margin:0 0 8px;color:#4a3020;font-weight:bold;"></p>
-    <p style="font-size:12px;margin:0 0 10px;color:#a08060;">（支援繁體中文輸入法）</p>
+    <p style="font-size:12px;margin:0 0 10px;color:#a08060;display:none;"></p>
     <input type="text" id="__cc_inp" lang="zh-TW" autocomplete="off" spellcheck="false"
       style="font-size:18px;width:220px;padding:8px 12px;border:2px solid #d0a870;
       border-radius:8px;background:#fffdf6;color:#3a2010;outline:none;
@@ -218,7 +227,11 @@ IME_OVERLAY = """
     var sy = (c.height || 720)  / (rect.height || 1);
     var lx = (e.clientX - rect.left) * sx;
     var ly = (e.clientY - rect.top)  * sy;
+    console.log('[fs] click lx=' + Math.round(lx) + ' ly=' + Math.round(ly)
+      + ' need x:' + BTN_X + '-' + (BTN_X+BTN_W) + ' y:' + BTN_Y + '-' + (BTN_Y+BTN_H)
+      + ' cw=' + c.width + ' cssW=' + Math.round(rect.width));
     if (lx >= BTN_X && lx <= BTN_X + BTN_W && ly >= BTN_Y && ly <= BTN_Y + BTN_H) {
+      console.log('[fs] button HIT → toggling fullscreen');
       fsToggle();
     }
   }
