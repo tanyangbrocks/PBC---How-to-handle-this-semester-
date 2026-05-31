@@ -276,7 +276,7 @@ class EventSystem:
 
         # 強制宿醉（不受次數上限約束，但計入計數）
         if self.pending_hangover:
-            self._fire_event("hangover", None)
+            await self._fire_event("hangover", None)
             self.events_this_week += 1
             return True
 

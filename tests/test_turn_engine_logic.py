@@ -4,7 +4,8 @@
 # ============================================================
 import pytest
 import random
-from unittest.mock import MagicMock, patch
+import asyncio
+from unittest.mock import MagicMock, AsyncMock, patch
 
 from character import Character, EXTRA_EVENTS
 from turn_engine import TurnEngine, ACTIONS, SPECIAL_ACTIONS
@@ -232,9 +233,8 @@ class TestPreExamCheck:
         p = make_char(stamina=50, luck=60)
         p.stamina = 50   # 高體力
         te = make_engine(p)
-        # 確保不觸發任何意外
         with patch("turn_engine.random.random", return_value=0.99):
-            mod = te._pre_exam_check()
+            mod = asyncio.run(te._pre_exam_check())
         assert mod == pytest.approx(1.0)
 
     def test_oversleep_triggers_when_stamina_low_and_random_hit(self):
@@ -243,29 +243,28 @@ class TestPreExamCheck:
         p.stamina = 10   # 低體力（< 30 且 < 50*0.3=15）
         te = make_engine(p)
         with patch("turn_engine.random.random", return_value=0.1):   # < 0.4
-            mod = te._pre_exam_check()
+            mod = asyncio.run(te._pre_exam_check())
         assert mod == pytest.approx(0.5)
         assert p.satisfaction == 65   # 80 - 15
 
     def test_oversleep_not_triggered_when_random_miss(self):
-        """體力 < 30 且 < stamina_max*0.3 但 random() >= 0.4 → 繼續判斷運氣（不立即返回 0.5）。"""
+        """體力 < 30 且 < stamina_max*0.3 但 random() >= 0.4 → 繼續判斷運氣。"""
         p = make_char(stamina=50, luck=60, satisfaction=80)
-        p.stamina = 10   # 低體力（< 30 且 < 50*0.3=15）
+        p.stamina = 10
         te = make_engine(p)
         with patch("turn_engine.random.random", return_value=0.5):   # >= 0.4
-            mod = te._pre_exam_check()
-        # 體力 miss 後，luck=65 >= 40，不觸發爆胎
+            mod = asyncio.run(te._pre_exam_check())
+        # luck=65 >= 40，不觸發爆胎
         assert mod == pytest.approx(1.0)
 
     def test_flat_tire_triggers_when_luck_low(self):
         """運氣 < 40 且 random() < 0.3 → modifier = 0.85，滿足感 -8。"""
         p = make_char(stamina=50, luck=20, satisfaction=80)
-        p.stamina = 50   # 體力充足（stamina >= 30），睡過頭分支被短路，不呼叫 random()
-        p.luck    = 20   # 但運氣低 → luck < 40，才呼叫 random()
+        p.stamina = 50   # 體力充足，睡過頭分支被短路
+        p.luck    = 20   # 運氣低 → luck < 40
         te = make_engine(p)
-        # stamina 分支被短路不呼叫 random()，luck 分支才是第一次呼叫
-        with patch("turn_engine.random.random", return_value=0.1):   # < 0.3 → 爆胎
-            mod = te._pre_exam_check()
+        with patch("turn_engine.random.random", return_value=0.1):   # < 0.3
+            mod = asyncio.run(te._pre_exam_check())
         assert mod == pytest.approx(0.85)
         assert p.satisfaction == 72   # 80 - 8
 
@@ -276,8 +275,8 @@ class TestPreExamCheck:
         for _ in range(200):
             p.stamina = random.randint(0, 60)
             p.luck    = random.randint(0, 80)
-            p.satisfaction = 80   # reset
-            mod = te._pre_exam_check()
+            p.satisfaction = 80
+            mod = asyncio.run(te._pre_exam_check())
             assert 0.0 < mod <= 1.0, f"modifier {mod} 不在 (0, 1]"
 
 
@@ -305,7 +304,7 @@ class TestFinalSettlement:
             captured.update(data)
         _ui.set_settlement_data.side_effect = mock_set
 
-        te.final_settlement()
+        asyncio.run(te.final_settlement())
         return captured.get("comment", "")
 
     def test_balanced_ending(self):
