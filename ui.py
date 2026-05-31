@@ -816,9 +816,11 @@ async def run_ui():
         pygame.mixer.init(frequency=_freq, size=-16, channels=2, buffer=_buf)
         # WASM：減少 channel 數量降低音訊處理負載
         if _sys_m.platform == "emscripten":
-            pygame.mixer.set_num_channels(4)   # 桌面預設 8，WASM 降為 4
-        pygame.mixer.set_reserved(1)          # channel 0 保留給突發事件正面音效
-        _event_ch[0] = pygame.mixer.Channel(0)
+            pygame.mixer.set_num_channels(6)   # 桌面預設 8，WASM 降為 6（含 BGM ch）
+        pygame.mixer.set_reserved(2)          # channel 0: 突發事件正面音效
+                                              # channel 1: BGM 專用（Sound 取代 music）
+        _event_ch[0]  = pygame.mixer.Channel(0)
+        _bgm_ch_obj[0] = pygame.mixer.Channel(1)   # BGM 專用 channel（WASM 相容）
         _se_dir = resource_path("asset", "audio", "se")
         def _ld(fn):
             try:
@@ -1049,23 +1051,36 @@ async def run_ui():
         shop_active = (_mode[0] == "choices" and "🏪 前往道具店" in _choices)
 
         # ── BGM 非阻塞切換 tick ───────────────────────────────
+        # 使用 pygame.mixer.Sound + 專用 Channel（channel 1）。
+        # pygame.mixer.music 在 emscripten WASM 無聲音輸出，Sound 可正常發聲。
         if (_bgm_pending[0] is not None
                 and pygame.time.get_ticks() >= _bgm_switch_at[0]):
             _next_bgm      = _bgm_pending[0]
             _bgm_pending[0] = None
             _bgm_current[0] = _next_bgm
+            _ch = _bgm_ch_obj[0]
             if _next_bgm is not None:
                 _bpath = os.path.join(_bgm_dir[0], _next_bgm)
-                print(f"[BGM] 嘗試載入: {_bpath}  isfile={os.path.isfile(_bpath)}")
                 if os.path.isfile(_bpath):
                     try:
-                        pygame.mixer.music.load(_bpath)
-                        pygame.mixer.music.play(-1, fade_ms=BGM_FADE_MS)
-                        print(f"[BGM] play() 成功：{_next_bgm}")
+                        _new_snd = pygame.mixer.Sound(_bpath)
+                        _bgm_snd_obj[0] = _new_snd
+                        if _ch is not None:
+                            _ch.play(_new_snd, loops=-1, fade_ms=BGM_FADE_MS)
+                        else:
+                            # Channel 未初始化（理論上不會發生）→ 直接 play
+                            _new_snd.play(loops=-1, fade_ms=BGM_FADE_MS)
                     except Exception as _bgm_e:
-                        print(f"[BGM] load/play 失敗：{_bgm_e}")
-                else:
-                    print(f"[BGM] isfile=False，跳過。dir={_bgm_dir[0]}")
+                        print(f"[BGM] Sound load/play 失敗：{_bgm_e}")
+            else:
+                # 切換到靜音
+                try:
+                    if _ch is not None:
+                        _ch.fadeout(BGM_FADE_MS)
+                    elif _bgm_snd_obj[0] is not None:
+                        _bgm_snd_obj[0].stop()
+                except Exception:
+                    pass
 
         # ── 消化遊戲執行緒的命令 ─────────────────────────────
         # try/except 保護：任何 tag handler 例外不會 crash 整個 run_ui asyncio task

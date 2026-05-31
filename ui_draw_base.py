@@ -74,6 +74,10 @@ def _request_bgm(name: "str | None") -> None:
     - 若目標與當前（或進行中切換目標）相同：不動作。
     - 若目前無曲目在播：立即排程（下一幀載入），無淡出等待。
     - 否則：fadeout 舊曲，等 BGM_FADE_MS ms 後主迴圈自動載入新曲。
+
+    實作說明：改用 pygame.mixer.Sound + 專用 Channel（_bgm_ch_obj）。
+    pygame.mixer.music（串流）在 emscripten WASM SDL2_mixer 無聲音輸出，
+    pygame.mixer.Sound（取樣）與 SFX 同一套 Web Audio 路徑，可正常發聲。
     """
     target = _bgm_pending[0] if _bgm_pending[0] is not None else _bgm_current[0]
     if name == target:
@@ -85,7 +89,12 @@ def _request_bgm(name: "str | None") -> None:
     else:
         _bgm_switch_at[0] = pygame.time.get_ticks() + BGM_FADE_MS
         try:
-            pygame.mixer.music.fadeout(BGM_FADE_MS)
+            ch = _bgm_ch_obj[0]
+            if ch is not None:
+                ch.fadeout(BGM_FADE_MS)
+            elif _bgm_snd_obj[0] is not None:
+                # Channel 尚未初始化（run_ui 前被呼叫）→ 直接 stop Sound
+                _bgm_snd_obj[0].stop()
         except Exception:
             pass
 
