@@ -183,6 +183,10 @@ var _origCSP = AudioContext.prototype.createScriptProcessor;
 AudioContext.prototype.createScriptProcessor = function(bufSz, inCh, outCh) {
   var real = _origCSP.call(this, bufSz, inCh, outCh);
   var ctx  = this;
+  // 攔截到 AudioContext 時立即存到全域，供 _tryResumeAudio 使用。
+  // getAudioCtx() 的 Module.SDL2 / window.MM 路徑在 pygbag 下找不到；
+  // 唯一可靠的方式是在 createScriptProcessor 攔截點直接拿到 this。
+  window.__sdl2AudioCtx = ctx;
   outCh = outCh || 2;
 
   // 非同步建立 AudioWorklet
@@ -254,6 +258,9 @@ AudioContext.prototype.createScriptProcessor = function(bufSz, inCh, outCh) {
 // 瀏覽器 autoplay 政策：AudioContext 在使用者互動前維持 suspended 狀態，
 // 必須在 click/pointerdown 時明確呼叫 resume()，否則整場無音樂。
 function getAudioCtx() {
+  // 優先使用攔截 createScriptProcessor 時存下的參照（最可靠）
+  if (window.__sdl2AudioCtx) return window.__sdl2AudioCtx;
+  // 備援：其他框架的慣用路徑
   try { if (window.MM && window.MM.audioContext) return window.MM.audioContext; } catch(e){}
   try { if (typeof Module !== 'undefined' && Module.SDL2 && Module.SDL2.audioContext) return Module.SDL2.audioContext; } catch(e){}
   return null;

@@ -427,23 +427,30 @@ async def ask_cc_name(prompt: str) -> str:
         try:
             import platform as _plt
             import json as _jj
+            print(f"[DBG ask_cc_name] 呼叫 __cc_show，prompt={prompt!r}")
             _plt.window.eval(f"__cc_show({_jj.dumps(prompt)})")
             _shown = True
+            print("[DBG ask_cc_name] __cc_show 完成，進入 FS bridge polling")
         except Exception as _e:
             print(f"[ask_cc_name] __cc_show 失敗：{_e}，回退 cc_name 模式")
 
         if _shown:
             # ② polling：純 Python open()，不呼叫任何 JS — 無死鎖風險
+            _poll_count = 0
             while True:
                 try:
                     with open(_RESULT_FILE, "r", encoding="utf-8") as _f:
                         _raw = _f.read()
+                    print(f"[DBG ask_cc_name] 收到結果：{_raw!r}")
                     final = _raw.strip() or "無名氏"
                     _cc_reply_val[0]  = final
                     _cc_reply_ready[0] = True
                     return final
                 except (FileNotFoundError, OSError):
                     pass
+                _poll_count += 1
+                if _poll_count == 60:   # 約 1 秒後印一次，確認 polling 仍在跑
+                    print("[DBG ask_cc_name] polling 中，等待玩家輸入...")
                 await asyncio.sleep(0)
 
     # 桌面（及 WASM overlay 顯示失敗時的 fallback）
