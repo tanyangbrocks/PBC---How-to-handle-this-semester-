@@ -9,6 +9,7 @@ import random
 from ui_state import *
 from ui_const import *
 from ui_draw_base import *
+from ui_video import SpritePlayer
 
 # ── 常數 ──────────────────────────────────────────────────
 
@@ -39,6 +40,9 @@ def _get_shape_label_font() -> pygame.font.Font:
     return _extra_fonts[ck]
 
 ROUND_MS = 30_000   # 每回合 30 秒
+
+# 第一回合動態背景（Stop Motion Texture GIF 旋轉 90° 左後拆幀）
+_smg_r1_player: list = [None]   # SpritePlayer，懶初始化
 
 # 第二回合可用背景清單
 _SMG_BG_FILES = [
@@ -321,6 +325,17 @@ def _draw_shape_minigame(
         surf.blit(_smg_bg_surf[0], (0, 0))
         # 淡奶油遮罩（快取）
         _blit_ov(surf, _SMG_BG[0], _SMG_BG[1], _SMG_BG[2], 160)
+    elif _smg_round[0] == 1:
+        # 第一回合：Stop Motion Texture 動態背景（已旋轉 90° 左）
+        if _smg_r1_player[0] is None:
+            _smg_r1_player[0] = SpritePlayer(
+                resource_path("asset", "video_frames", "exam_round1_bg"), loop=True)
+        r1_bg = _smg_r1_player[0].get_surface(ms, (WIN_W, WIN_H))
+        if r1_bg is not None:
+            surf.blit(r1_bg, (0, 0))
+            _blit_ov(surf, _SMG_BG[0], _SMG_BG[1], _SMG_BG[2], 150)
+        else:
+            surf.fill(_SMG_BG)
     else:
         surf.fill(_SMG_BG)
 
@@ -527,7 +542,17 @@ def _draw_r1_score(
     fm: pygame.font.Font,
     fs: pygame.font.Font,
 ) -> None:
-    surf.fill(_SMG_BG)
+    # 第一回合結束畫面延用動態背景
+    ms = pygame.time.get_ticks()
+    if _smg_r1_player[0] is not None:
+        r1_bg = _smg_r1_player[0].get_surface(ms, (WIN_W, WIN_H))
+        if r1_bg is not None:
+            surf.blit(r1_bg, (0, 0))
+            _blit_ov(surf, _SMG_BG[0], _SMG_BG[1], _SMG_BG[2], 200)
+        else:
+            surf.fill(_SMG_BG)
+    else:
+        surf.fill(_SMG_BG)
 
     # 粗體字型
     fb_lg = _font_bold_lg[0] or fm

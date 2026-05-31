@@ -20,7 +20,8 @@ from ui import notify, ask_ok, ask_yn, ask_choice, ask_text, set_player, \
                notify_timetable, notify_grade_report, set_time, show_action_result, \
                show_action_blocked, \
                ask_subject_popup, trigger_time_overflow_warning, tell_story, \
-               show_extra_event_popup, ask_exam_start, set_roll_call, clear_roll_call, \
+               show_extra_event_popup, show_guide_modal, \
+               ask_exam_start, set_roll_call, clear_roll_call, \
                set_roll_call_attended, set_roll_call_xed, set_special_disabled, \
                set_allnighter_count, \
                ask_skip_class_popup, ask_withdrawal_popup, set_settlement_data, \
@@ -474,45 +475,8 @@ class TurnEngine:
             await tell_story(["新的一學期又開始了，帶著暑假的好心情來上課。"])
             await notify_timetable(self._WEEK1_TIMETABLE)
             if self.show_tutorial:
-                await show_extra_event_popup(
-                    [
-                        "左側面板是本週可選的行動。",
-                        "每次行動消耗 1 個時間格。",
-                        "時間格用完前可一直選擇行動。",
-                        "---",
-                        "特殊行動（右下方圓形按鈕）",
-                        "不消耗時間格，隨時可用。",
-                    ],
-                    "新手教學①：行動系統",
-                    (70, 55, 130),
-                )
-                await show_extra_event_popup(
-                    [
-                        "體力：執行行動的消耗來源。",
-                        "  歸零會生病，效率大幅下降。",
-                        "---",
-                        "自我滿足度：降至 0 = 遊戲結束！",
-                        "---",
-                        "智力：影響讀書效率與考試成績。",
-                        "金錢：道具店與進食所需。",
-                    ],
-                    "新手教學②：主要數值",
-                    (70, 55, 130),
-                )
-                await show_extra_event_popup(
-                    [
-                        "第 8 週有期中考、第 16 週有期末考。",
-                        "各占總成績 30%，是決定結局的關鍵。",
-                        "---",
-                        "考前多讀書、維持高智力，",
-                        "記得留足夠的時間格應考！",
-                        "---",
-                        "自我滿足度快歸零時，",
-                        "優先選社團活動補回來。",
-                    ],
-                    "新手教學③：考試與目標",
-                    (70, 55, 130),
-                )
+                # 顯示與「遊戲說明」相同的圖文 modal（3 頁翻頁式）
+                await show_guide_modal()
             await tell_story([
                 "「吼呦，雖然大部分的課是我自己選的，不過這學期的課表看起來也太無聊了吧！」",
                 "上課時太無聊，眼睛快要闔起來了，下課時要不要去商店裡繞一繞？",

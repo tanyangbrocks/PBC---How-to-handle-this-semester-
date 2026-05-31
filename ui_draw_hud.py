@@ -387,9 +387,12 @@ def _draw_status_v2(surf, fm, fs, player, rect, mpos):
             em_ch  = _STATUS_EMOJI.get(sname, "❓")
             num_ch = _fw_num(sv)
             col_n  = GREEN if sname in _STATUS_POS else RED
+            # 使用 _EMOJI_COLORS（來自 ui_draw_base import *）著色；
+            # 再 fallback 到 _STATUS_EMOJI_COLOR（本地定義），最後才用 WHITE
+            em_col = _EMOJI_COLORS.get(em_ch, _STATUS_EMOJI_COLOR.get(em_ch, WHITE))
 
             # ── 正常尺寸量測 ──────────────────────────────
-            em_sn   = em_fn.render(em_ch, True, WHITE) if em_fn else None
+            em_sn   = em_fn.render(em_ch, True, em_col) if em_fn else None
             num_sn  = fb_lg.render(num_ch, True, col_n)
             em_wn   = em_sn.get_width() if em_sn else 0
             cw_n    = em_wn + 2 + num_sn.get_width()
@@ -406,7 +409,7 @@ def _draw_status_v2(surf, fm, fs, player, rect, mpos):
                 )
 
                 # hover 尺寸
-                em_sh   = em_fh.render(em_ch, True, WHITE) if em_fh else em_sn
+                em_sh   = em_fh.render(em_ch, True, em_col) if em_fh else em_sn
                 num_sh  = fb_lg.render(num_ch, True, (255, 220, 80))
                 em_wh   = em_sh.get_width() if em_sh else 0
                 cw_h    = em_wh + 2 + num_sh.get_width()

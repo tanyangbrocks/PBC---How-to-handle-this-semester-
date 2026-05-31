@@ -1194,8 +1194,8 @@ def _draw_guide_modal(surf, fm, fs, mpos):
     # 與 show_extra_event_popup 相同方式合併正文
     body = "\n".join(str(l) for l in pdata["lines"] if l)
 
-    # ── 版面常數 ──────────────────────────────────────────────
-    popup_w  = min(WIN_W - 80, 760)
+    # ── 版面常數（視窗 150% 放大）─────────────────────────────
+    popup_w  = min(WIN_W - 60, 1140)   # 760 × 1.5 = 1140，左右各 ~70px 邊距
     PAD_X    = 28
     PAD_TOP  = 18
     PAD_BOT  = 20          # popup 底部內距（按鈕/圓點已移至 popup 外）
@@ -1208,7 +1208,7 @@ def _draw_guide_modal(surf, fm, fs, mpos):
 
     title_lines = _wrap(pdata["title"], fb_lg, text_w)
     q_lh_lg     = fb_lg.get_height() + 4
-    IMG_H       = 320      # 圖片顯示區域固定高度
+    IMG_H       = 480      # 320 × 1.5 = 480（圖片顯示區域）
 
     # popup 高度只含標題 + 圖片，不含按鈕/圓點（它們懸浮在 popup 外）
     total_h = min(HDR_H + PAD_TOP + IMG_H + PAD_BOT, WIN_H - 120)

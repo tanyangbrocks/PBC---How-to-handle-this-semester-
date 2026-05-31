@@ -515,6 +515,15 @@ async def ask_cc_summary(data: dict) -> str:
     while not _cc_reply_ready[0]: await asyncio.sleep(0)
     return _cc_reply_val[0]
 
+async def show_guide_modal() -> None:
+    """顯示「遊戲說明」modal（任何 phase 均可），阻塞直到玩家關閉。
+    用於遊戲開始時的新手教學，替代三個 show_extra_event_popup 純文字彈窗。
+    """
+    _guide_page[0] = 0
+    _guide_active[0] = True
+    while _guide_active[0]:
+        await asyncio.sleep(0)
+
 async def show_extra_event_popup(lines: list, title: str, border_color: tuple) -> None:
     """顯示帶彩色邊框的事件通知彈窗，阻塞直到玩家點確認。"""
     body = "\n".join(str(l) for l in lines if l)
@@ -747,10 +756,12 @@ def _handle_cc_action(ev_pos):
         start_r   = _cc_btn_cache.get("summary_start")
         restart_r = _cc_btn_cache.get("summary_restart")
         if start_r and start_r.collidepoint(ev_pos):
+            _play_sfx("start_click")   # soundreality-interface-6-204504.ogg
             _cc_reply_val[0] = "start"
             _cc_mode[0] = ""
             _cc_reply_ready[0] = True
         elif restart_r and restart_r.collidepoint(ev_pos):
+            _play_sfx("ui_click")
             _cc_reply_val[0] = "restart"
             _cc_mode[0] = ""
             _cc_reply_ready[0] = True
@@ -1581,6 +1592,12 @@ async def run_ui():
             _close_r, _ = _draw_cc_summary(screen, fm, fs, mpos, game_mode=True)
             _info_modal_close[0] = _close_r
 
+        # ── 遊戲說明 modal（start phase 以外時在此渲染，浮在最上層）─
+        # start phase 時已在 _draw_start 塊中渲染，此處處理其他 phase
+        if _guide_active[0] and _phase[0] != "start":
+            _guide_close_r, _guide_prev_r, _guide_next_r = \
+                _draw_guide_modal(screen, fm, fl, mpos)
+
         # ── Modal 疊加（課表 / 成績公告，浮在所有畫面之上）────────
         _modal_ok_btn = None
         if _modal[0] == "timetable":
@@ -1789,6 +1806,20 @@ async def run_ui():
                         }
                         _info_modal_active[0] = True
                     continue
+
+                # ── 遊戲說明 modal 通用點擊（start 以外的 phase）────────
+                # start phase 的 guide 點擊在下方的 start 區塊處理
+                if _guide_active[0] and _phase[0] != "start":
+                    if _guide_close_r and _guide_close_r.collidepoint(_tpos(ev.pos)):
+                        _play_sfx("back")
+                        _guide_active[0] = False
+                    elif _guide_prev_r and _guide_prev_r.collidepoint(_tpos(ev.pos)):
+                        _play_sfx("ui_click")
+                        _guide_page[0] = max(0, _guide_page[0] - 1)
+                    elif _guide_next_r and _guide_next_r.collidepoint(_tpos(ev.pos)):
+                        _play_sfx("ui_click")
+                        _guide_page[0] = min(_GUIDE_N - 1, _guide_page[0] + 1)
+                    continue   # 點擊不穿透到底層 UI
 
                 if _phase[0] == "start":
                     if _guide_active[0]:
