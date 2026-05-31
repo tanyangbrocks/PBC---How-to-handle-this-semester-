@@ -13,6 +13,9 @@ from ui_state  import *
 from ui_draw_base import *
 from ui_draw_hud  import *
 
+# ── WASM 記憶體優化：快取固定尺寸 SRCALPHA Surface，避免每幀重建 ──────────
+_ap_surf_cache: dict = {}   # key → pygame.Surface
+
 def _draw_action_icon(surf: pygame.Surface, cx: int, cy: int, ar: int, label: str) -> None:
     """在圓形按鈕表面貼上滿版 icon（圓形裁切）。"""
     if label not in _ACTION_ICON_FILES:
@@ -47,10 +50,14 @@ def _draw_bump_bg(surf: pygame.Surface, pr: pygame.Rect) -> None:
     top_y  = pr.y - _BUMP_H
     full_h = _BUMP_H + 14                    # 凸起 + 與面板的重疊部份
 
-    # 陰影
-    sh_sf = pygame.Surface((_BUMP_W + 8, full_h + 6), pygame.SRCALPHA)
-    pygame.draw.rect(sh_sf, (0, 0, 0, 42),
-                     pygame.Rect(0, 0, _BUMP_W + 8, full_h + 6), border_radius=14)
+    # 陰影（尺寸固定，快取）
+    _bump_sh_key = ("bump_sh", _BUMP_W, full_h)
+    if _bump_sh_key not in _ap_surf_cache:
+        _s = pygame.Surface((_BUMP_W + 8, full_h + 6), pygame.SRCALPHA)
+        pygame.draw.rect(_s, (0, 0, 0, 42),
+                         pygame.Rect(0, 0, _BUMP_W + 8, full_h + 6), border_radius=14)
+        _ap_surf_cache[_bump_sh_key] = _s
+    sh_sf = _ap_surf_cache[_bump_sh_key]
     surf.blit(sh_sf, (bx - 2, top_y + 5))
 
     # 凸起本體（奶霜底色 + 深棕邊框）
@@ -70,11 +77,14 @@ def _draw_ap_toggle_btn(surf: pygame.Surface, ar: pygame.Rect, mpos: tuple) -> N
     collapsed = _ap_collapse_val[0] > 0.5
     hover = trect.collidepoint(mpos)
 
-    # 膠囊背景
+    # 膠囊背景（按 alpha 狀態快取）
     bg_alpha = 225 if hover else 190
-    bg = pygame.Surface((tw, th), pygame.SRCALPHA)
-    pygame.draw.rect(bg, (255, 244, 228, bg_alpha), (0, 0, tw, th), border_radius=th // 2)
-    surf.blit(bg, trect.topleft)
+    _tog_key = ("tog_bg", tw, th, bg_alpha)
+    if _tog_key not in _ap_surf_cache:
+        _s = pygame.Surface((tw, th), pygame.SRCALPHA)
+        pygame.draw.rect(_s, (255, 244, 228, bg_alpha), (0, 0, tw, th), border_radius=th // 2)
+        _ap_surf_cache[_tog_key] = _s
+    surf.blit(_ap_surf_cache[_tog_key], trect.topleft)
 
     # 邊框
     bdr_col = CYAN if hover else (175, 145, 105)
@@ -120,26 +130,35 @@ def _draw_action_panel(surf, fm, fs, mode, choices, log, prompt, tvalue, rect, t
         _bump_cx = (_blx + _brx) // 2
         _bump_cy = (_btop + pr.y) // 2
 
-        # tab 投影（頂部圓角）
+        # tab 投影（頂部圓角，尺寸固定快取）
         _TR = 12
-        _tsh = pygame.Surface((_BUMP_W + 6, _BUMP_H + 6), pygame.SRCALPHA)
-        pygame.draw.rect(_tsh, (0, 0, 0, 40),
-                         pygame.Rect(0, 0, _BUMP_W, _BUMP_H),
-                         border_top_left_radius=_TR,
-                         border_top_right_radius=_TR)
-        surf.blit(_tsh, (_blx + 4, _btop + 4))
+        _tsh_key = ("ap_tsh", _BUMP_W, _BUMP_H)
+        if _tsh_key not in _ap_surf_cache:
+            _ts = pygame.Surface((_BUMP_W + 6, _BUMP_H + 6), pygame.SRCALPHA)
+            pygame.draw.rect(_ts, (0, 0, 0, 40),
+                             pygame.Rect(0, 0, _BUMP_W, _BUMP_H),
+                             border_top_left_radius=_TR,
+                             border_top_right_radius=_TR)
+            _ap_surf_cache[_tsh_key] = _ts
+        surf.blit(_ap_surf_cache[_tsh_key], (_blx + 4, _btop + 4))
 
-    # ── 主面板投影 ──────────────────────────────────────────────
-    sh = pygame.Surface((pr.width, pr.height), pygame.SRCALPHA)
-    pygame.draw.rect(sh, (0, 0, 0, 52),
-                     pygame.Rect(0, 0, pr.width, pr.height), border_radius=14)
-    surf.blit(sh, (pr.x + 4, pr.y + 4))
+    # ── 主面板投影（按尺寸快取，避免每幀 ~700 KB 分配）─────────
+    _sh_key = ("ap_sh", pr.width, pr.height)
+    if _sh_key not in _ap_surf_cache:
+        _ss = pygame.Surface((pr.width, pr.height), pygame.SRCALPHA)
+        pygame.draw.rect(_ss, (0, 0, 0, 52),
+                         pygame.Rect(0, 0, pr.width, pr.height), border_radius=14)
+        _ap_surf_cache[_sh_key] = _ss
+    surf.blit(_ap_surf_cache[_sh_key], (pr.x + 4, pr.y + 4))
 
-    # ── 主面板卡片底色 ──────────────────────────────────────────
-    card = pygame.Surface((pr.width, pr.height), pygame.SRCALPHA)
-    pygame.draw.rect(card, (255, 244, 228, 238),
-                     pygame.Rect(0, 0, pr.width, pr.height), border_radius=14)
-    surf.blit(card, pr.topleft)
+    # ── 主面板卡片底色（按尺寸快取，避免每幀 ~700 KB 分配）─────
+    _card_key = ("ap_card", pr.width, pr.height)
+    if _card_key not in _ap_surf_cache:
+        _cs = pygame.Surface((pr.width, pr.height), pygame.SRCALPHA)
+        pygame.draw.rect(_cs, (255, 244, 228, 238),
+                         pygame.Rect(0, 0, pr.width, pr.height), border_radius=14)
+        _ap_surf_cache[_card_key] = _cs
+    surf.blit(_ap_surf_cache[_card_key], pr.topleft)
     if not is_std_action:
         pygame.draw.rect(surf, CYAN, pr, 2, border_radius=14)
 
@@ -349,15 +368,19 @@ def _draw_action_panel(surf, fm, fs, mode, choices, log, prompt, tvalue, rect, t
             brect = pygame.Rect(cx_btn - r - 8, cy_btn - r - 8,
                                 (r + 8) * 2, (r + 8) * 2)   # 點擊判定用原始 r
 
-            # ── Hover 光暈：SRCALPHA 同心圓環，畫在按鈕邊框外側 ─────
+            # ── Hover 光暈（按尺寸快取）─────────────────────────
             if hover:
                 _glow_sz = (ar + 28) * 2
-                _glow_sf = pygame.Surface((_glow_sz, _glow_sz), pygame.SRCALPHA)
-                _gc      = _glow_sz // 2
-                for _gr, _ga in [(ar + 24, 28), (ar + 16, 50), (ar + 8, 72)]:
-                    pygame.draw.circle(_glow_sf, (160, 210, 255, _ga),
-                                       (_gc, _gc), _gr, 4)
-                surf.blit(_glow_sf, (cx_btn - _gc, cy_btn - _gc))
+                _glow_key = ("btn_glow", _glow_sz)
+                if _glow_key not in _ap_surf_cache:
+                    _gf = pygame.Surface((_glow_sz, _glow_sz), pygame.SRCALPHA)
+                    _gc2 = _glow_sz // 2
+                    for _gr, _ga in [(_gc2 - 4, 28), (_gc2 - 12, 50), (_gc2 - 20, 72)]:
+                        pygame.draw.circle(_gf, (160, 210, 255, _ga),
+                                           (_gc2, _gc2), _gr, 4)
+                    _ap_surf_cache[_glow_key] = _gf
+                _gc = _glow_sz // 2
+                surf.blit(_ap_surf_cache[_glow_key], (cx_btn - _gc, cy_btn - _gc))
 
             # ── 波浪標籤：每 2 秒 1 次，hover 時靜止 ────────────────
             # 每 2000ms 週期：前 1000ms 播波浪（同速），後 1000ms 靜止；
@@ -427,21 +450,28 @@ def _draw_action_panel(surf, fm, fs, mode, choices, log, prompt, tvalue, rect, t
             # icon 蓋住 _premium_circle 的邊框，補畫一圈
             _sp_bdr = (105, 105, 115) if _disabled else tuple(min(255, int(c * 1.20 + 30)) for c in BTN_N)
             pygame.draw.circle(surf, _sp_bdr, (_sp_cx, _sp_cy), _sp_ar, 2)
-            # 停用時疊半透明灰膜使 icon 變暗
+            # 停用時疊半透明灰膜（按半徑快取）
             if _disabled:
-                _dim = pygame.Surface((_sp_ar * 2, _sp_ar * 2), pygame.SRCALPHA)
-                pygame.draw.circle(_dim, (130, 130, 140, 140), (_sp_ar, _sp_ar), _sp_ar)
-                surf.blit(_dim, (_sp_cx - _sp_ar, _sp_cy - _sp_ar))
+                _dim_key = ("sp_dim", _sp_ar)
+                if _dim_key not in _ap_surf_cache:
+                    _dm = pygame.Surface((_sp_ar * 2, _sp_ar * 2), pygame.SRCALPHA)
+                    pygame.draw.circle(_dm, (130, 130, 140, 140), (_sp_ar, _sp_ar), _sp_ar)
+                    _ap_surf_cache[_dim_key] = _dm
+                surf.blit(_ap_surf_cache[_dim_key], (_sp_cx - _sp_ar, _sp_cy - _sp_ar))
 
-            # hover 光暈
+            # hover 光暈（按尺寸快取）
             if _sp_hover:
-                _glow_sz = (_sp_ar + 28) * 2
-                _glow_sf = pygame.Surface((_glow_sz, _glow_sz), pygame.SRCALPHA)
-                _gc2     = _glow_sz // 2
-                for _gr2, _ga2 in [(_sp_ar + 24, 28), (_sp_ar + 16, 50), (_sp_ar + 8, 72)]:
-                    pygame.draw.circle(_glow_sf, (160, 210, 255, _ga2),
-                                       (_gc2, _gc2), _gr2, 4)
-                surf.blit(_glow_sf, (_sp_cx - _gc2, _sp_cy - _gc2))
+                _sglow_sz  = (_sp_ar + 28) * 2
+                _sglow_key = ("sp_glow", _sglow_sz)
+                if _sglow_key not in _ap_surf_cache:
+                    _sf = pygame.Surface((_sglow_sz, _sglow_sz), pygame.SRCALPHA)
+                    _sgc = _sglow_sz // 2
+                    for _gr2, _ga2 in [(_sgc - 4, 28), (_sgc - 12, 50), (_sgc - 20, 72)]:
+                        pygame.draw.circle(_sf, (160, 210, 255, _ga2),
+                                           (_sgc, _sgc), _gr2, 4)
+                    _ap_surf_cache[_sglow_key] = _sf
+                _sgc2 = _sglow_sz // 2
+                surf.blit(_ap_surf_cache[_sglow_key], (_sp_cx - _sgc2, _sp_cy - _sgc2))
 
             # 停用倒數數字 overlay
             if _disabled:
@@ -719,14 +749,20 @@ def _draw_exam_stress_fx(surf: pygame.Surface) -> None:
 
 def _side_panel_bg(surf: pygame.Surface, x: int, y: int, w: int, h: int) -> None:
     """繪製白色筆記本卡片底色（陰影 + 奶白底 + 暖棕邊框）。"""
-    # 投影
-    sh = pygame.Surface((w, h), pygame.SRCALPHA)
-    pygame.draw.rect(sh, (0, 0, 0, 48), pygame.Rect(0, 0, w, h), border_radius=13)
-    surf.blit(sh, (x + 3, y + 4))
-    # 卡片底色
-    bg = pygame.Surface((w, h), pygame.SRCALPHA)
-    pygame.draw.rect(bg, (251, 248, 243, 242), pygame.Rect(0, 0, w, h), border_radius=13)
-    surf.blit(bg, (x, y))
+    # 投影（按尺寸快取）
+    _sp_sh_key = ("sp_sh", w, h)
+    if _sp_sh_key not in _ap_surf_cache:
+        _s = pygame.Surface((w, h), pygame.SRCALPHA)
+        pygame.draw.rect(_s, (0, 0, 0, 48), pygame.Rect(0, 0, w, h), border_radius=13)
+        _ap_surf_cache[_sp_sh_key] = _s
+    surf.blit(_ap_surf_cache[_sp_sh_key], (x + 3, y + 4))
+    # 卡片底色（按尺寸快取）
+    _sp_bg_key = ("sp_bg", w, h)
+    if _sp_bg_key not in _ap_surf_cache:
+        _b = pygame.Surface((w, h), pygame.SRCALPHA)
+        pygame.draw.rect(_b, (251, 248, 243, 242), pygame.Rect(0, 0, w, h), border_radius=13)
+        _ap_surf_cache[_sp_bg_key] = _b
+    surf.blit(_ap_surf_cache[_sp_bg_key], (x, y))
     # 邊框
     pygame.draw.rect(surf, (185, 163, 138), pygame.Rect(x, y, w, h), 1, border_radius=13)
 
@@ -858,80 +894,77 @@ def _draw_roll_call_note(surf: pygame.Surface, fmic, x_offset: int = 0) -> None:
 
     fb = _font_bold[0] or fmic
 
-    # ── 便利貼 Surface（100×68 px）────────────────────────────
+    # ── 便利貼 Surface（100×68 px）按狀態快取，避免每幀建立+旋轉 ──
     NW, NH = 100, 68
-    note = pygame.Surface((NW, NH), pygame.SRCALPHA)
-
-    # 主底色（亮黃便利貼）
-    pygame.draw.rect(note, (255, 228, 52, 242),
-                     pygame.Rect(0, 0, NW, NH), border_radius=4)
-
-    # 折角（右下角）
-    pygame.draw.polygon(note, (196, 162, 18, 230),
-                        [(NW - 14, NH), (NW, NH - 14), (NW, NH)])
-    pygame.draw.line(note, (155, 128, 8, 190),
-                     (NW - 14, NH - 1), (NW, NH - 14), 1)
-
-    # 頂部警示色帶（深橘紅）
-    pygame.draw.rect(note, (210, 52, 42, 225),
-                     pygame.Rect(0, 0, NW, 15), border_radius=4)
-
-    # 色帶文字
-    tape_s = fmic.render("點 名 通 知", True, (255, 240, 230))
-    note.blit(tape_s, ((NW - tape_s.get_width()) // 2,
-                        (15 - tape_s.get_height()) // 2))
-
-    # 課程短名（粗體，置中）
     short = _SUBJ_SHORT_NAMES.get(course, course[:4])
-    sub_s = fb.render(short, True, (80, 42, 10))
-    note.blit(sub_s, ((NW - sub_s.get_width()) // 2, 20))
+    _note_key = ("roll_note", short, _roll_call_xed[0], _roll_call_attended[0])
+    if _note_key not in _ap_surf_cache:
+        note = pygame.Surface((NW, NH), pygame.SRCALPHA)
+        # 主底色（亮黃便利貼）
+        pygame.draw.rect(note, (255, 228, 52, 242),
+                         pygame.Rect(0, 0, NW, NH), border_radius=4)
+        # 折角（右下角）
+        pygame.draw.polygon(note, (196, 162, 18, 230),
+                            [(NW - 14, NH), (NW, NH - 14), (NW, NH)])
+        pygame.draw.line(note, (155, 128, 8, 190),
+                         (NW - 14, NH - 1), (NW, NH - 14), 1)
+        # 頂部警示色帶（深橘紅）
+        pygame.draw.rect(note, (210, 52, 42, 225),
+                         pygame.Rect(0, 0, NW, 15), border_radius=4)
+        # 色帶文字
+        tape_s = fmic.render("點 名 通 知", True, (255, 240, 230))
+        note.blit(tape_s, ((NW - tape_s.get_width()) // 2,
+                            (15 - tape_s.get_height()) // 2))
+        # 課程短名（粗體，置中）
+        sub_s = fb.render(short, True, (80, 42, 10))
+        note.blit(sub_s, ((NW - sub_s.get_width()) // 2, 20))
 
-    if _roll_call_xed[0]:
-        # ── 點名課已被翹掉：紅色大叉 ─────────────────────────────
-        tint = pygame.Surface((NW, NH - 15), pygame.SRCALPHA)
-        pygame.draw.rect(tint, (220, 40, 40, 55),
-                         pygame.Rect(0, 0, NW, NH - 15), border_radius=4)
-        note.blit(tint, (0, 15))
-        xc = (185, 32, 32)
-        pygame.draw.line(note, xc, (18, 28), (82, 64), 6)   # 左上→右下
-        pygame.draw.line(note, xc, (82, 28), (18, 64), 6)   # 右上→左下
-        # 抗鋸齒端點補圓
-        for pt in [(18, 28), (82, 64), (82, 28), (18, 64)]:
-            pygame.draw.circle(note, xc, pt, 3)
-    elif _roll_call_attended[0]:
-        # ── 已出席：綠色大勾 ─────────────────────────────────────
-        tint = pygame.Surface((NW, NH - 15), pygame.SRCALPHA)
-        pygame.draw.rect(tint, (60, 200, 90, 48),
-                         pygame.Rect(0, 0, NW, NH - 15), border_radius=4)
-        note.blit(tint, (0, 15))
-        chk = (30, 185, 65)
-        pygame.draw.line(note, chk, (22, 52), (36, 62), 5)
-        pygame.draw.line(note, chk, (36, 62), (78, 28), 5)
-        pygame.draw.circle(note, chk, (36, 62), 3)
-    else:
-        # 提示小字（兩行）
-        r1 = fmic.render("本週將點名", True, (120, 68, 18))
-        r2 = fmic.render("記得出席！", True, (160, 78, 18))
-        note.blit(r1, ((NW - r1.get_width()) // 2, 44))
-        note.blit(r2, ((NW - r2.get_width()) // 2, 56))
+        if _roll_call_xed[0]:
+            tint = pygame.Surface((NW, NH - 15), pygame.SRCALPHA)
+            pygame.draw.rect(tint, (220, 40, 40, 55),
+                             pygame.Rect(0, 0, NW, NH - 15), border_radius=4)
+            note.blit(tint, (0, 15))
+            xc = (185, 32, 32)
+            pygame.draw.line(note, xc, (18, 28), (82, 64), 6)
+            pygame.draw.line(note, xc, (82, 28), (18, 64), 6)
+            for pt in [(18, 28), (82, 64), (82, 28), (18, 64)]:
+                pygame.draw.circle(note, xc, pt, 3)
+        elif _roll_call_attended[0]:
+            tint = pygame.Surface((NW, NH - 15), pygame.SRCALPHA)
+            pygame.draw.rect(tint, (60, 200, 90, 48),
+                             pygame.Rect(0, 0, NW, NH - 15), border_radius=4)
+            note.blit(tint, (0, 15))
+            chk = (30, 185, 65)
+            pygame.draw.line(note, chk, (22, 52), (36, 62), 5)
+            pygame.draw.line(note, chk, (36, 62), (78, 28), 5)
+            pygame.draw.circle(note, chk, (36, 62), 3)
+        else:
+            r1 = fmic.render("本週將點名", True, (120, 68, 18))
+            r2 = fmic.render("記得出席！", True, (160, 78, 18))
+            note.blit(r1, ((NW - r1.get_width()) // 2, 44))
+            note.blit(r2, ((NW - r2.get_width()) // 2, 56))
 
-    # ── 旋轉 -8°（便利貼略歪，增加手感）─────────────────────
-    rotated = pygame.transform.rotate(note, -8)
-    rw, rh  = rotated.get_size()
+        # 旋轉 -8°，連同陰影一起快取成最終合成 surface
+        rotated  = pygame.transform.rotate(note, -8)
+        rw, rh   = rotated.get_size()
+        combined = pygame.Surface((rw + 5, rh + 6), pygame.SRCALPHA)
+        # 先貼陰影
+        shad_sf = pygame.Surface((rw, rh), pygame.SRCALPHA)
+        pygame.draw.rect(shad_sf, (0, 0, 0, 55),
+                         pygame.Rect(0, 0, rw, rh), border_radius=6)
+        combined.blit(shad_sf,  (5, 6))
+        combined.blit(rotated,  (0, 0))
+        _ap_surf_cache[_note_key] = combined
+
+    _cached_note = _ap_surf_cache[_note_key]
+    rw, rh = _cached_note.get_size()
 
     # ── 定位：成績面板左邊緣偏左 24 px 為便利貼中心 ──────────
     PW = _SIDE_PANEL_W
-    cx = WIN_W - 8 - PW - 24 + x_offset   # 隨成績面板同步平移
-    cy = STATUS_H + 8 + 130               # 175 + 8 + 130 = 313
+    cx = WIN_W - 8 - PW - 24 + x_offset
+    cy = STATUS_H + 8 + 130
 
-    # 陰影（偏移 +5, +6 的半透明矩形）
-    shad_sf = pygame.Surface((rw, rh), pygame.SRCALPHA)
-    pygame.draw.rect(shad_sf, (0, 0, 0, 55),
-                     pygame.Rect(0, 0, rw, rh), border_radius=6)
-    surf.blit(shad_sf, (cx - rw // 2 + 5, cy - rh // 2 + 6))
-
-    # 便利貼本體
-    surf.blit(rotated, (cx - rw // 2, cy - rh // 2))
+    surf.blit(_cached_note, (cx - (rw - 5) // 2, cy - (rh - 6) // 2))
 
 
 # 明確宣告所有名稱可被 import * 匯出（含 _ 前綴）

@@ -605,10 +605,14 @@ def _draw_status_v2(surf, fm, fs, player, rect, mpos):
         _cdwn_h  = _cdwn_s.get_height() + _cdwn_py * 2
         _cdwn_rx = shop_r.right - _cdwn_w
         _cdwn_ry = shop_r.bottom + 16
-        _cdwn_pill = pygame.Surface((_cdwn_w, _cdwn_h), pygame.SRCALPHA)
-        pygame.draw.rect(_cdwn_pill, _cdwn_bg,
-                         pygame.Rect(0, 0, _cdwn_w, _cdwn_h), border_radius=10)
-        surf.blit(_cdwn_pill, (_cdwn_rx, _cdwn_ry))
+        # countdown pill（按尺寸+顏色快取，避免每幀分配）
+        _pill_key = ("cdwn", _cdwn_w, _cdwn_h, _cdwn_bg)
+        if _pill_key not in _shadow_cache:
+            _ps = pygame.Surface((_cdwn_w, _cdwn_h), pygame.SRCALPHA)
+            pygame.draw.rect(_ps, _cdwn_bg,
+                             pygame.Rect(0, 0, _cdwn_w, _cdwn_h), border_radius=10)
+            _shadow_cache[_pill_key] = _ps
+        surf.blit(_shadow_cache[_pill_key], (_cdwn_rx, _cdwn_ry))
         surf.blit(_cdwn_s,    (_cdwn_rx + _cdwn_px, _cdwn_ry + _cdwn_py))
 
     # ── 週次日曆（等距置中：進度條右緣 ↔ 倒數提示左緣）──────────────

@@ -250,7 +250,10 @@ IME_OVERLAY = """
       }
     } else {
       // 退出全螢幕：還原 overlay 原始位置
-      if (ov._fsParent && !document.body.contains(ov)) {
+      // 注意：不能用 !document.body.contains(ov) 判斷——overlay 移進 canvas 後
+      // canvas 仍在 body 內，條件會是 false 導致永遠無法還原。
+      // 正確判斷：currentParent 是否已不是原始 parent
+      if (ov._fsParent && ov.parentNode !== ov._fsParent) {
         ov._fsParent.insertBefore(ov, ov._fsNextSib || null);
       }
       ov._fsParent  = null;

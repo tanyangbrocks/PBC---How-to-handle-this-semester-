@@ -41,6 +41,10 @@ class SpritePlayer:
         self._idx:           int   = 0
         self._last_adv_ms:   float = -1.0    # -1 = not started yet
         self._ext:           str   = ".jpg"
+        # LRU-1 scaled-surface cache：避免每幀重建 transform.scale（3.68 MB/frame）
+        self._scaled_last_idx:  int   = -1
+        self._scaled_last_size: tuple = ()
+        self._scaled_last_surf        = None
 
         # ── Read metadata ────────────────────────────────────
         meta_path = os.path.join(frames_dir, "meta.json")
@@ -135,7 +139,16 @@ class SpritePlayer:
         if surf is None:
             return None
         if target_size is not None and target_size != surf.get_size():
-            return pygame.transform.scale(surf, target_size)
+            # LRU-1 cache：只要 idx 和尺寸不變就重用，避免每幀重建大 Surface
+            if (self._idx == self._scaled_last_idx
+                    and target_size == self._scaled_last_size
+                    and self._scaled_last_surf is not None):
+                return self._scaled_last_surf
+            scaled = pygame.transform.scale(surf, target_size)
+            self._scaled_last_idx  = self._idx
+            self._scaled_last_size = target_size
+            self._scaled_last_surf = scaled
+            return scaled
         return surf
 
     def reset(self) -> None:

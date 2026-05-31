@@ -493,9 +493,13 @@ def _draw_float_label_card(surf, font, text, x_center, base_y,
     cy     = base_y + fy
     card_r = pygame.Rect(cx, cy, cw, ch)
     _soft_shadow(surf, card_r, radius=radius, alpha=36, offset=(0, 5))
-    card_s = pygame.Surface((cw, ch), pygame.SRCALPHA)
-    card_s.fill((*bg, bg_alpha))
-    surf.blit(card_s, (cx, cy))
+    # 按 (尺寸+顏色) 快取，避免每幀重建 SRCALPHA Surface
+    _fc_key = ("fc", cw, ch, bg, bg_alpha)
+    if _fc_key not in _shadow_cache:
+        _fs = pygame.Surface((cw, ch), pygame.SRCALPHA)
+        _fs.fill((*bg, bg_alpha))
+        _shadow_cache[_fc_key] = _fs
+    surf.blit(_shadow_cache[_fc_key], (cx, cy))
     pygame.draw.rect(surf, CYAN, card_r, 1, border_radius=radius)
     surf.blit(t_surf, (x_center - tw // 2, cy + pad_y))
     return card_r, fy

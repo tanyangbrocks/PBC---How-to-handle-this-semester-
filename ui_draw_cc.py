@@ -852,13 +852,15 @@ def _draw_cc_summary(surf, fm, fs, mpos, game_mode=False):
     cw = 700; ch = 500
     cx = (WIN_W - cw) // 2; cy = (WIN_H - ch) // 2
 
-    sh = pygame.Surface((cw + 8, ch + 8), pygame.SRCALPHA)
-    pygame.draw.rect(sh, (0, 0, 0, 55), (0, 0, cw + 8, ch + 8), border_radius=20)
-    surf.blit(sh, (cx + 4, cy + 4))
+    # 外卡片投影（尺寸固定，快取避免每幀 1.4 MB 分配）
+    surf.blit(_get_popup_sh(cw + 8, ch + 8, 55), (cx + 4, cy + 4))
 
-    card_s = pygame.Surface((cw, ch), pygame.SRCALPHA)
-    pygame.draw.rect(card_s, (255, 245, 228, 248), (0, 0, cw, ch), border_radius=18)
-    surf.blit(card_s, (cx, cy))
+    # 外卡片底色（尺寸固定，快取）
+    if ("cc_sum_card", cw, ch) not in _popup_sh_cache:
+        _cs = pygame.Surface((cw, ch), pygame.SRCALPHA)
+        pygame.draw.rect(_cs, (255, 245, 228, 248), (0, 0, cw, ch), border_radius=18)
+        _popup_sh_cache[("cc_sum_card", cw, ch)] = _cs
+    surf.blit(_popup_sh_cache[("cc_sum_card", cw, ch)], (cx, cy))
     pygame.draw.rect(surf, CYAN, pygame.Rect(cx, cy, cw, ch), 2, border_radius=18)
 
     # ── 標題 ────────────────────────────────────────────────────
@@ -874,10 +876,14 @@ def _draw_cc_summary(surf, fm, fs, mpos, game_mode=False):
     GAP     = 10
 
     def _inner_card(rect):
-        s = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
-        pygame.draw.rect(s, _IC_BG, (0, 0, rect.width, rect.height),
-                         border_radius=_IC_R)
-        surf.blit(s, rect.topleft)
+        # 改用 _popup_sh_cache 快取（key 包含尺寸和顏色資訊）
+        _ick = ("ic", rect.width, rect.height)
+        if _ick not in _popup_sh_cache:
+            _s = pygame.Surface((rect.width, rect.height), pygame.SRCALPHA)
+            pygame.draw.rect(_s, _IC_BG, (0, 0, rect.width, rect.height),
+                             border_radius=_IC_R)
+            _popup_sh_cache[_ick] = _s
+        surf.blit(_popup_sh_cache[_ick], rect.topleft)
         pygame.draw.rect(surf, _IC_BDR, rect, 1, border_radius=_IC_R)
 
     def _small_chip(rect, text, font, bg, fg):
