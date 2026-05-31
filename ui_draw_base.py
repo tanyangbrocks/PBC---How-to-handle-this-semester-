@@ -723,10 +723,10 @@ def _apply_shop_purchase(idx: int) -> None:
     """
     pygame 主執行緒直接套用購買效果。
     遊戲執行緒此時阻塞於 _shop_exit_event，無競爭讀寫風險。
-    注意：此模組沒有 import notify()，改用 _cmd_q.put 直接推訊息。
+    注意：此模組沒有 import notify()，改用 _cmd_q.append 直接推訊息。
     """
     def _msg(text: str):
-        _cmd_q.put(("msg", text))
+        _cmd_q.append(("msg", text))
 
     item   = _shop_items[idx]
     player = _player[0]

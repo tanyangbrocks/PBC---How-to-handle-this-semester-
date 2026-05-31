@@ -236,11 +236,35 @@ IME_OVERLAY = """
     }
   }
 
+  function _syncOvForFs() {
+    // 全螢幕時 position:fixed 元素必須在 fullscreen element 內才可見
+    var fsEl = document.fullscreenElement || document.webkitFullscreenElement;
+    var ov   = document.getElementById('__cc_ov');
+    if (!ov) return;
+    if (fsEl) {
+      // 進入全螢幕：把 overlay 移到全螢幕元素裡
+      if (!fsEl.contains(ov)) {
+        ov._fsParent  = ov.parentNode;
+        ov._fsNextSib = ov.nextSibling;
+        fsEl.appendChild(ov);
+      }
+    } else {
+      // 退出全螢幕：還原 overlay 原始位置
+      if (ov._fsParent && !document.body.contains(ov)) {
+        ov._fsParent.insertBefore(ov, ov._fsNextSib || null);
+      }
+      ov._fsParent  = null;
+      ov._fsNextSib = null;
+    }
+  }
+
   document.addEventListener('fullscreenchange', function() {
     writeState((document.fullscreenElement || document.webkitFullscreenElement) ? '1' : '0');
+    _syncOvForFs();
   });
   document.addEventListener('webkitfullscreenchange', function() {
     writeState((document.fullscreenElement || document.webkitFullscreenElement) ? '1' : '0');
+    _syncOvForFs();
   });
 
   // canvas 可能在 DOMContentLoaded 後才建立，用 MutationObserver 等待

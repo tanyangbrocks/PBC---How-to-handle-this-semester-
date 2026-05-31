@@ -814,8 +814,8 @@ async def run_ui():
         _freq = 44100
         # WASM: ScriptProcessorNode 在主執行緒處理音效。
         # 前景時主執行緒忙於渲染，buffer 填不及 → 失真。
-        # 增大 buffer 到 4096 給更多餘裕（~93ms latency，BGM 可接受）。
-        _buf  = 4096  if _sys_m.platform == "emscripten" else 512
+        # 增大 buffer 到 8192 給更多餘裕（~186ms latency，BGM 可接受）。
+        _buf  = 8192  if _sys_m.platform == "emscripten" else 512
         pygame.mixer.init(frequency=_freq, size=-16, channels=2, buffer=_buf)
         # WASM：減少 channel 數量降低音訊處理負載
         if _sys_m.platform == "emscripten":
