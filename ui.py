@@ -427,30 +427,46 @@ async def ask_cc_name(prompt: str) -> str:
         try:
             import platform as _plt
             import json as _jj
-            print(f"[DBG ask_cc_name] 呼叫 __cc_show，prompt={prompt!r}")
+            # 清除上次可能殘留的 JS global fallback（必須在任何 await 之前執行）
+            try: _plt.window.eval("window.__cc_result_fb = null;")
+            except Exception: pass
             _plt.window.eval(f"__cc_show({_jj.dumps(prompt)})")
             _shown = True
-            print("[DBG ask_cc_name] __cc_show 完成，進入 FS bridge polling")
         except Exception as _e:
             print(f"[ask_cc_name] __cc_show 失敗：{_e}，回退 cc_name 模式")
 
         if _shown:
-            # ② polling：純 Python open()，不呼叫任何 JS — 無死鎖風險
+            # polling：以下順序：
+            #   ① 讀 /tmp/__cc_result.txt（FS bridge 主路徑）
+            #   ② 讀 window.__cc_result_fb（JS global fallback；FS.writeFile 失敗時用）
+            # 不在 await 後呼叫 eval()，僅做 property 讀取（同步、無死鎖風險）
             _poll_count = 0
             while True:
+                # ─── ① FS bridge ────────────────────────────────
                 try:
                     with open(_RESULT_FILE, "r", encoding="utf-8") as _f:
                         _raw = _f.read()
-                    print(f"[DBG ask_cc_name] 收到結果：{_raw!r}")
                     final = _raw.strip() or "無名氏"
                     _cc_reply_val[0]  = final
                     _cc_reply_ready[0] = True
                     return final
                 except (FileNotFoundError, OSError):
                     pass
+                # ─── ② JS global fallback ────────────────────────
+                try:
+                    import platform as _plt2
+                    _fb = _plt2.window.__cc_result_fb
+                    # _fb 為 null/undefined/空 時跳過
+                    if _fb is not None and str(_fb) not in ("", "null", "undefined", "None"):
+                        final = str(_fb).strip() or "無名氏"
+                        _cc_reply_val[0]  = final
+                        _cc_reply_ready[0] = True
+                        return final
+                except Exception:
+                    pass
                 _poll_count += 1
-                if _poll_count == 60:   # 約 1 秒後印一次，確認 polling 仍在跑
-                    print("[DBG ask_cc_name] polling 中，等待玩家輸入...")
+                if _poll_count % 120 == 60:   # 每隔約 1 秒印一次
+                    print("[ask_cc_name] polling 等待玩家輸入名字...")
                 await asyncio.sleep(0)
 
     # 桌面（及 WASM overlay 顯示失敗時的 fallback）

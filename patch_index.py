@@ -489,11 +489,17 @@ function __cc_submit() {
   }
   try {
     // emscripten FS bridge：直接寫入 WASM 虛擬檔案系統，Python 用 open() 讀取
+    // 確保 /tmp/ 目錄存在（部分 BrowserFS 設定下不會自動建立）
+    try { Module.FS.mkdir('/tmp'); } catch(e2) { /* 已存在時忽略 */ }
     Module.FS.writeFile('/tmp/__cc_result.txt', val);
-  } catch(e) {
-    // fallback：寫到 window property（Python 不需要在 await 後讀，只作備用）
+    // 同時寫到 JS global，讓 Python fallback 路徑也能取得結果
     window.__cc_result_fb = val;
-    console.warn('[cc_ime] FS.writeFile failed, using fallback:', e);
+    console.log('[cc_ime] FS.writeFile OK, val=' + JSON.stringify(val));
+  } catch(e) {
+    // fallback：僅寫到 window property（Python fallback 路徑讀取）
+    window.__cc_result_fb = val;
+    console.warn('[cc_ime] FS.writeFile failed, fallback set. val='
+                 + JSON.stringify(val) + ' err=' + e);
   }
 }
 document.addEventListener('DOMContentLoaded', function(){
