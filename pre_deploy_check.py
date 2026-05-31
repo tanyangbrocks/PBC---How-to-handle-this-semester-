@@ -133,18 +133,29 @@ if not _found:
 # B. canvas tabindex=-1（會讓 pygame 事件全部失效）
 # ════════════════════════════════════════════════════════════════
 _section("B. canvas tabindex=-1（pygame 事件失效）")
+# IME overlay（__cc_show）在 patch_index.py 裡會暫時設 tabindex=-1，
+# 但 __cc_submit 會還原，屬於受控操作。
+# 此處只抓「沒有配對 restore 的裸操作」，即 Python 端的 _wasm_input_setup 型錯誤。
 _found = False
 for pyf in GAME_PY:
     src = pyf.read_text(encoding="utf-8", errors="replace")
-    for i, line in enumerate(src.splitlines(), 1):
-        # 找設 tabindex="-1" 且作用在 canvas 的程式碼
-        if "tabindex" in line and ("-1" in line):
-            if "canvas" in line or "querySelectorAll" in line or "setAttribute" in line:
-                _red(f"{pyf.name}:{i}  canvas 被設為 tabindex=-1 → 滑鼠點擊與鍵盤全部失效")
-                _found = True
+    lines = src.splitlines()
+    for i, line in enumerate(lines, 1):
+        if "tabindex" not in line or "-1" not in line:
+            continue
+        if not ("canvas" in line or "querySelectorAll" in line or "setAttribute" in line):
+            continue
+        # 若同函式 ±20 行內有 restore（tabindex 還原 / oldTab / pointerEvents 還原）就跳過
+        ctx = "\n".join(lines[max(0,i-20):min(len(lines),i+20)])
+        if any(kw in ctx for kw in ("_oldTab", "oldPe", "setAttribute('tabindex','1')",
+                                     'setAttribute("tabindex","1")', "removeAttribute('tabindex')",
+                                     'removeAttribute("tabindex")', "__cc_submit", "_imeKeyBlock")):
+            continue
+        _red(f"{pyf.name}:{i}  canvas 設 tabindex=-1 且無 restore → 滑鼠/鍵盤事件永久失效")
+        _found = True
 
 if not _found:
-    _ok("無危險的 canvas tabindex=-1 操作")
+    _ok("canvas tabindex=-1 操作均有對應 restore（或不存在）")
 
 
 # ════════════════════════════════════════════════════════════════
@@ -300,21 +311,26 @@ if not _index.exists():
 else:
     _html = _index.read_text(encoding="utf-8", errors="replace")
 
-    if "visibilitychange" in _html:
-        _ok("Page Visibility 音訊修復已套用")
-    else:
-        _yellow("index.html 缺少 Page Visibility 音訊修復 → 重跑 patch_index.py")
-
-    if "pbc_bar" in _html:
-        _ok("自訂載入畫面已套用")
-    else:
-        _yellow("index.html 缺少自訂載入畫面 → 重跑 patch_index.py")
-
-    # 檢查 tabindex=-1 是否殘留在已 patch 的 html
-    if 'tabindex="-1"' in _html or "tabindex='-1'" in _html:
-        _yellow("index.html 內含 tabindex=-1 → 確認是否影響 canvas 事件")
-    else:
-        _ok("index.html 無危險 tabindex=-1")
+    # 以 patch_index.py 實際注入的關鍵字串驗證每個 patch 是否已套用
+    _patches = [
+        ("pbc_bar",              "自訂載入畫面"),
+        ("AudioWorklet",         "AudioWorklet proxy（音訊主執行緒隔離）"),
+        ("visibilitychange",     "Page Visibility AudioContext resume"),
+        ("sdl2-proxy",           "AudioWorklet Worklet processor"),
+        ("browserfs.min.js",     "browserfs URL 修復"),
+        ("cdn.jsdelivr.net",     "browserfs 改用 jsdelivr CDN"),
+        ("__cc_show",            "中文 IME overlay（FS bridge）"),
+        ("__cc_submit",          "IME overlay 提交函式"),
+        ("documentElement",      "全螢幕使用 documentElement（IME 可見）"),
+        ("handleCanvasClick",    "全螢幕按鈕座標換算"),
+        ("1280 / (rect.width",   "全螢幕座標修正（canvas.width ≠ 遊戲寬）"),
+        ("__fs_state.txt",       "全螢幕狀態 FS bridge"),
+    ]
+    for keyword, label in _patches:
+        if keyword in _html:
+            _ok(f"patch 已套用：{label}")
+        else:
+            _red(f"patch 缺失：{label} → 重跑 patch_index.py")
 
     # 遊戲包
     _pkg_name = "pbc---how-to-handle-this-semester-"

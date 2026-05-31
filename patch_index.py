@@ -463,6 +463,79 @@ document.addEventListener('DOMContentLoaded', function(){
 html = html.replace("</body>", IME_OVERLAY, 1)
 print("[patch_index] ✓ 中文 IME overlay 注入成功（FS bridge 方案）")
 
+# ── 5. 注入 JS 全域崩潰攔截（WASM heap 耗盡 / RuntimeError）────────────
+# Python try/except 在 WASM/heap 崩潰時根本無法執行。
+# 在 JS 層用 window.onerror + unhandledrejection 攔截，
+# 顯示可操作的重整畫面，避免玩家面對空白黑屏不知所措。
+CRASH_HANDLER_JS = """
+<script>
+(function(){
+  var _crashed = false;
+
+  function _showCrash(reason) {
+    if (_crashed) return;
+    _crashed = true;
+    console.error('[PBC crash]', reason);
+    // 嘗試暫停音訊
+    try {
+      var ctx = (window.MM && window.MM.audioContext) ||
+                (typeof Module !== 'undefined' && Module.SDL2 && Module.SDL2.audioContext);
+      if (ctx) ctx.suspend();
+    } catch(e) {}
+    // 建立全螢幕錯誤覆蓋層
+    var ov = document.createElement('div');
+    ov.style.cssText =
+      'position:fixed;top:0;left:0;width:100%;height:100%;z-index:2147483647;' +
+      'background:rgba(20,10,5,0.93);display:flex;flex-direction:column;' +
+      'align-items:center;justify-content:center;font-family:sans-serif;';
+    var title = document.createElement('div');
+    title.textContent = '遊戲發生錯誤';
+    title.style.cssText = 'font-size:26px;font-weight:bold;color:#ffcc88;margin-bottom:12px;';
+    var sub = document.createElement('div');
+    sub.textContent = '請重新整理頁面繼續遊玩';
+    sub.style.cssText = 'font-size:14px;color:#aa9070;margin-bottom:8px;';
+    var detail = document.createElement('div');
+    detail.textContent = String(reason).substring(0, 120);
+    detail.style.cssText = 'font-size:11px;color:#666;margin-bottom:28px;max-width:480px;text-align:center;';
+    var btn = document.createElement('button');
+    btn.textContent = '重新整理';
+    btn.style.cssText =
+      'padding:12px 40px;font-size:16px;font-weight:bold;' +
+      'background:#FF9460;color:#fff;border:none;border-radius:10px;cursor:pointer;';
+    btn.onclick = function(){ location.reload(); };
+    ov.appendChild(title);
+    ov.appendChild(sub);
+    ov.appendChild(detail);
+    ov.appendChild(btn);
+    document.body.appendChild(ov);
+  }
+
+  // JS 全域例外（含 WASM RuntimeError / abort / OOM）
+  window.addEventListener('error', function(e) {
+    var msg = (e.error && e.error.message) || e.message || 'Unknown error';
+    // 過濾無害的資源載入錯誤（img/script 404 等）
+    if (e.filename || e.lineno) {
+      _showCrash(msg);
+    }
+  });
+
+  // 未處理的 Promise rejection（emscripten abort() 有時走這條路）
+  window.addEventListener('unhandledrejection', function(e) {
+    var reason = (e.reason && e.reason.message) || String(e.reason) || 'Unhandled rejection';
+    if (reason.indexOf('abort') !== -1 ||
+        reason.indexOf('OOM')   !== -1 ||
+        reason.indexOf('memory') !== -1 ||
+        reason.indexOf('RuntimeError') !== -1) {
+      _showCrash(reason);
+    }
+  });
+})();
+</script>
+</body>"""
+
+html = html.replace("</body>", CRASH_HANDLER_JS, 1)
+print("[patch_index] ✓ JS 全域崩潰攔截注入成功（window.onerror + unhandledrejection）")
+
 with open(INDEX_PATH, "w", encoding="utf-8") as f:
     f.write(html)
 

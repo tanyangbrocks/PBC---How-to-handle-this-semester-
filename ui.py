@@ -95,13 +95,12 @@ def _wasm_input_setup(prompt: str, default: str = "") -> None:
     _plt.window.eval(f"window._ask_text_default={_json.dumps(default)};")
     _plt.window.eval(f"window._ask_text_hint={_json.dumps('（支援繁體中文輸入法）')};")
     _plt.window.eval(f"window._ask_text_btn={_json.dumps('確認')};")
-    _plt.window.eval("window._ask_text_result=null;window._ask_text_done=false;")
     _plt.window.eval("""
 (function(){
   var d=document.createElement('div');
   d.id='__py_input_ov';
   d.style.cssText='position:fixed;top:0;left:0;width:100%;height:100%;'
-    +'background:rgba(0,0,0,0.52);z-index:99999;'
+    +'background:rgba(0,0,0,0.52);z-index:2147483647;'
     +'display:flex;align-items:center;justify-content:center;';
   var box=document.createElement('div');
   box.style.cssText='background:#fff9f0;border-radius:16px;padding:30px 36px;'
@@ -134,7 +133,10 @@ def _wasm_input_setup(prompt: str, default: str = "") -> None:
     +'cursor:pointer;font-weight:bold;';
   function ok(){
     var v=document.getElementById('__py_inp');
-    if(v){window._ask_text_result=v.value;window._ask_text_done=true;}
+    if(!v) return;
+    var val=v.value||'';
+    try{ Module.FS.writeFile('/tmp/__ask_text_result.txt', val); }
+    catch(e){ window.__ask_text_fb=val; console.warn('[ask_text] FS.writeFile failed:',e); }
   }
   btn.onclick=ok;
   inp.addEventListener('keydown',function(e){
@@ -168,11 +170,13 @@ def _wasm_input_teardown() -> None:
     import platform as _plt
     _plt.window.eval(
         "var e=document.getElementById('__py_input_ov');if(e)e.remove();"
-        "delete window._ask_text_result;"
-        "delete window._ask_text_done;"
-        "delete window._ask_text_prompt;"
-        "delete window._ask_text_default;"
+        "delete window.__ask_text_fb;"
     )
+    try:
+        import os as _os_atd
+        _os_atd.remove("/tmp/__ask_text_result.txt")
+    except (FileNotFoundError, OSError):
+        pass
     # 恢復 canvas pointer-events 與焦點
     _plt.window.eval(
         "var c=document.getElementById('canvas');"
@@ -187,30 +191,27 @@ async def ask_text(prompt: str, default: str = "") -> str:
     """
     import sys
     if sys.platform == "emscripten":
+        import os as _os_at
+        _ATFILE = "/tmp/__ask_text_result.txt"
+        try: _os_at.remove(_ATFILE)
+        except (FileNotFoundError, OSError): pass
         try:
             _wasm_input_setup(prompt, default)
-            import platform as _plt
-            # 用 _ask_text_done flag 偵測提交，每幀 yield 確保遊戲迴圈繼續運行
+            # FS bridge polling：純 open()，零 WASM→JS eval 呼叫，不影響主執行緒
             while True:
                 try:
-                    # 回傳整數 1/0，避免 JS boolean→Python 橋接的型別不確定性
-                    done = bool(_plt.window.eval("window._ask_text_done?1:0"))
-                except Exception:
-                    done = False
-                if done:
-                    break
+                    with open(_ATFILE, "r", encoding="utf-8") as _f:
+                        result = _f.read()
+                    _wasm_input_teardown()
+                    return result
+                except (FileNotFoundError, OSError):
+                    pass
                 await asyncio.sleep(0)
-            try:
-                result = str(_plt.window.eval("window._ask_text_result||''") or "")
-            except Exception:
-                result = ""
-            _wasm_input_teardown()
-            return result
         except Exception as _e:
             try: _wasm_input_teardown()
             except Exception: pass
             print(f"[ask_text WASM] 失敗：{_e}")
-            return default   # 出錯時不 fallthrough 到桌面模式
+            return default
     # 桌面環境
     _cmd_q.append(("text", prompt, default))
     _reply_ready[0] = False
