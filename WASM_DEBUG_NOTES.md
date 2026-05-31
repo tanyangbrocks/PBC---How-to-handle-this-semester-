@@ -34,9 +34,9 @@
 - **修法**：移除 `ctx.suspend()`，只在 visible 時 `ctx.resume()`（`patch_index.py`）
 
 ### 2-4 全螢幕時 IME overlay 消失
-- **根因**：`__cc_ov` div 在 `<body>` 中。進入全螢幕後，瀏覽器只顯示 fullscreen element（canvas）及其子元素，`<body>` 中其他元素全隱藏
-- **修法**：注入 `_syncOvForFs()` 函式，`fullscreenchange` 時將 overlay 移入 fullscreen element（`patch_index.py`）
-- **追加修**：還原條件原為 `!document.body.contains(ov)`（永遠 false，因 canvas 仍在 body 內）→ 改為 `ov.parentNode !== ov._fsParent`
+- **根因**：`__cc_ov` div 在 `<body>` 中。進入全螢幕後，瀏覽器只顯示 fullscreen element 及其子元素，`<body>` 中其他元素全隱藏
+- **嘗試過的錯誤方向**：把 overlay 移入 `<canvas>`（fullscreen element）→ 仍然不可見。原因：HTML spec 規定 `<canvas>` 不渲染 HTML 子元素（子元素只是不支援 canvas 的瀏覽器用的 fallback content）
+- **最終正確修法**：`fsToggle()` 改為對 `document.documentElement`（html 根元素）呼叫 `requestFullscreen()`。`documentElement` 包含整個 `<body>`，所有元素（含 overlay）自動在全螢幕範圍內，無需移動任何 DOM（`patch_index.py`）
 
 ### 2-5 WASM heap 耗盡（全面性 SRCALPHA 問題）
 - **根因**：每幀建立大型 SRCALPHA Surface，Python GC 追不上 → heap 溢位 → 凍結
@@ -65,12 +65,19 @@
 ### 2-6 音訊失真（前景 ScriptProcessorNode underrun）
 - **根因**：SDL2 的 `ScriptProcessorNode.onaudioprocess` 跑在主執行緒。主執行緒忙於 WASM 渲染 + GC → callback 來不及填滿 buffer → underrun = 失真。
 - **確認依據**：「遊戲凍結後音效反而正常了」→ 凍結時主執行緒空閒 → audio callback 正常填入
-- **pygbag 官方**：issue #19 為已知問題，官方建議「用外部 JS sound manager 取代 SDL2 音效」
+- **官方狀態**（參見[附錄 A](#附錄-a外部資料來源)）：pygbag issue #19 為已知問題；FAQ 建議改用外部 JS sound manager 或等待 SDL2 換成 OpenAL
 - **修法（分層）**：
   1. **根本修**：AudioWorklet proxy（`patch_index.py`）——monkey-patch `AudioContext.createScriptProcessor`，用 Proxy 攔截 SDL2 的音訊節點，把資料 `postMessage` 給 AudioWorkletNode（獨立執行緒），主執行緒不再決定音訊輸出時機
-  2. **輔助修**：移除所有 `[DBG] print()` 語句——每次 `print()` 都跨越 WASM→JS boundary，直接增加主執行緒負擔
+  2. **輔助修**：移除所有 `[DBG] print()` 語句——每次 `print()` 都跨越 WASM→JS boundary，直接增加主執行緒負擔（pygbag FAQ 明確記載）
   3. **輔助修**：主迴圈 double yield（`asyncio.sleep(0)` × 2）——給瀏覽器更多機會執行任務
   4. **基礎修**：大量 SRCALPHA 快取——降低 GC 頻率，縮短每幀時間
+
+### 2-6a AudioWorklet proxy 實作踩坑
+- **AudioWorklet 送接 packet 大小不匹配**（第一版 bug）：  
+  `ScriptProcessorNode` 每次 `onaudioprocess` 送出 4096 sample 的 packet；  
+  `AudioWorkletProcessor.process()` 每次只有 128 個 sample 的 buffer。  
+  初版直接 `ch[c].set(pkt[c])`，只複製前 128/4096 = **3.1%**，其餘 96.9% 丟棄 → 音樂「消失」。  
+  **正確做法**：Worklet 內維護 `this._pos` cursor，跨多次 `process()` 呼叫連續消化完整 packet。
 
 ### 2-7 run_ui asyncio task 被例外 crash 後無法恢復
 - **根因**：`while _cmd_q:` 中的 tag handler 若拋出例外，整個 `run_ui` coroutine 終止 → 遊戲永久凍結
@@ -86,7 +93,7 @@
 |------|------|
 | 全螢幕按鈕座標換算 | `canvas.click` listener，用固定遊戲解析度 1280×720 換算 |
 | 全螢幕狀態橋接 | `fullscreenchange` → 寫 `/tmp/__fs_state.txt` → Python 每幀讀取 |
-| IME overlay 全螢幕同步 | `_syncOvForFs()`，進入全螢幕時把 `__cc_ov` 移入 `document.fullscreenElement` |
+| 全螢幕目標 | `document.documentElement.requestFullscreen()`，使 body 內所有元素可見 |
 | 中文 IME overlay | `__cc_show(prompt)`、`__cc_submit()` → FS bridge → `/tmp/__cc_result.txt` |
 | AudioWorklet proxy | monkey-patch `createScriptProcessor`，把音訊路由到獨立 Worklet 執行緒 |
 | Page Visibility resume | `visibilitychange` 時 `ctx.resume()`，防止 AudioContext 停留在 suspended 狀態 |
@@ -152,6 +159,7 @@ python -X utf8 patch_index.py
 | `a19315d` | 全面 WASM heap 修復（SpritePlayer/AP panel/CC summary 等）+ _syncOvForFs 條件修正 |
 | `74ec40b` | Double yield + cmd handler guard + fade surf cache + cc_title cache |
 | `ab420cb` | **AudioWorklet proxy + 移除 debug print**（音訊根本修） |
+| `b7e7489` | **Worklet cursor bug 修（音樂消失）+ fullscreen 改用 documentElement** |
 
 ---
 
@@ -159,7 +167,33 @@ python -X utf8 patch_index.py
 
 | 問題 | 狀態 | 說明 |
 |------|------|------|
-| 音訊失真 | ✅ 已修（AudioWorklet proxy） | 如仍有問題，可能是 Worklet 初始化期間（遊戲開始後約 200ms 內）的短暫直通 |
+| 音訊失真 | ✅ 已修（AudioWorklet proxy + cursor fix） | Worklet 就緒前（~200ms）有短暫直通；Worklet 就緒後完全離開主執行緒 |
+| 全螢幕 IME overlay | ✅ 已修（documentElement fullscreen） | 改用 html 根元素為全螢幕目標，overlay 自動可見 |
 | CC 粒子 wisp 每幀小 Surface | ⚠️ 待優化 | ~30 個小 SRCALPHA/frame，影響較小但未快取 |
 | `_render_mixed` 每幀建立 Surface | ⚠️ 待優化 | 拉霸機可見時，每個 tile 都建立小 Surface |
 | `ui_draw.py`（死碼） | ℹ️ 無影響 | 原始未拆分的 4628 行巨型檔案，未被 `ui.py` import，不影響遊戲 |
+
+---
+
+## 附錄 A：外部資料來源
+
+### pygbag issue #19 — "sound may have problems"
+**連結**：https://github.com/pygame-web/pygbag/issues/19
+
+**官方說明摘要**：
+- 狀態：已知問題，尚未在 pygbag 層面根本修復
+- 症狀：各瀏覽器均有不同程度的嘶嘶聲 / 失真，Brave / Edge 尤其明顯
+- 官方根因：「SDL2 is hard realtime, so sometimes the game asks too much from average devices and is a bit late on frame. Because of this, sound effects are distorted.」（SDL2 是硬即時，裝置太忙時掉幀導致音效失真）
+- 官方建議：
+  1. 升級到 pygbag 0.1.5 以上（已解決部分問題）
+  2. 用外部 JavaScript sound manager 取代 SDL2 音效
+  3. 長期方向：「Possible other solution: replace sdl2_audio by openal, PR welcomed」
+- 本專案的進展：我們透過 AudioWorklet proxy（見 2-6）在不修改 pygbag 底層的情況下從根本解決了主執行緒競爭問題
+
+### pygbag code FAQ — "Pygbag code FAQ/Samples"
+**連結**：https://pygame-web.github.io/wiki/pygbag-code/
+
+**與音訊相關的官方注意事項**：
+- **`print()` 效能警告**（官方明確記載）：「remove all debug `print()` statements from your code, as console output significantly reduces browser performance」——每個 `print()` 在 WASM 中都要跨越 WASM→JS boundary。本專案已全面移除所有 polling loop 中的 debug print。
+- **音訊格式建議**：所有音訊檔案使用 **OGG 格式**，目標 16-bit、24 kHz、Mono。（本專案使用 44100 Hz stereo OGG，已驗證無降頻失真問題）
+- **音訊初始化**：不建議主動 `ctx.suspend()`，瀏覽器本身會在頁面不可見時節流，主動 suspend 反而導致背景音消失（本專案 2-3 已修）
