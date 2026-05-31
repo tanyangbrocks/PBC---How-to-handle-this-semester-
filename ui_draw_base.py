@@ -75,10 +75,11 @@ def _request_bgm(name: "str | None") -> None:
     - 若目前無曲目在播：立即排程（下一幀載入），無淡出等待。
     - 否則：fadeout 舊曲，等 BGM_FADE_MS ms 後主迴圈自動載入新曲。
 
-    實作說明：改用 pygame.mixer.Sound + 專用 Channel（_bgm_ch_obj）。
-    pygame.mixer.music（串流）在 emscripten WASM SDL2_mixer 無聲音輸出，
-    pygame.mixer.Sound（取樣）與 SFX 同一套 Web Audio 路徑，可正常發聲。
+    平台差異：
+    - 桌面：pygame.mixer.music（串流，即時切換，有淡出淡入效果）
+    - WASM：pygame.mixer.Sound + Channel（music 在 emscripten 無聲音輸出）
     """
+    import sys as _sys_rbgm
     target = _bgm_pending[0] if _bgm_pending[0] is not None else _bgm_current[0]
     if name == target:
         return
@@ -87,16 +88,24 @@ def _request_bgm(name: "str | None") -> None:
         # 目前沒有在播的曲目，不需要等待淡出
         _bgm_switch_at[0] = pygame.time.get_ticks()
     else:
-        # 不使用 fade_ms（WASM SDL2_mixer fade 計時可能有 bug）
-        _bgm_switch_at[0] = pygame.time.get_ticks() + 300  # 短暫等待讓舊曲結束
-        try:
-            ch = _bgm_ch_obj[0]
-            if ch is not None:
-                ch.stop()
-            elif _bgm_snd_obj[0] is not None:
-                _bgm_snd_obj[0].stop()
-        except Exception:
-            pass
+        if _sys_rbgm.platform == "emscripten":
+            # WASM：Sound 無 fadeout，直接 stop + 短暫等待
+            _bgm_switch_at[0] = pygame.time.get_ticks() + 300
+            try:
+                ch = _bgm_ch_obj[0]
+                if ch is not None:
+                    ch.stop()
+                elif _bgm_snd_obj[0] is not None:
+                    _bgm_snd_obj[0].stop()
+            except Exception:
+                pass
+        else:
+            # 桌面：music fadeout（有淡出效果，等待淡出完成再切換）
+            _bgm_switch_at[0] = pygame.time.get_ticks() + BGM_FADE_MS
+            try:
+                pygame.mixer.music.fadeout(BGM_FADE_MS)
+            except Exception:
+                pass
 
 def _get_evt_shake_offset() -> tuple:
     """回傳突發事件全螢幕震動的 (dx, dy) 位移量（px）。震動結束後自動清除。"""

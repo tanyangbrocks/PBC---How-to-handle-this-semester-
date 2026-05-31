@@ -867,20 +867,21 @@ async def run_ui():
     except Exception:
         pass
 
-    # ── BGM 快取：預載最常用的兩個 BGM，避免遊戲中 OGG decode 造成卡頓 ──
-    # Morning_Rain：標題畫面立刻就播，反正要載；Aether：進入角色創建時立刻要用。
-    # 其餘 BGM 在 BGM tick 中首次用到時才載入並快取，每個唯一 BGM 只 decode 一次。
-    try:
-        _bgm_pre_dir = resource_path("asset", "audio", "bgm")
-        for _bgm_pre_fn in ("Music-Morning_Rain.ogg", "Music-Aether.ogg"):
-            _bgm_pre_path = os.path.join(_bgm_pre_dir, _bgm_pre_fn)
-            if os.path.isfile(_bgm_pre_path) and _bgm_pre_fn not in _bgm_cache:
-                try:
-                    _bgm_cache[_bgm_pre_fn] = pygame.mixer.Sound(_bgm_pre_path)
-                except Exception:
-                    pass
-    except Exception:
-        pass
+    # ── WASM BGM 快取：預載最常用的兩個 BGM，避免遊戲中 OGG decode 造成卡頓 ──
+    # 只在 WASM 上需要（桌面用 music 串流，不需要預先 decode）。
+    # Morning_Rain：標題畫面立刻就播；Aether：進入角色創建時立刻要用。
+    if sys.platform == "emscripten":
+        try:
+            _bgm_pre_dir = resource_path("asset", "audio", "bgm")
+            for _bgm_pre_fn in ("Music-Morning_Rain.ogg", "Music-Aether.ogg"):
+                _bgm_pre_path = os.path.join(_bgm_pre_dir, _bgm_pre_fn)
+                if os.path.isfile(_bgm_pre_path) and _bgm_pre_fn not in _bgm_cache:
+                    try:
+                        _bgm_cache[_bgm_pre_fn] = pygame.mixer.Sound(_bgm_pre_path)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
 
     screen = pygame.display.set_mode((WIN_W, WIN_H))
     pygame.display.set_caption("如何渡過這學期？")
@@ -1082,39 +1083,49 @@ async def run_ui():
         shop_active = (_mode[0] == "choices" and "🏪 前往道具店" in _choices)
 
         # ── BGM 非阻塞切換 tick ───────────────────────────────
-        # 使用 pygame.mixer.Sound + 專用 Channel（channel 1）。
-        # pygame.mixer.music 在 emscripten WASM 無聲音輸出，Sound 可正常發聲。
-        # 注意：不使用 fade_ms（WASM SDL2_mixer 的 fade 計時可能有 bug 導致永遠靜音）
+        # 平台差異：
+        #   桌面：pygame.mixer.music（串流，即時 load，有 fade 效果）
+        #   WASM：Sound + Channel（music 無聲音輸出；Sound 用快取避免 decode stutter）
         if (_bgm_pending[0] is not None
                 and pygame.time.get_ticks() >= _bgm_switch_at[0]):
             _next_bgm      = _bgm_pending[0]
             _bgm_pending[0] = None
             _bgm_current[0] = _next_bgm
-            _ch = _bgm_ch_obj[0]
             if _next_bgm is not None:
                 _bpath = os.path.join(_bgm_dir[0], _next_bgm)
                 if os.path.isfile(_bpath):
                     try:
-                        # 優先從快取取得（避免重複 OGG decode stutter）
-                        if _next_bgm in _bgm_cache:
-                            _new_snd = _bgm_cache[_next_bgm]
+                        if sys.platform == "emscripten":
+                            # ── WASM：Sound + Channel ──────────────────
+                            _ch = _bgm_ch_obj[0]
+                            # 優先從快取取得（避免重複 OGG decode stutter）
+                            if _next_bgm in _bgm_cache:
+                                _new_snd = _bgm_cache[_next_bgm]
+                            else:
+                                _new_snd = pygame.mixer.Sound(_bpath)
+                                _bgm_cache[_next_bgm] = _new_snd
+                            _bgm_snd_obj[0] = _new_snd
+                            if _ch is not None:
+                                _ch.play(_new_snd, loops=-1)
+                            else:
+                                _new_snd.play(-1)
                         else:
-                            _new_snd = pygame.mixer.Sound(_bpath)
-                            _bgm_cache[_next_bgm] = _new_snd   # 快取供後續重用
-                        _bgm_snd_obj[0] = _new_snd
-                        if _ch is not None:
-                            _ch.play(_new_snd, loops=-1)   # 無 fade_ms
-                        else:
-                            _new_snd.play(-1)
+                            # ── 桌面：music（串流，即時切換）─────────
+                            pygame.mixer.music.load(_bpath)
+                            pygame.mixer.music.play(-1, fade_ms=BGM_FADE_MS)
                     except Exception as _bgm_e:
-                        print(f"[BGM] Sound load/play 失敗：{_bgm_e}")
+                        print(f"[BGM] load/play 失敗：{_bgm_e}")
             else:
                 # 切換到靜音
                 try:
-                    if _ch is not None:
-                        _ch.stop()
-                    elif _bgm_snd_obj[0] is not None:
-                        _bgm_snd_obj[0].stop()
+                    if sys.platform == "emscripten":
+                        _ch = _bgm_ch_obj[0]
+                        if _ch is not None:
+                            _ch.stop()
+                        elif _bgm_snd_obj[0] is not None:
+                            _bgm_snd_obj[0].stop()
+                    else:
+                        pygame.mixer.music.stop()
                 except Exception:
                     pass
 
