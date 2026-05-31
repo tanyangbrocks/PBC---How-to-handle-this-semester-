@@ -1045,12 +1045,16 @@ async def run_ui():
             _bgm_current[0] = _next_bgm
             if _next_bgm is not None:
                 _bpath = os.path.join(_bgm_dir[0], _next_bgm)
+                print(f"[BGM] 嘗試載入: {_bpath}  isfile={os.path.isfile(_bpath)}")
                 if os.path.isfile(_bpath):
                     try:
                         pygame.mixer.music.load(_bpath)
                         pygame.mixer.music.play(-1, fade_ms=BGM_FADE_MS)
-                    except Exception:
-                        pass
+                        print(f"[BGM] play() 成功：{_next_bgm}")
+                    except Exception as _bgm_e:
+                        print(f"[BGM] load/play 失敗：{_bgm_e}")
+                else:
+                    print(f"[BGM] isfile=False，跳過。dir={_bgm_dir[0]}")
 
         # ── 消化遊戲執行緒的命令 ─────────────────────────────
         # try/except 保護：任何 tag handler 例外不會 crash 整個 run_ui asyncio task

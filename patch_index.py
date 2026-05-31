@@ -267,20 +267,50 @@ function getAudioCtx() {
 }
 function _tryResumeAudio() {
   var ctx = getAudioCtx();
+  // 診斷 log（每次觸發都印，方便確認是否被呼叫）
+  console.log('[audio] _tryResumeAudio ctx=' + (ctx ? ctx.state : 'null'));
   if (ctx && ctx.state === 'suspended') {
-    ctx.resume().catch(function(){});
+    ctx.resume().then(function() {
+      console.log('[audio] ctx.resume() OK → state=' + ctx.state);
+    }).catch(function(e) {
+      console.warn('[audio] ctx.resume() failed:', e);
+    });
   }
 }
 // 首次點擊 / 觸控 → resume（解決開場無音樂問題）
-document.addEventListener('click',       _tryResumeAudio, {once: false, passive: true});
-document.addEventListener('pointerdown', _tryResumeAudio, {once: false, passive: true});
-document.addEventListener('keydown',     _tryResumeAudio, {once: false, passive: true});
+// 重要：用 capture:true — SDL2/Emscripten 在 canvas 上呼叫 stopPropagation()，
+// bubble phase 的 document 層監聽器收不到事件；
+// capture phase 在 SDL2 的 handler 之前觸發，不受 stopPropagation 影響。
+document.addEventListener('click',       _tryResumeAudio, {capture: true, passive: true});
+document.addEventListener('pointerdown', _tryResumeAudio, {capture: true, passive: true});
+document.addEventListener('keydown',     _tryResumeAudio, {capture: true, passive: true});
 // 切回分頁 / 重新取得焦點 → resume（解決切換分頁後音樂消失問題）
 document.addEventListener('visibilitychange', function() {
   if (document.visibilityState === 'visible') _tryResumeAudio();
 });
 document.addEventListener('focus', _tryResumeAudio);
 window.addEventListener('focus',   _tryResumeAudio);
+
+// 額外保險：直接在 canvas 元素上掛 capture 監聽，避免任何中間層遺漏
+(function attachCanvasAudioResume() {
+  var c = document.getElementById('canvas');
+  if (c) {
+    c.addEventListener('click',       _tryResumeAudio, {capture: true, passive: true});
+    c.addEventListener('pointerdown', _tryResumeAudio, {capture: true, passive: true});
+    return;
+  }
+  // canvas 尚未建立，用 MutationObserver 等待
+  var obs = new MutationObserver(function() {
+    var c2 = document.getElementById('canvas');
+    if (c2) {
+      obs.disconnect();
+      c2.addEventListener('click',       _tryResumeAudio, {capture: true, passive: true});
+      c2.addEventListener('pointerdown', _tryResumeAudio, {capture: true, passive: true});
+      console.log('[audio] canvas audio-resume listeners attached');
+    }
+  });
+  obs.observe(document.body || document.documentElement, {childList: true, subtree: true});
+})();
 
 })();
 </script>
