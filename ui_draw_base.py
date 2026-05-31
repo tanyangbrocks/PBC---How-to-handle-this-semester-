@@ -87,13 +87,13 @@ def _request_bgm(name: "str | None") -> None:
         # 目前沒有在播的曲目，不需要等待淡出
         _bgm_switch_at[0] = pygame.time.get_ticks()
     else:
-        _bgm_switch_at[0] = pygame.time.get_ticks() + BGM_FADE_MS
+        # 不使用 fade_ms（WASM SDL2_mixer fade 計時可能有 bug）
+        _bgm_switch_at[0] = pygame.time.get_ticks() + 300  # 短暫等待讓舊曲結束
         try:
             ch = _bgm_ch_obj[0]
             if ch is not None:
-                ch.fadeout(BGM_FADE_MS)
+                ch.stop()
             elif _bgm_snd_obj[0] is not None:
-                # Channel 尚未初始化（run_ui 前被呼叫）→ 直接 stop Sound
                 _bgm_snd_obj[0].stop()
         except Exception:
             pass

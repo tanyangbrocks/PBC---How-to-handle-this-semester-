@@ -1069,6 +1069,7 @@ async def run_ui():
         # ── BGM 非阻塞切換 tick ───────────────────────────────
         # 使用 pygame.mixer.Sound + 專用 Channel（channel 1）。
         # pygame.mixer.music 在 emscripten WASM 無聲音輸出，Sound 可正常發聲。
+        # 注意：不使用 fade_ms（WASM SDL2_mixer 的 fade 計時可能有 bug 導致永遠靜音）
         if (_bgm_pending[0] is not None
                 and pygame.time.get_ticks() >= _bgm_switch_at[0]):
             _next_bgm      = _bgm_pending[0]
@@ -1082,10 +1083,10 @@ async def run_ui():
                         _new_snd = pygame.mixer.Sound(_bpath)
                         _bgm_snd_obj[0] = _new_snd
                         if _ch is not None:
-                            _ch.play(_new_snd, loops=-1, fade_ms=BGM_FADE_MS)
+                            _ch.play(_new_snd, loops=-1)   # 無 fade_ms
                         else:
                             # Channel 未初始化（理論上不會發生）→ 直接 play
-                            _new_snd.play(loops=-1, fade_ms=BGM_FADE_MS)
+                            _new_snd.play(-1)
                     except Exception as _bgm_e:
                         print(f"[BGM] Sound load/play 失敗：{_bgm_e}")
             else:
