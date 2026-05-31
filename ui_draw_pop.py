@@ -1194,27 +1194,26 @@ def _draw_guide_modal(surf, fm, fs, mpos):
     # 與 show_extra_event_popup 相同方式合併正文
     body = "\n".join(str(l) for l in pdata["lines"] if l)
 
-    # ── 版面常數（與 _draw_event_ok_popup 相同）──────────────
+    # ── 版面常數 ──────────────────────────────────────────────
     popup_w  = min(WIN_W - 80, 760)
     PAD_X    = 28
     PAD_TOP  = 18
-    PAD_BOT  = 24
+    PAD_BOT  = 20          # popup 底部內距（按鈕/圓點已移至 popup 外）
     HDR_H    = fb_lg.get_height() + 22
-    SEP_H    = 14
     BTN_H    = 48
     BTN_W    = 120
-    DOT_H    = 28          # 頁碼指示點區域高度
+    DOT_R    = 6           # 頁碼圓球半徑（略大）
+    dot_gap  = 20
     text_w   = popup_w - PAD_X * 2
 
     title_lines = _wrap(pdata["title"], fb_lg, text_w)
     q_lh_lg     = fb_lg.get_height() + 4
-    IMG_H       = 320   # 圖片顯示區域固定高度
-    body_h      = IMG_H
+    IMG_H       = 320      # 圖片顯示區域固定高度
 
-    total_h = min(HDR_H + PAD_TOP + body_h + SEP_H + DOT_H + BTN_H + PAD_BOT,
-                  WIN_H - 60)
+    # popup 高度只含標題 + 圖片，不含按鈕/圓點（它們懸浮在 popup 外）
+    total_h = min(HDR_H + PAD_TOP + IMG_H + PAD_BOT, WIN_H - 120)
     px = (WIN_W - popup_w) // 2
-    py = max(30, (WIN_H - total_h) // 2)
+    py = max(30, (WIN_H - total_h) // 2 - 30)   # 略上移，為底部懸浮元素留空間
 
     # ── 全螢幕遮罩（快取）────────────────────────────────────
     _blit_ov(surf, 0, 0, 0, 165)
@@ -1265,30 +1264,24 @@ def _draw_guide_modal(surf, fm, fs, mpos):
             cur_y += q_lh
         surf.set_clip(old_clip)
 
-    # ── 分隔線 ────────────────────────────────────────────────
-    nav_top  = py + total_h - PAD_BOT - BTN_H - DOT_H
-    sep_y    = nav_top - SEP_H // 2
-    pygame.draw.line(surf, (210, 190, 165),
-                     (px + PAD_X, sep_y), (px + popup_w - PAD_X, sep_y), 1)
-
-    # ── 頁碼指示點 ───────────────────────────────────────────
-    DOT_R   = 5
-    dot_gap = 16
+    # ── 頁碼圓球：懸浮在 popup 正下方居中 ────────────────────
     dots_w  = _GUIDE_N * (DOT_R * 2) + (_GUIDE_N - 1) * (dot_gap - DOT_R * 2)
-    dot_x0  = px + (popup_w - dots_w) // 2
-    dot_cy  = nav_top + DOT_H // 2
+    dot_x0  = WIN_W // 2 - dots_w // 2
+    dot_cy  = py + total_h + 18
     for _di in range(_GUIDE_N):
         _dcx = dot_x0 + _di * dot_gap + DOT_R
-        _col = (180, 140, 255) if _di == page else (160, 130, 100)
+        _col = (180, 140, 255) if _di == page else (200, 185, 220)
         pygame.draw.circle(surf, _col, (_dcx, dot_cy), DOT_R)
+        if _di == page:   # 當前頁加亮環
+            pygame.draw.circle(surf, (255, 255, 255), (_dcx, dot_cy), DOT_R, 2)
 
-    # ── 導航按鈕 ─────────────────────────────────────────────
-    btn_y     = py + total_h - PAD_BOT - BTN_H
+    # ── 導航按鈕：懸浮在畫面右下角 popup 外 ─────────────────
+    btn_y     = WIN_H - 24 - BTN_H
     prev_rect = None
     next_rect = None
 
     if page > 0:
-        prev_rect = pygame.Rect(px + PAD_X, btn_y, BTN_W, BTN_H)
+        prev_rect = pygame.Rect(WIN_W - PAD_X - BTN_W * 2 - 12, btn_y, BTN_W, BTN_H)
         phov = prev_rect.collidepoint(mpos)
         _premium_btn(surf, prev_rect, _GUIDE_BORDER, phov, radius=12)
         pw = _measure_mixed(fb_lg, "← 上一頁")
@@ -1297,7 +1290,7 @@ def _draw_guide_modal(surf, fm, fs, mpos):
                       prev_rect.y + (BTN_H - fb_lg.get_height()) // 2)
 
     if page < _GUIDE_N - 1:
-        next_rect = pygame.Rect(px + popup_w - PAD_X - BTN_W, btn_y, BTN_W, BTN_H)
+        next_rect = pygame.Rect(WIN_W - PAD_X - BTN_W, btn_y, BTN_W, BTN_H)
         nhov = next_rect.collidepoint(mpos)
         _premium_btn(surf, next_rect, _GUIDE_BORDER, nhov, radius=12)
         nw = _measure_mixed(fb_lg, "下一頁 →")
