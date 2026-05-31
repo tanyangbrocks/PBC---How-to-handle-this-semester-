@@ -1155,6 +1155,29 @@ _GUIDE_PAGES = [
 _GUIDE_N = len(_GUIDE_PAGES)
 _GUIDE_BORDER = (70, 55, 130)   # 與 turn_engine 教學彈窗相同的邊框色
 
+# ── 教學頁面插圖快取 ──────────────────────────────────────────
+# learn_1.jpg / learn_2.jpg / learn_3.jpg，每頁對應一張
+_guide_img_cache: dict = {}   # (page_idx, w, h) -> Surface | None
+
+def _get_guide_img(page_idx: int, max_w: int, max_h: int):
+    """載入並快取 learn_N.jpg，縮放到不超過 (max_w, max_h) 的最大尺寸（保持比例）。"""
+    key = (page_idx, max_w, max_h)
+    if key in _guide_img_cache:
+        return _guide_img_cache[key]
+    fname = f"learn_{page_idx + 1}.jpg"
+    path = resource_path("asset", "picture", "big_object", fname)
+    scaled = None
+    try:
+        raw = pygame.image.load(path).convert()
+        iw, ih = raw.get_size()
+        scale = min(max_w / iw, max_h / ih, 1.0)   # 不放大，只縮小
+        nw, nh = max(1, int(iw * scale)), max(1, int(ih * scale))
+        scaled = pygame.transform.smoothscale(raw, (nw, nh))
+    except Exception as _e:
+        print(f"[guide_img] 無法載入 {fname}：{_e}")
+    _guide_img_cache[key] = scaled
+    return scaled
+
 
 def _draw_guide_modal(surf, fm, fs, mpos):
     """
@@ -1184,10 +1207,9 @@ def _draw_guide_modal(surf, fm, fs, mpos):
     text_w   = popup_w - PAD_X * 2
 
     title_lines = _wrap(pdata["title"], fb_lg, text_w)
-    body_lines  = _wrap(body, fb, text_w) if body else []
     q_lh_lg     = fb_lg.get_height() + 4
-    q_lh        = fb.get_height()    + 4
-    body_h      = len(body_lines) * q_lh
+    IMG_H       = 320   # 圖片顯示區域固定高度
+    body_h      = IMG_H
 
     total_h = min(HDR_H + PAD_TOP + body_h + SEP_H + DOT_H + BTN_H + PAD_BOT,
                   WIN_H - 60)
@@ -1222,17 +1244,26 @@ def _draw_guide_modal(surf, fm, fs, mpos):
     pygame.draw.rect(surf, _GUIDE_BORDER,
                      pygame.Rect(px, py, popup_w, total_h), 3, border_radius=18)
 
-    # ── clip ─────────────────────────────────────────────────
-    old_clip = surf.get_clip()
-    surf.set_clip(pygame.Rect(px + 2, py + 2, popup_w - 4, total_h - 4))
-
-    # ── 正文 ─────────────────────────────────────────────────
-    cur_y = py + HDR_H + PAD_TOP
-    for line in body_lines:
-        _render_mixed(surf, fb, line, WHITE, px + PAD_X, cur_y)
-        cur_y += q_lh
-
-    surf.set_clip(old_clip)
+    # ── 圖片內容（替代文字正文）──────────────────────────────
+    img_area_w = popup_w - PAD_X * 2
+    img_area_h = IMG_H
+    img = _get_guide_img(page, img_area_w, img_area_h)
+    if img is not None:
+        iw, ih = img.get_size()
+        ix = px + PAD_X + (img_area_w - iw) // 2
+        iy = py + HDR_H + PAD_TOP + (img_area_h - ih) // 2
+        surf.blit(img, (ix, iy))
+    else:
+        # 圖片載入失敗時退回文字顯示
+        old_clip = surf.get_clip()
+        surf.set_clip(pygame.Rect(px + 2, py + 2, popup_w - 4, total_h - 4))
+        body_lines = _wrap(body, fb, text_w) if body else []
+        q_lh = fb.get_height() + 4
+        cur_y = py + HDR_H + PAD_TOP
+        for line in body_lines:
+            _render_mixed(surf, fb, line, WHITE, px + PAD_X, cur_y)
+            cur_y += q_lh
+        surf.set_clip(old_clip)
 
     # ── 分隔線 ────────────────────────────────────────────────
     nav_top  = py + total_h - PAD_BOT - BTN_H - DOT_H
