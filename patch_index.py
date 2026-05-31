@@ -143,19 +143,32 @@ AUDIO_FIX_JS = """
 (function(){
 'use strict';
 
+// Worklet 程式碼：正確實作 cursor-based packet 讀取。
+// 背景：ScriptProcessorNode 每次 onaudioprocess 送來 4096 個 sample 的 packet，
+// 但 AudioWorkletProcessor.process() 每次只接收 128 個 sample 的 buffer。
+// 必須用 cursor 追蹤目前讀到 packet 的哪個位置，跨多次 process() 呼叫消化完整 packet。
 var WORKLET_SRC = [
   'class SDL2Proxy extends AudioWorkletProcessor {',
   '  constructor(){',
   '    super();',
-  '    this._q=[];',
+  '    this._q=[];   // packet 佇列',
+  '    this._pos=0;  // 目前 packet 的讀取 cursor',
   '    this.port.onmessage=function(e){this._q.push(e.data);}.bind(this);',
   '  }',
   '  process(inp,out){',
   '    var ch=out[0]; if(!ch||!ch[0]) return true;',
-  '    var n=ch[0].length;',
-  '    if(this._q.length){',
-  '      var pkt=this._q.shift();',
-  '      for(var c=0;c<ch.length&&c<pkt.length;c++) ch[c].set(pkt[c]);',
+  '    var n=ch[0].length; // = 128 samples',
+  '    var done=0;',
+  '    while(done<n){',
+  '      if(!this._q.length){ for(var c=0;c<ch.length;c++) ch[c].fill(0,done); break; }',
+  '      var pkt=this._q[0];',
+  '      var avail=pkt[0].length-this._pos;',
+  '      var take=Math.min(avail,n-done);',
+  '      for(var c=0;c<ch.length&&c<pkt.length;c++){',
+  '        ch[c].set(pkt[c].subarray(this._pos,this._pos+take),done);',
+  '      }',
+  '      done+=take; this._pos+=take;',
+  '      if(this._pos>=pkt[0].length){ this._q.shift(); this._pos=0; }',
   '    }',
   '    return true;',
   '  }',
@@ -311,11 +324,15 @@ IME_OVERLAY = """
   }
 
   function fsToggle() {
-    var c = document.getElementById('canvas');
-    if (!c) return;
     if (!document.fullscreenElement && !document.webkitFullscreenElement) {
-      var req = c.requestFullscreen || c.webkitRequestFullscreen;
-      if (req) req.call(c).catch(function(e){ console.warn('[fs] enter failed:', e); });
+      // 以 document.documentElement（html 根元素）為全螢幕目標。
+      // 原因：以 <canvas> 為目標時，canvas 不渲染 HTML 子元素，
+      // 導致 IME overlay div 移入 canvas 後仍不可見（canvas spec 規定）。
+      // 以 documentElement 為目標時，body 內所有元素（含 overlay）自動可見，
+      // 無需移動 DOM；視覺效果與 canvas 全螢幕相同（canvas 已 100vw/100vh）。
+      var root = document.documentElement;
+      var req  = root.requestFullscreen || root.webkitRequestFullscreen;
+      if (req) req.call(root).catch(function(e){ console.warn('[fs] enter failed:', e); });
     } else {
       var ex = document.exitFullscreen || document.webkitExitFullscreen;
       if (ex) ex.call(document);
@@ -342,28 +359,9 @@ IME_OVERLAY = """
   }
 
   function _syncOvForFs() {
-    // 全螢幕時 position:fixed 元素必須在 fullscreen element 內才可見
-    var fsEl = document.fullscreenElement || document.webkitFullscreenElement;
-    var ov   = document.getElementById('__cc_ov');
-    if (!ov) return;
-    if (fsEl) {
-      // 進入全螢幕：把 overlay 移到全螢幕元素裡
-      if (!fsEl.contains(ov)) {
-        ov._fsParent  = ov.parentNode;
-        ov._fsNextSib = ov.nextSibling;
-        fsEl.appendChild(ov);
-      }
-    } else {
-      // 退出全螢幕：還原 overlay 原始位置
-      // 注意：不能用 !document.body.contains(ov) 判斷——overlay 移進 canvas 後
-      // canvas 仍在 body 內，條件會是 false 導致永遠無法還原。
-      // 正確判斷：currentParent 是否已不是原始 parent
-      if (ov._fsParent && ov.parentNode !== ov._fsParent) {
-        ov._fsParent.insertBefore(ov, ov._fsNextSib || null);
-      }
-      ov._fsParent  = null;
-      ov._fsNextSib = null;
-    }
+    // fsToggle() 改為以 document.documentElement 為全螢幕目標。
+    // documentElement 包含 body 包含 overlay，overlay 永遠在全螢幕元素內，
+    // 無需移動 DOM。此函式保留（供 fullscreenchange 事件使用）但已無實際操作。
   }
 
   document.addEventListener('fullscreenchange', function() {
