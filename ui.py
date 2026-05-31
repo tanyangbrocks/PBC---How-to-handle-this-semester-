@@ -428,45 +428,28 @@ async def ask_cc_name(prompt: str) -> str:
             import json as _jj
             _plt.window.eval(f"__cc_show({_jj.dumps(prompt)})")
             _shown = True
-            print("[DBG] ask_cc_name WASM: overlay __cc_show() 呼叫成功")
         except Exception as _e:
-            print(f"[DBG] ask_cc_name WASM: __cc_show 失敗 {_e}，回退 cc_name 模式")
+            print(f"[ask_cc_name] __cc_show 失敗：{_e}，回退 cc_name 模式")
 
         if _shown:
             # ② polling：純 Python open()，不呼叫任何 JS — 無死鎖風險
-            _frame = 0
             while True:
                 try:
                     with open(_RESULT_FILE, "r", encoding="utf-8") as _f:
                         _raw = _f.read()
                     final = _raw.strip() or "無名氏"
-                    print(f"[DBG] ask_cc_name WASM: 讀到結果 {final!r}（frame={_frame}）")
                     _cc_reply_val[0]  = final
                     _cc_reply_ready[0] = True
                     return final
                 except (FileNotFoundError, OSError):
                     pass
                 await asyncio.sleep(0)
-                _frame += 1
-                if _frame == 1:
-                    print("[DBG] ask_cc_name WASM: asyncio yield 正常（第 1 幀）")
-                if _frame % 90 == 0:
-                    print(f"[DBG] ask_cc_name WASM: 等待輸入中... frame={_frame}")
 
     # 桌面（及 WASM overlay 顯示失敗時的 fallback）
-    print(f"[DBG] ask_cc_name: 使用 cc_name 模式, prompt={prompt!r}")
     _cmd_q.append(("cc_name", prompt))
     _cc_reply_ready[0] = False
-    print("[DBG] ask_cc_name: cc_name 指令已進 queue，開始等待...")
-    _frame = 0
     while not _cc_reply_ready[0]:
         await asyncio.sleep(0)
-        _frame += 1
-        if _frame == 1:
-            print("[DBG] ask_cc_name: asyncio.sleep(0) 有 yield（第 1 幀）")
-        if _frame % 90 == 0:
-            print(f"[DBG] ask_cc_name: 仍在等待... frame={_frame}")
-    print(f"[DBG] ask_cc_name: 收到回應 → {_cc_reply_val[0]!r}")
     return _cc_reply_val[0]
 
 async def ask_cc_portrait() -> str:
@@ -537,17 +520,10 @@ async def notify_timetable(courses: list):
     顯示課表彈出畫面，阻塞直到玩家點確認。
     courses: [{"name": "統計學", "day": "週一", "time": "08:10", "credits": 3}, ...]
     """
-    print(f"[DBG] notify_timetable: 開始，課程數={len(courses)}")
     _cmd_q.append(("timetable", courses))
     _modal_ready[0] = False
-    print("[DBG] notify_timetable: 開始等待玩家點確認...")
-    _f = 0
     while not _modal_ready[0]:
         await asyncio.sleep(0)
-        _f += 1
-        if _f == 1: print("[DBG] notify_timetable: asyncio yield 正常（第1幀）")
-        if _f % 90 == 0: print(f"[DBG] notify_timetable: 仍在等待 frame={_f}")
-    print("[DBG] notify_timetable: 確認按下，繼續遊戲")
 
 async def notify_grade_report(items: list, sfx: str = None):
     """
@@ -1151,15 +1127,12 @@ async def run_ui():
                 _settlement_data[0] = None
                 _request_bgm("Music-Morning_Rain.ogg")
             elif tag == "cc_name":
-                print("[DBG] run_ui: cc_name 指令收到，設定 _cc_mode='name'")
                 _cc_mode[0]      = "name"
                 _cc_data[0]      = tag
                 _cc_tvalue[0]    = ""
                 _cc_composing[0] = ""
                 _cc_caret_pos[0] = 0
-                print("[DBG] run_ui: 呼叫 pygame.key.start_text_input()")
                 pygame.key.start_text_input()
-                print("[DBG] run_ui: start_text_input() 完成")
                 # 告知 IME 輸入框位置，讓候選字清單出現在正確位置
                 pygame.key.set_text_input_rect(pygame.Rect(
                     (WIN_W - 520) // 2 + 30 + _fs_off[0],

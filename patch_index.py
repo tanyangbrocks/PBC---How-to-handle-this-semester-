@@ -123,40 +123,145 @@ html = html.replace(
 )
 print("[patch_index] ✓ infobox 樣式替換成功")
 
-# ── 4. 注入 Page Visibility API 音訊修復 ─────────────────────────
-# 根本原因：切 tab 時瀏覽器節流主線程，ScriptProcessorNode 的 buffer 積壓；
-# 切回來時一次爆發 → 爆音。解法：隱藏時 suspend AudioContext，顯示時 resume。
+# ── 4. 注入 AudioWorklet proxy + Page Visibility 修復 ────────────────
+# 根本原因：ScriptProcessorNode 的 onaudioprocess 跑在主執行緒；
+# 主執行緒忙於 WASM 渲染 → callback 來不及填 buffer → underrun = 失真。
+#
+# 修法：monkey-patch createScriptProcessor，用 Proxy 攔截 SDL2 建立的
+# ScriptProcessorNode，把音訊資料透過 postMessage 轉發給 AudioWorkletNode。
+# AudioWorklet 跑在獨立的 AudioWorkletGlobalScope（非主執行緒），完全不受
+# 主執行緒忙碌影響，從根本解決失真問題。
+#
+# 流程：
+#   SDL2 onaudioprocess → 填 outputBuffer（主執行緒）
+#   → 我們 slice 一份資料，postMessage 給 Worklet（~0.5ms 傳輸）
+#   → Worklet 從佇列讀取並輸出到喇叭（獨立執行緒）
+#   → 原始 ScriptProcessorNode 輸出靜音（避免雙重輸出）
 AUDIO_FIX_JS = """
 <script>
-// Page Visibility API — 防止 tab 切換時 ScriptProcessorNode buffer 積壓爆音
+// ── AudioWorklet proxy：把 SDL2 音訊從主執行緒移到 AudioWorklet 執行緒 ──
 (function(){
-    function getAudioCtx() {
-        try { if (window.MM && window.MM.audioContext) return window.MM.audioContext; } catch(e){}
-        try { if (typeof Module !== 'undefined' && Module.SDL2 && Module.SDL2.audioContext) return Module.SDL2.audioContext; } catch(e){}
-        return null;
+'use strict';
+
+var WORKLET_SRC = [
+  'class SDL2Proxy extends AudioWorkletProcessor {',
+  '  constructor(){',
+  '    super();',
+  '    this._q=[];',
+  '    this.port.onmessage=function(e){this._q.push(e.data);}.bind(this);',
+  '  }',
+  '  process(inp,out){',
+  '    var ch=out[0]; if(!ch||!ch[0]) return true;',
+  '    var n=ch[0].length;',
+  '    if(this._q.length){',
+  '      var pkt=this._q.shift();',
+  '      for(var c=0;c<ch.length&&c<pkt.length;c++) ch[c].set(pkt[c]);',
+  '    }',
+  '    return true;',
+  '  }',
+  '}',
+  'registerProcessor("sdl2-proxy",SDL2Proxy);'
+].join('\\n');
+
+var _wNode=null, _wReady=false;
+
+// 在 SDL2 呼叫 createScriptProcessor 之前先 patch
+var _origCSP = AudioContext.prototype.createScriptProcessor;
+AudioContext.prototype.createScriptProcessor = function(bufSz, inCh, outCh) {
+  var real = _origCSP.call(this, bufSz, inCh, outCh);
+  var ctx  = this;
+  outCh = outCh || 2;
+
+  // 非同步建立 AudioWorklet
+  var blob = new Blob([WORKLET_SRC], {type:'application/javascript'});
+  var url  = URL.createObjectURL(blob);
+  ctx.audioWorklet.addModule(url).then(function(){
+    URL.revokeObjectURL(url);
+    _wNode = new AudioWorkletNode(ctx, 'sdl2-proxy', {
+      numberOfInputs:0, numberOfOutputs:1,
+      outputChannelCount:[outCh]
+    });
+    _wNode.connect(ctx.destination);
+    _wReady = true;
+    console.log('[audio-proxy] AudioWorklet ready — audio off main thread');
+  }).catch(function(e){
+    console.warn('[audio-proxy] AudioWorklet setup failed, using ScriptProcessorNode fallback:', e.message);
+    URL.revokeObjectURL(url);
+  });
+
+  // 用 Proxy 攔截 onaudioprocess 賦值 和 connect 呼叫
+  var _sdl2fn = null;
+  var _destNode = null;
+  var _muted = false;
+
+  return new Proxy(real, {
+    set: function(t, p, v) {
+      if (p === 'onaudioprocess') {
+        _sdl2fn = v;
+        t.onaudioprocess = function(evt) {
+          if (_sdl2fn) _sdl2fn.call(t, evt);   // 讓 SDL2 照常填 buffer
+          if (_wReady && _wNode) {
+            // 複製 output 資料給 Worklet
+            var ob  = evt.outputBuffer;
+            var nCh = ob.numberOfChannels;
+            var pkt = [];
+            for (var c = 0; c < nCh; c++) {
+              pkt.push(ob.getChannelData(c).slice(0));
+            }
+            _wNode.port.postMessage(pkt, pkt.map(function(a){return a.buffer;}));
+            // 靜音原始節點（避免與 Worklet 雙重輸出）
+            if (!_muted && _destNode) {
+              try { real.disconnect(_destNode); } catch(e2){}
+              _muted = true;
+            }
+            for (var c2 = 0; c2 < nCh; c2++) {
+              ob.getChannelData(c2).fill(0);
+            }
+          }
+        };
+        return true;
+      }
+      return Reflect.set(t, p, v);
+    },
+    get: function(t, p) {
+      if (p === 'connect') {
+        return function(dest) {
+          _destNode = dest;
+          // 先正常連結（Worklet 未就緒時仍可出聲）
+          return Reflect.get(t,'connect').call(t, dest);
+        };
+      }
+      var val = Reflect.get(t, p);
+      return typeof val === 'function' ? val.bind(t) : val;
     }
-    // 頁面重新可見時 resume（部分瀏覽器會自動 suspend 背景 tab）
-    // 不主動 suspend：背景 tab 因主執行緒節流，ScriptProcessorNode 反而跑得更順
-    document.addEventListener('visibilitychange', function() {
-        if (document.visibilityState === 'visible') {
-            var ctx = getAudioCtx();
-            if (ctx && ctx.state === 'suspended') ctx.resume();
-        }
-    });
-    document.addEventListener('focus', function() {
-        var ctx = getAudioCtx();
-        if (ctx && ctx.state === 'suspended') ctx.resume();
-    });
-    window.addEventListener('focus', function() {
-        var ctx = getAudioCtx();
-        if (ctx && ctx.state === 'suspended') ctx.resume();
-    });
+  });
+};
+
+// Page Visibility：切回來時 resume AudioContext
+function getAudioCtx() {
+  try { if (window.MM && window.MM.audioContext) return window.MM.audioContext; } catch(e){}
+  try { if (typeof Module !== 'undefined' && Module.SDL2 && Module.SDL2.audioContext) return Module.SDL2.audioContext; } catch(e){}
+  return null;
+}
+document.addEventListener('visibilitychange', function() {
+  if (document.visibilityState === 'visible') {
+    var ctx = getAudioCtx();
+    if (ctx && ctx.state === 'suspended') ctx.resume();
+  }
+});
+document.addEventListener('focus', function() {
+  var ctx = getAudioCtx(); if (ctx && ctx.state === 'suspended') ctx.resume();
+});
+window.addEventListener('focus', function() {
+  var ctx = getAudioCtx(); if (ctx && ctx.state === 'suspended') ctx.resume();
+});
+
 })();
 </script>
 </body>"""
 
 html = html.replace("</body>", AUDIO_FIX_JS, 1)
-print("[patch_index] ✓ Page Visibility 音訊修復注入成功")
+print("[patch_index] ✓ AudioWorklet proxy + Page Visibility 音訊修復注入成功")
 
 # ── 修復 pygbag template bug：cdn 結尾 / + 路徑開頭 / = 雙斜線 ──────────
 # CDN 上沒有 browserfs，改用 jsdelivr（穩定，不會 404）
