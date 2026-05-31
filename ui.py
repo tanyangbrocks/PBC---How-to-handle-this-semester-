@@ -1058,7 +1058,9 @@ async def run_ui():
                         pass
 
         # ── 消化遊戲執行緒的命令 ─────────────────────────────
+        # try/except 保護：任何 tag handler 例外不會 crash 整個 run_ui asyncio task
         while _cmd_q:
+          try:
             cmd = _cmd_q.popleft()
             tag = cmd[0]
             if tag == "msg":
@@ -1315,6 +1317,10 @@ async def run_ui():
                 _smg_phase_clearing[0] = False   # 確保 phase 清場旗標歸零
                 _info_modal_active[0]  = False   # 確保資訊 modal 不會鎖住點擊
                 _modal[0]              = None    # 確保課表/成績 modal 不會鎖住點擊
+          except Exception as _cmd_e:
+            import traceback as _tb
+            print(f"[run_ui] cmd handler 例外（tag={cmd[0] if cmd else '?'}）: {_cmd_e}")
+            _tb.print_exc()
 
         # ── 繪製（依畫面階段切換內容）────────────────────────
         # 全螢幕：先把黑邊區域鋪上背景圖（screen 是 real_screen 的子 Surface，
@@ -2241,8 +2247,12 @@ async def run_ui():
                         else:
                             _tvalue[0] = _tvalue[0][:-1]
 
-        await asyncio.sleep(0)   # pygbag: yield to browser event loop each frame
+        await asyncio.sleep(0)   # yield #1：讓瀏覽器跑 onaudioprocess / 其他 task
         clock.tick(30)
+        # yield #2（WASM only）：clock.tick 結束後再讓一次，確保 ScriptProcessorNode
+        # 在下一幀渲染開始前還有機會填滿 audio buffer，減少 underrun 失真。
+        if sys.platform == "emscripten":
+            await asyncio.sleep(0)
 
     pygame.quit()
     if sys.platform != "emscripten":

@@ -15,6 +15,9 @@ from ui_draw_base import *
 # 拉霸機每格高度（同 _draw_cc_slot_machine 內的 TILE_H，此處提出供 _update_slot_state 使用）
 _SLOT_TILE_H = 62
 
+# ── CC 標題 comp 表面快取（key = (text, active_idx)，最多 N×文字數 種狀態）──
+_cc_title_cache: dict = {}
+
 def _cc_ptcl_new(full_screen: bool = False) -> dict:
     """生成一顆紫色螢光粒子（orb 光球 或 wisp 光絮）。"""
     kind = "orb" if random.random() < 0.55 else "wisp"
@@ -192,28 +195,30 @@ def _draw_cc_title(surf: pygame.Surface, text: str,
     active_idx = int((ms % 1000) / 1000 * N)
     fy         = _float_offset(7, 0.00170, phase)
 
-    ch_ws   = [fc.size(ch)[0] for ch in text]
-    total_w = sum(ch_ws)
-    th      = fc.get_height()
-
-    comp = pygame.Surface((total_w + OUTLINE_OFF * 2 + 4,
-                           th + OUTLINE_OFF * 2 + 4), pygame.SRCALPHA)
-
-    # 描邊層（8 方向深紫）
-    x_cur = OUTLINE_OFF + 2
-    for ch, cw in zip(text, ch_ws):
-        out_s = fc.render(ch, True, OUTLINE_COL)
-        for ox, oy in ((-1,-1),(0,-1),(1,-1),(-1,0),(1,0),(-1,1),(0,1),(1,1)):
-            comp.blit(out_s, (x_cur + ox * OUTLINE_OFF,
-                              OUTLINE_OFF + 2 + oy * OUTLINE_OFF))
-        x_cur += cw
-
-    # 主文字層（循環亮金）
-    x_cur = OUTLINE_OFF + 2
-    for i, (ch, cw) in enumerate(zip(text, ch_ws)):
-        col = GOLD if i == active_idx else WHITE_T
-        comp.blit(fc.render(ch, True, col), (x_cur, OUTLINE_OFF + 2))
-        x_cur += cw
+    # comp 表面按 (text, active_idx) 快取，避免每幀重建（active_idx 每 ~1s/N 才換一次）
+    _ck = (text, active_idx)
+    if _ck not in _cc_title_cache:
+        ch_ws   = [fc.size(ch)[0] for ch in text]
+        total_w = sum(ch_ws)
+        th      = fc.get_height()
+        _comp = pygame.Surface((total_w + OUTLINE_OFF * 2 + 4,
+                               th + OUTLINE_OFF * 2 + 4), pygame.SRCALPHA)
+        # 描邊層（8 方向深紫）
+        x_cur = OUTLINE_OFF + 2
+        for ch, cw in zip(text, ch_ws):
+            out_s = fc.render(ch, True, OUTLINE_COL)
+            for ox, oy in ((-1,-1),(0,-1),(1,-1),(-1,0),(1,0),(-1,1),(0,1),(1,1)):
+                _comp.blit(out_s, (x_cur + ox * OUTLINE_OFF,
+                                  OUTLINE_OFF + 2 + oy * OUTLINE_OFF))
+            x_cur += cw
+        # 主文字層（循環亮金）
+        x_cur = OUTLINE_OFF + 2
+        for i, (ch, cw) in enumerate(zip(text, ch_ws)):
+            col = GOLD if i == active_idx else WHITE_T
+            _comp.blit(fc.render(ch, True, col), (x_cur, OUTLINE_OFF + 2))
+            x_cur += cw
+        _cc_title_cache[_ck] = _comp
+    comp = _cc_title_cache[_ck]
 
     # TV 掃描線 / 色差雜訊
     rng      = random.Random(ms // 80)

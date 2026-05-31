@@ -13,6 +13,20 @@ from ui_state  import *
 from ui_draw_base import *
 from ui_draw_hud import _draw_log
 
+# ── 全螢幕過場遮罩快取（非 SRCALPHA，set_alpha 可重用）────────────────────
+# 過場動畫每幀都需要 pygame.Surface((WIN_W,WIN_H)) 全螢幕填色；不快取 = 每幀 2.76 MB 分配。
+# 只需按填色 (r,g,b) 快取一次；每幀只 set_alpha 後 blit，不會重建 Surface。
+_fade_surf_cache: dict = {}
+
+def _get_fade_surf(r: int, g: int, b: int) -> pygame.Surface:
+    """取得可重用的全螢幕填色 Surface（非 SRCALPHA）。每幀直接 set_alpha 後使用。"""
+    key = (r, g, b)
+    if key not in _fade_surf_cache:
+        s = pygame.Surface((WIN_W, WIN_H))
+        s.fill((r, g, b))
+        _fade_surf_cache[key] = s
+    return _fade_surf_cache[key]
+
 def _wx_leaf_new(wt: str, full_screen: bool = False) -> dict:
     """生成一片葉子 / 花瓣粒子。full_screen=True 時 y 散布全螢幕（初始化用）。"""
     is_sak = (wt == "sakura")
@@ -972,8 +986,7 @@ def _draw_end(surf, fm, fs, mpos):
             surf.fill(BG)
         t = min(1.0, elapsed / _EFADE_MS)
         alpha = int(255 * t) if "out" in sub else int(255 * (1.0 - t))
-        ov = pygame.Surface((WIN_W, WIN_H))
-        ov.fill((255, 255, 255))
+        ov = _get_fade_surf(255, 255, 255)
         ov.set_alpha(alpha)
         surf.blit(ov, (0, 0))
         return None
@@ -1085,8 +1098,7 @@ def _draw_end_report(surf, fm, fs, mpos, data, ms, elapsed):
             surf.blit(_end_bg_surf[0], (0, 0))
             fade_elapsed = max(0, ms - _end_bg_fade_t0[0])
             t  = min(1.0, fade_elapsed / _FADE_BG_MS)
-            ov = pygame.Surface((WIN_W, WIN_H))
-            ov.fill((248, 238, 220))
+            ov = _get_fade_surf(248, 238, 220)
             ov.set_alpha(int(255 * (1.0 - t)))
             surf.blit(ov, (0, 0))
         else:
@@ -1356,8 +1368,7 @@ def _draw_gameover(surf: pygame.Surface, fm, fs, mpos) -> "pygame.Rect | None":
     # ── fade_in：黑色遮罩由不透明→透明，背景逐漸顯現 ────────────────
     if sub == "fade_in":
         overlay_alpha = int(255 * (1.0 - min(1.0, elapsed / _GO_FADE_MS)))
-        ov = pygame.Surface((WIN_W, WIN_H))
-        ov.fill((0, 0, 0))
+        ov = _get_fade_surf(0, 0, 0)
         ov.set_alpha(overlay_alpha)
         surf.blit(ov, (0, 0))
         return None
