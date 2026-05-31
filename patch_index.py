@@ -250,24 +250,30 @@ AudioContext.prototype.createScriptProcessor = function(bufSz, inCh, outCh) {
   });
 };
 
-// Page Visibility：切回來時 resume AudioContext
+// Page Visibility + 首次互動：resume AudioContext
+// 瀏覽器 autoplay 政策：AudioContext 在使用者互動前維持 suspended 狀態，
+// 必須在 click/pointerdown 時明確呼叫 resume()，否則整場無音樂。
 function getAudioCtx() {
   try { if (window.MM && window.MM.audioContext) return window.MM.audioContext; } catch(e){}
   try { if (typeof Module !== 'undefined' && Module.SDL2 && Module.SDL2.audioContext) return Module.SDL2.audioContext; } catch(e){}
   return null;
 }
-document.addEventListener('visibilitychange', function() {
-  if (document.visibilityState === 'visible') {
-    var ctx = getAudioCtx();
-    if (ctx && ctx.state === 'suspended') ctx.resume();
+function _tryResumeAudio() {
+  var ctx = getAudioCtx();
+  if (ctx && ctx.state === 'suspended') {
+    ctx.resume().catch(function(){});
   }
+}
+// 首次點擊 / 觸控 → resume（解決開場無音樂問題）
+document.addEventListener('click',       _tryResumeAudio, {once: false, passive: true});
+document.addEventListener('pointerdown', _tryResumeAudio, {once: false, passive: true});
+document.addEventListener('keydown',     _tryResumeAudio, {once: false, passive: true});
+// 切回分頁 / 重新取得焦點 → resume（解決切換分頁後音樂消失問題）
+document.addEventListener('visibilitychange', function() {
+  if (document.visibilityState === 'visible') _tryResumeAudio();
 });
-document.addEventListener('focus', function() {
-  var ctx = getAudioCtx(); if (ctx && ctx.state === 'suspended') ctx.resume();
-});
-window.addEventListener('focus', function() {
-  var ctx = getAudioCtx(); if (ctx && ctx.state === 'suspended') ctx.resume();
-});
+document.addEventListener('focus', _tryResumeAudio);
+window.addEventListener('focus',   _tryResumeAudio);
 
 })();
 </script>
@@ -410,14 +416,16 @@ function __cc_show(prompt) {
     cv.addEventListener('keydown',  cv._imeKeyBlock, true);
     cv.addEventListener('keypress', cv._imeKeyBlock, true);
     cv.addEventListener('keyup',    cv._imeKeyBlock, true);
-    cv.blur();  // 強制 canvas 失焦
+    // 注意：不呼叫 cv.blur()。
+    // cv.blur() 會讓 pygbag 偵測到 canvas 失去焦點並暫停渲染主迴圈，
+    // 導致遊戲凍結。改由 inp.focus() 自然搶走焦點，避免此問題。
   }
-  // 延遲 focus：確保 canvas blur 生效後再聚焦 input
+  // 延遲 focus：讓 canvas 先完成當前幀再移交焦點，避免搶佔時序問題
   setTimeout(function(){
     inp.focus();
     inp.click();   // 在部分瀏覽器觸發 IME 啟動
     inp.select();
-  }, 120);
+  }, 50);
 }
 function __cc_submit() {
   var val = (document.getElementById('__cc_inp').value || '').trim();
