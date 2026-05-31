@@ -84,6 +84,7 @@ GAME_PY = [p for p in ROOT.glob("*.py")
                               "check_ui_state.py",
                               "check_pygbag_compat.py",
                               "build.py",      # build 工具，在開發機執行，不進 WASM
+                              "server.py",     # 本機靜態伺服器，在開發機執行，不進 WASM
                               "ui_draw.py")    # 重構前舊版整合檔，已不再被 import
            and "_origin" not in p.stem]   # 排除 *_origin.py 備份檔
 
@@ -863,7 +864,7 @@ else:
     # 只比對遊戲邏輯 .py（排除工具腳本與備份）
     _SKIP_W = {"pre_deploy_check.py", "check_ui_state.py", "patch_index.py",
                "refactor_ui.py", "restore_assets.py", "convert_assets.py",
-               "build.py", "check_pygbag_compat.py"}
+               "build.py", "server.py", "check_pygbag_compat.py"}
     _newer_py = sorted(
         (p for p in ROOT.glob("*.py")
          if p.name not in _SKIP_W
