@@ -92,11 +92,11 @@ def _check_build():
     if ok:
         with open(index, "r", encoding="utf-8", errors="replace") as _f:
             _html = _f.read()
-        if "AudioWorkletProcessor" not in _html:
+        if "__sdl2AudioCtx" not in _html:
             print("[server] ❌  index.html 尚未套用 patch，請執行：python patch_index.py")
             ok = False
         else:
-            print("[server] ✅  patch   : AudioWorklet 已注入")
+            print("[server] ✅  patch   : 音訊修復已注入")
 
     if not ok:
         sys.exit(1)
