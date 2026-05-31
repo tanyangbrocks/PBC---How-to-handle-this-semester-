@@ -867,6 +867,21 @@ async def run_ui():
     except Exception:
         pass
 
+    # ── BGM 快取：預載最常用的兩個 BGM，避免遊戲中 OGG decode 造成卡頓 ──
+    # Morning_Rain：標題畫面立刻就播，反正要載；Aether：進入角色創建時立刻要用。
+    # 其餘 BGM 在 BGM tick 中首次用到時才載入並快取，每個唯一 BGM 只 decode 一次。
+    try:
+        _bgm_pre_dir = resource_path("asset", "audio", "bgm")
+        for _bgm_pre_fn in ("Music-Morning_Rain.ogg", "Music-Aether.ogg"):
+            _bgm_pre_path = os.path.join(_bgm_pre_dir, _bgm_pre_fn)
+            if os.path.isfile(_bgm_pre_path) and _bgm_pre_fn not in _bgm_cache:
+                try:
+                    _bgm_cache[_bgm_pre_fn] = pygame.mixer.Sound(_bgm_pre_path)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
     screen = pygame.display.set_mode((WIN_W, WIN_H))
     pygame.display.set_caption("如何渡過這學期？")
     clock  = pygame.time.Clock()
@@ -1080,12 +1095,16 @@ async def run_ui():
                 _bpath = os.path.join(_bgm_dir[0], _next_bgm)
                 if os.path.isfile(_bpath):
                     try:
-                        _new_snd = pygame.mixer.Sound(_bpath)
+                        # 優先從快取取得（避免重複 OGG decode stutter）
+                        if _next_bgm in _bgm_cache:
+                            _new_snd = _bgm_cache[_next_bgm]
+                        else:
+                            _new_snd = pygame.mixer.Sound(_bpath)
+                            _bgm_cache[_next_bgm] = _new_snd   # 快取供後續重用
                         _bgm_snd_obj[0] = _new_snd
                         if _ch is not None:
                             _ch.play(_new_snd, loops=-1)   # 無 fade_ms
                         else:
-                            # Channel 未初始化（理論上不會發生）→ 直接 play
                             _new_snd.play(-1)
                     except Exception as _bgm_e:
                         print(f"[BGM] Sound load/play 失敗：{_bgm_e}")
@@ -1093,7 +1112,7 @@ async def run_ui():
                 # 切換到靜音
                 try:
                     if _ch is not None:
-                        _ch.fadeout(BGM_FADE_MS)
+                        _ch.stop()
                     elif _bgm_snd_obj[0] is not None:
                         _bgm_snd_obj[0].stop()
                 except Exception:

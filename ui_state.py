@@ -303,6 +303,7 @@ _bgm_switch_at = [0]         # 允許載入新曲的最早時間戳（ms）
 # pygame.mixer.music 在 emscripten WASM 無效，改用 Sound + 專用 Channel
 _bgm_ch_obj    = [None]      # BGM 專用 pygame.mixer.Channel（run_ui 啟動後設定）
 _bgm_snd_obj   = [None]      # 目前正在播放的 pygame.mixer.Sound（換曲時釋放舊曲）
+_bgm_cache:    dict = {}     # filename → pygame.mixer.Sound（避免重複 OGG decode stutter）
 
 _bg_surfs   : dict = {}   # filename → pygame.Surface（啟動時載入）
 
