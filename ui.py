@@ -988,6 +988,17 @@ async def run_ui():
         _end_bg_players[_ebkey] = SpritePlayer(
             resource_path("asset", "video_frames", _ebslug), loop=True)
 
+    # ── 預初始化 CC overlay surface（避免首幀 720×draw.line 卡死主執行緒）──
+    # _draw_cc_bg 在 char_create 首幀會建立 1280×720 SRCALPHA surface
+    # 並執行 720 次 pygame.draw.line（約 1–5 秒），無 yield → Chrome 判定頁面無回應。
+    # 在載入畫面期間（進度條）預先呼叫一次，把代價移到玩家等待的時間點。
+    try:
+        _pre_surf = pygame.Surface((WIN_W, WIN_H))
+        _draw_cc_bg(_pre_surf)
+        del _pre_surf
+    except Exception as _pre_e:
+        print(f"[run_ui] CC overlay 預初始化失敗（不影響遊戲）：{_pre_e}")
+
     # 全螢幕切換按鈕固定 Rect（右下角，各畫面常駐）
     fs_btn = pygame.Rect(WIN_W - 46, WIN_H - 46, 40, 40)
 
