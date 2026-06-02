@@ -145,10 +145,10 @@ AUDIO_FIX_JS = """
 //   讓 ScriptProcessorNode 輸出靜音；Worklet（獨立執行緒）輸出真實音訊。
 //   兩者在 destination 混合 = 靜音 + 音訊 = 正常播放。
 //
-// pre-buffer：2 packets（23ms @44100Hz）
-//   - 足以吸收正常幀時間（rAF ~16ms）
-//   - 不截斷短音效（< 93ms 的 SFX 在舊版 8-pkt 設定下會被吃掉）
+// pre-buffer：1 packet（11.6ms @44100Hz）
+//   - 最小可用緩衝，降低 SFX 延遲感（人耳感知閾值 ~20ms）
 //   - underrun 時輸出靜音 quantum（2.9ms），不重置 ready，等新 packet 自動恢復
+//   - 若未來出現明顯破音，可提高回 2（23ms）
 (function(){
 'use strict';
 
@@ -159,7 +159,7 @@ var WORKLET_SRC = [
   '    this._q=[];',
   '    this._pos=0;',
   '    this._ready=false;',
-  '    this._MIN=2;', // pre-buffer: 2×512=1024 samples = 23ms @44100Hz
+  '    this._MIN=1;', // pre-buffer: 1×512=512 samples = 11.6ms @44100Hz
   '    this.port.onmessage=function(e){this._q.push(e.data);}.bind(this);',
   '  }',
   '  process(inp,out){',
@@ -209,7 +209,7 @@ AudioContext.prototype.createScriptProcessor = function(bufSz, inCh, outCh) {
     });
     _wNode.connect(ctx.destination);
     _wReady = true;
-    console.log('[audio-proxy] AudioWorklet ready (2-pkt pre-buffer, copy mode)');
+    console.log('[audio-proxy] AudioWorklet ready (1-pkt pre-buffer, copy mode)');
   }).catch(function(e){
     console.warn('[audio-proxy] AudioWorklet failed, using ScriptProcessorNode fallback:', e.message);
     URL.revokeObjectURL(url);
@@ -263,12 +263,8 @@ function getAudioCtx() {
 }
 function _tryResumeAudio() {
   var ctx = getAudioCtx();
-  // 診斷 log（每次觸發都印，方便確認是否被呼叫）
-  console.log('[audio] _tryResumeAudio ctx=' + (ctx ? ctx.state : 'null'));
   if (ctx && ctx.state === 'suspended') {
-    ctx.resume().then(function() {
-      console.log('[audio] ctx.resume() OK → state=' + ctx.state);
-    }).catch(function(e) {
+    ctx.resume().catch(function(e) {
       console.warn('[audio] ctx.resume() failed:', e);
     });
   }
@@ -277,6 +273,7 @@ function _tryResumeAudio() {
 // 重要：用 capture:true — SDL2/Emscripten 在 canvas 上呼叫 stopPropagation()，
 // bubble phase 的 document 層監聽器收不到事件；
 // capture phase 在 SDL2 的 handler 之前觸發，不受 stopPropagation 影響。
+// document capture 已能捕捉所有元素（含 canvas）的事件，不需再對 canvas 單獨掛載。
 document.addEventListener('click',       _tryResumeAudio, {capture: true, passive: true});
 document.addEventListener('pointerdown', _tryResumeAudio, {capture: true, passive: true});
 document.addEventListener('keydown',     _tryResumeAudio, {capture: true, passive: true});
@@ -286,27 +283,6 @@ document.addEventListener('visibilitychange', function() {
 });
 document.addEventListener('focus', _tryResumeAudio);
 window.addEventListener('focus',   _tryResumeAudio);
-
-// 額外保險：直接在 canvas 元素上掛 capture 監聽，避免任何中間層遺漏
-(function attachCanvasAudioResume() {
-  var c = document.getElementById('canvas');
-  if (c) {
-    c.addEventListener('click',       _tryResumeAudio, {capture: true, passive: true});
-    c.addEventListener('pointerdown', _tryResumeAudio, {capture: true, passive: true});
-    return;
-  }
-  // canvas 尚未建立，用 MutationObserver 等待
-  var obs = new MutationObserver(function() {
-    var c2 = document.getElementById('canvas');
-    if (c2) {
-      obs.disconnect();
-      c2.addEventListener('click',       _tryResumeAudio, {capture: true, passive: true});
-      c2.addEventListener('pointerdown', _tryResumeAudio, {capture: true, passive: true});
-      console.log('[audio] canvas audio-resume listeners attached');
-    }
-  });
-  obs.observe(document.body || document.documentElement, {childList: true, subtree: true});
-})();
 
 })();
 </script>
