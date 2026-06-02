@@ -368,11 +368,7 @@ IME_OVERLAY = """
     var sy = 720  / (rect.height || 1);
     var lx = (e.clientX - rect.left) * sx;
     var ly = (e.clientY - rect.top)  * sy;
-    console.log('[fs] click lx=' + Math.round(lx) + ' ly=' + Math.round(ly)
-      + ' need x:' + BTN_X + '-' + (BTN_X+BTN_W) + ' y:' + BTN_Y + '-' + (BTN_Y+BTN_H)
-      + ' cw=' + c.width + ' cssW=' + Math.round(rect.width));
     if (lx >= BTN_X && lx <= BTN_X + BTN_W && ly >= BTN_Y && ly <= BTN_Y + BTN_H) {
-      console.log('[fs] button HIT → toggling fullscreen');
       fsToggle();
     }
   }
