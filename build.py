@@ -113,6 +113,37 @@ def _monitor(proc):
             ).start()
 
 
+def _file_watcher(pygbag_proc):
+    """
+    備援觸發器：監看 build/web/index.html 是否出現／更新。
+    Windows 上 pygbag 常在 WASM mimetype 警告後卡住、不再輸出任何訊號，
+    導致 _monitor 永遠無法觸發 patch。
+    此執行緒改由檔案系統確認 build 完成，與 _monitor 競速，先到先觸發（有鎖防重複）。
+    """
+    target = os.path.join(ROOT, "build", "web", "index.html")
+    existed     = os.path.isfile(target)
+    init_mtime  = os.path.getmtime(target) if existed else 0
+
+    POLL  = 5    # 每 5 秒輪詢一次
+    LIMIT = 120  # 最多等 600 秒（10 分鐘）
+
+    print("[build] 備援監看 build/web/index.html（每 5 秒檢查）...")
+    for i in range(LIMIT):
+        time.sleep(POLL)
+        if _patched:          # stdout 那側已觸發，退出
+            return
+        if os.path.isfile(target):
+            mtime = os.path.getmtime(target)
+            if mtime > init_mtime + 1:   # 檔案有更新，判定 build 完成
+                elapsed = (i + 1) * POLL
+                print(f"\n[build] 備援觸發：index.html 已更新（等待 {elapsed}s）")
+                _run_patch_and_switch(pygbag_proc)
+                return
+
+    if not _patched:
+        print("[build] ⚠  等待 10 分鐘仍未偵測到 build 完成，請確認 pygbag 是否正常運行。")
+
+
 print("[build] 啟動 pygbag（產生 build/web/）...")
 pygbag_proc = subprocess.Popen(
     [sys.executable, "-X", "utf8", "-m", "pygbag", "main.py"],
@@ -122,7 +153,9 @@ pygbag_proc = subprocess.Popen(
 )
 
 monitor_thread = threading.Thread(target=_monitor, args=(pygbag_proc,), daemon=True)
+watcher_thread = threading.Thread(target=_file_watcher, args=(pygbag_proc,), daemon=True)
 monitor_thread.start()
+watcher_thread.start()
 
 try:
     pygbag_proc.wait()
