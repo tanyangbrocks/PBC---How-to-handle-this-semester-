@@ -312,8 +312,12 @@ window.addEventListener('focus',   _tryResumeAudio);
 </script>
 </body>"""
 
-html = html.replace("</body>", AUDIO_FIX_JS, 1)
-print("[patch_index] ✓ SDL2音訊直連 + Page Visibility 音訊修復注入成功")
+# 防重複注入：若已含 sdl2-proxy 識別碼，代表本次 patch 已套用過，跳過
+if 'sdl2-proxy' in html:
+    print("[patch_index] ⚠️  音訊修復已存在於 index.html，跳過注入（需先 build.py 取得乾淨版本）")
+else:
+    html = html.replace("</body>", AUDIO_FIX_JS, 1)
+    print("[patch_index] ✓ AudioWorklet proxy + Page Visibility 音訊修復注入成功")
 
 # ── 修復 pygbag template bug：cdn 結尾 / + 路徑開頭 / = 雙斜線 ──────────
 # CDN 上沒有 browserfs，改用 jsdelivr（穩定，不會 404）
