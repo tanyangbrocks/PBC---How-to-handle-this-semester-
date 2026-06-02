@@ -123,34 +123,92 @@ html = html.replace(
 )
 print("[patch_index] ✓ infobox 樣式替換成功")
 
-# ── 4. 注入音訊修復 + Page Visibility ────────────────────────────────
-# 架構說明（簡化版）：
-#   不使用 AudioWorklet proxy 路由。
-#   ScriptProcessorNode 直連 AudioContext.destination，讓 SDL2 音訊
-#   直接輸出（最低複雜度，排除 Worklet 造成靜音的可能）。
+# ── 4. 注入 AudioWorklet proxy（大緩衝版）+ Page Visibility ──────────
+# 問題根源：
+#   ScriptProcessorNode bufSz=512 = 11.6ms；遊戲 rAF 幀時間常達 20-40ms。
+#   主執行緒忙時 onaudioprocess 被延遲，直接輸出就失真（buffer underrun）。
 #
-#   保留以下功能：
-#   1. createScriptProcessor patch → 存 window.__sdl2AudioCtx reference
-#   2. onaudioprocess 診斷 log（前 6 次，顯示 max_sample）
-#      → 若 max_sample=0.00000 表示 SDL2 沒產生音頻資料
-#      → 若 max_sample>0      表示 SDL2 有資料但某處靜音
-#   3. AudioContext resume（capture phase）
+# 修法（改良版 AudioWorklet proxy）：
+#   1. ScriptProcessorNode 照常接收 SDL2 音訊（每次 512 samples / 11.6ms）
+#   2. 每個 packet 傳給 AudioWorklet（獨立執行緒，不受主執行緒影響）
+#   3. Worklet 預緩衝 MIN_PKTS=8 個 packet（= 8×512 samples = 93ms）再開始播放
+#      → 即使主執行緒 block 了 80ms，Worklet 的緩衝也夠用
+#   4. Underrun 時輸出靜音（而非失真），Worklet 不重置 ready 狀態
+#      → 可能出現 1-2 個靜音 quantum（2.9ms）但無持續失真
 AUDIO_FIX_JS = """
 <script>
-// ── SDL2 音訊直連方案（無 AudioWorklet proxy）─────────────────────────
+// ── AudioWorklet proxy（大緩衝，減少 rAF 造成的音訊失真）──────────────
 (function(){
 'use strict';
+
+// Worklet：等待 MIN_PKTS 個 packet（93ms pre-buffer）後才開始輸出
+// underrun 時輸出靜音 quantum（2.9ms）不重置，等新 packet 自動恢復
+var WORKLET_SRC = [
+  'class SDL2Proxy extends AudioWorkletProcessor {',
+  '  constructor(){',
+  '    super();',
+  '    this._q=[];',
+  '    this._pos=0;',
+  '    this._ready=false;',
+  '    this._MIN=8;', // pre-buffer: 8×512=4096 samples = 93ms @44100Hz
+  '    this.port.onmessage=function(e){this._q.push(e.data);}.bind(this);',
+  '  }',
+  '  process(inp,out){',
+  '    var ch=out[0]; if(!ch||!ch[0]) return true;',
+  '    if(!this._ready){',
+  '      if(this._q.length>=this._MIN) this._ready=true;',
+  '      else{ for(var c=0;c<ch.length;c++) ch[c].fill(0); return true; }',
+  '    }',
+  '    var n=ch[0].length; var done=0;',
+  '    while(done<n){',
+  '      if(!this._q.length){',
+  '        for(var c=0;c<ch.length;c++) ch[c].fill(0,done);',
+  '        break;',
+  '      }',
+  '      var pkt=this._q[0];',
+  '      var avail=pkt[0].length-this._pos;',
+  '      var take=Math.min(avail,n-done);',
+  '      for(var c=0;c<ch.length&&c<pkt.length;c++){',
+  '        ch[c].set(pkt[c].subarray(this._pos,this._pos+take),done);',
+  '      }',
+  '      done+=take; this._pos+=take;',
+  '      if(this._pos>=pkt[0].length){ this._q.shift(); this._pos=0; }',
+  '    }',
+  '    return true;',
+  '  }',
+  '}',
+  'registerProcessor("sdl2-proxy",SDL2Proxy);'
+].join('\\n');
+
+var _wNode=null, _wReady=false;
 
 var _origCSP = AudioContext.prototype.createScriptProcessor;
 AudioContext.prototype.createScriptProcessor = function(bufSz, inCh, outCh) {
   var real = _origCSP.call(this, bufSz, inCh, outCh);
   var ctx  = this;
-  window.__sdl2AudioCtx = ctx;   // 供 _tryResumeAudio 使用
+  window.__sdl2AudioCtx = ctx;
+  outCh = outCh || 2;
 
-  // 診斷：攔截 onaudioprocess，前 6 次印出 max_sample
-  // → 確認 SDL2 是否真的在 buffer 裡寫入非零音頻資料
-  var _dbgCnt = 0;
+  // 非同步建立 AudioWorklet
+  var blob = new Blob([WORKLET_SRC], {type:'application/javascript'});
+  var url  = URL.createObjectURL(blob);
+  ctx.audioWorklet.addModule(url).then(function(){
+    URL.revokeObjectURL(url);
+    _wNode = new AudioWorkletNode(ctx, 'sdl2-proxy', {
+      numberOfInputs:0, numberOfOutputs:1,
+      outputChannelCount:[outCh]
+    });
+    _wNode.connect(ctx.destination);
+    _wReady = true;
+    console.log('[audio-proxy] AudioWorklet ready (8-pkt pre-buffer)');
+  }).catch(function(e){
+    console.warn('[audio-proxy] AudioWorklet failed, using ScriptProcessorNode fallback:', e.message);
+    URL.revokeObjectURL(url);
+  });
+
   var _sdl2fn = null;
+  var _destNode = null;
+  var _muted = false;
 
   return new Proxy(real, {
     set: function(t, p, v) {
@@ -158,28 +216,34 @@ AudioContext.prototype.createScriptProcessor = function(bufSz, inCh, outCh) {
         _sdl2fn = v;
         t.onaudioprocess = function(evt) {
           if (_sdl2fn) _sdl2fn.call(t, evt);
-          // 診斷：記錄前 6 次 onaudioprocess 的最大 sample 絕對值
-          if (_dbgCnt < 6) {
-            _dbgCnt++;
-            var d   = evt.outputBuffer.getChannelData(0);
-            var mx  = 0;
-            for (var i = 0; i < d.length; i += 64) {
-              var a = d[i] < 0 ? -d[i] : d[i];
-              if (a > mx) mx = a;
+          if (_wReady && _wNode) {
+            var ob  = evt.outputBuffer;
+            var nCh = ob.numberOfChannels;
+            var pkt = [];
+            for (var c = 0; c < nCh; c++) {
+              pkt.push(ob.getChannelData(c).slice(0));
             }
-            console.log('[audio-diag] onaudioprocess#' + _dbgCnt
-              + ' bufSz=' + d.length
-              + ' max_sample=' + mx.toFixed(5)
-              + (mx > 0 ? ' ✓ HAS DATA' : ' ✗ SILENT'));
+            _wNode.port.postMessage(pkt, pkt.map(function(a){return a.buffer;}));
+            if (!_muted && _destNode) {
+              try { real.disconnect(_destNode); } catch(e2){}
+              _muted = true;
+            }
+            for (var c2 = 0; c2 < nCh; c2++) {
+              ob.getChannelData(c2).fill(0);
+            }
           }
-          // ScriptProcessorNode 直連 destination，不做任何 reroute
-          // （SDL2 填入 outputBuffer 後直接由 Web Audio 輸出到喇叭）
         };
         return true;
       }
       return Reflect.set(t, p, v);
     },
     get: function(t, p) {
+      if (p === 'connect') {
+        return function(dest) {
+          _destNode = dest;
+          return Reflect.get(t,'connect').call(t, dest);
+        };
+      }
       var val = Reflect.get(t, p);
       return typeof val === 'function' ? val.bind(t) : val;
     }

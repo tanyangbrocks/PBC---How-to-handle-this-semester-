@@ -671,12 +671,34 @@ _TT_COURSE_COLORS = {
 _TT_DEFAULT_COLOR = (198, 136, 76)
 
 
+# ── WASM modal 快取（LRU-1）── 僅緩存按鈕之外的靜態內容，避免每幀重繪 ──
+_tt_cache_key  = [None]   # 上次繪製的 courses id
+_tt_cache_surf = [None]   # 上次的 Surface 快照（不含按鈕）
+
 def _draw_modal_timetable(surf, fm, fs, courses, mpos):
     """
     格狀週課表 modal（仿 sheet.png 佈局，遊戲暖色調）。
     courses: [{"name":str, "day":str, "time":str, "credits":int}, ...]
     回傳「確認」按鈕 Rect。
     """
+    import sys as _sys_tt
+    cache_key = id(courses)
+
+    # ── WASM 快取路徑：靜態內容只渲染一次 ─────────────────────
+    if _sys_tt.platform == "emscripten" and _tt_cache_key[0] == cache_key \
+            and _tt_cache_surf[0] is not None:
+        surf.blit(_tt_cache_surf[0], (0, 0))
+        # 僅重繪動態按鈕（hover 變色），其餘直接從快取取
+        cw, ch_ = 760, 620
+        cx_, cy_ = (WIN_W - cw) // 2, (WIN_H - ch_) // 2
+        ok_ = pygame.Rect(cx_ + (cw - 140) // 2, cy_ + ch_ - 50, 140, 44)
+        hov_ = ok_.collidepoint(mpos)
+        dr_  = _premium_btn(surf, ok_, BTN_N, hov_, radius=14)
+        t_   = fm.render("確認", True, WHITE)
+        surf.blit(t_, (dr_.x + (dr_.width - t_.get_width()) // 2,
+                       dr_.y + (dr_.height - t_.get_height()) // 2))
+        return ok_
+
     _draw_modal_overlay(surf)
 
     # ── 卡片尺寸與位置 ───────────────────────────────────────────
@@ -795,6 +817,12 @@ def _draw_modal_timetable(surf, fm, fs, courses, mpos):
         if nt.get_width() <= bw - 4 and bh >= nt.get_height() + 2:
             surf.blit(nt, (bx + (bw - nt.get_width())  // 2,
                            by + (bh - nt.get_height()) // 2))
+
+    # ── WASM：在畫按鈕之前存快照（只存靜態內容）────────────────
+    import sys as _sys_tt2
+    if _sys_tt2.platform == "emscripten":
+        _tt_cache_key[0]  = cache_key
+        _tt_cache_surf[0] = surf.copy()
 
     # ── 確認按鈕 ────────────────────────────────────────────────
     ok    = pygame.Rect(cx + (cw - 140) // 2, cy + ch - 50, 140, 44)

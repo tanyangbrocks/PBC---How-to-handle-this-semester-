@@ -106,25 +106,31 @@ def _wx_fog_new(full_screen: bool = False) -> dict:
 
 def _weather_reset() -> None:
     """隨機挑選天氣並初始化粒子池（每週呼叫一次）。"""
+    import sys as _sys_wx
+    # WASM：粒子數量降為 25%，減少 rAF 負擔；桌面維持原量
+    _WX_S = 0.25 if _sys_wx.platform == "emscripten" else 1.0
     _weather_type[0] = random.choice(_WEATHER_TYPES)
     _weather_pts.clear()
     wt = _weather_type[0]
 
     if wt in ("leaves_green", "leaves_orange", "sakura"):
-        cnt = 72 if wt == "sakura" else 52
+        cnt = max(4, int((72 if wt == "sakura" else 52) * _WX_S))
         for _ in range(cnt):
             _weather_pts.append(_wx_leaf_new(wt, full_screen=True))
 
     elif wt == "sun":
-        for _ in range(32):
+        cnt = max(3, int(32 * _WX_S))
+        for _ in range(cnt):
             _weather_pts.append(_wx_dust_new(full_screen=True))
 
     elif wt == "rain":
-        for _ in range(240):
+        cnt = max(8, int(240 * _WX_S))
+        for _ in range(cnt):
             _weather_pts.append(_wx_rain_new(full_screen=True))
 
     elif wt == "fog":
-        for _ in range(26):
+        cnt = max(3, int(26 * _WX_S))
+        for _ in range(cnt):
             _weather_pts.append(_wx_fog_new(full_screen=True))
 
 def _wx_rotate(pts, angle_rad: float, cx: float, cy: float):
@@ -696,9 +702,11 @@ def _draw_start(surf, fm, fl, mpos):
 
     # ── 懶初始化：開始畫面固定使用「櫻花」天氣 ───────────────
     if _weather_type[0] is None:
+        import sys as _sys_ws
+        _WX_S2 = 0.25 if _sys_ws.platform == "emscripten" else 1.0
         _weather_type[0] = "sakura"
         _weather_pts.clear()
-        for _ in range(72):
+        for _ in range(max(4, int(72 * _WX_S2))):
             _weather_pts.append(_wx_leaf_new("sakura", full_screen=True))
 
     # ── 天氣特效（櫻花）────────────────────────────────────────
