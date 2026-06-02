@@ -56,6 +56,23 @@ def _run_patch_and_switch(pygbag_proc):
 
     print("[build] ✅  patch 完成")
 
+    # ── 步驟 2.5：打包 itch.io 上傳用 zip ────────────────────────
+    import zipfile
+    web_dir  = os.path.join(ROOT, "build", "web")
+    zip_path = os.path.join(ROOT, "build", "pbc_web.zip")
+    print("[build] 打包 itch.io 用 zip...")
+    try:
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for dirpath, _, files in os.walk(web_dir):
+                for fname in files:
+                    abs_path = os.path.join(dirpath, fname)
+                    arc_name = os.path.relpath(abs_path, web_dir)
+                    zf.write(abs_path, arc_name)
+        size_mb = os.path.getsize(zip_path) / 1024 / 1024
+        print(f"[build] ✅  pbc_web.zip（{size_mb:.1f} MB）→ build/pbc_web.zip")
+    except Exception as _ze:
+        print(f"[build] ⚠  打包失敗（不影響後續）：{_ze}")
+
     # ── 步驟 3：終止 pygbag dev server ───────────────────────────
     print("[build] 終止 pygbag dev server...")
     pygbag_proc.terminate()
