@@ -573,13 +573,36 @@ canvas { touch-action: none; }
   body { margin: 0; overflow: hidden; }
   canvas { width: 100vw !important; height: auto !important; display: block; }
 }
+/* 直式手機：顯示轉向提示，隱藏遊戲畫面 */
+@media screen and (orientation: portrait) and (max-width: 960px) {
+  canvas { display: none !important; }
+  #__rotate_hint { display: flex !important; }
+}
+</style>"""
+
+# 直式手機轉向提示覆蓋層（配合遊戲暖色系）
+ROTATE_HINT_HTML = """<div id="__rotate_hint" style="
+  display:none; position:fixed; inset:0; z-index:2147483646;
+  background:linear-gradient(160deg,#2a1500 0%,#1a0800 100%);
+  flex-direction:column; align-items:center; justify-content:center;
+  font-family:sans-serif; color:#f5d9a8; text-align:center; gap:20px;">
+  <div style="font-size:60px; animation:rot 2s ease-in-out infinite;">📱</div>
+  <div style="font-size:22px; font-weight:bold;">請將手機轉為橫向</div>
+  <div style="font-size:13px; opacity:0.6;">Please rotate to landscape</div>
+</div>
+<style>
+@keyframes rot {
+  0%,100% { transform: rotate(0deg); }
+  40%,60% { transform: rotate(90deg); }
+}
 </style>"""
 
 if 'touch-action' in html:
     print("[patch_index] ⚠️  行動裝置 CSS 已存在，跳過注入")
 else:
     html = html.replace("</head>", MOBILE_SUPPORT + "\n</head>", 1)
-    print("[patch_index] ✓ 行動裝置 viewport + touch CSS 注入成功")
+    html = html.replace("</body>", ROTATE_HINT_HTML + "\n</body>", 1)
+    print("[patch_index] ✓ 行動裝置 viewport + touch CSS + 直式轉向提示注入成功")
 
 with open(INDEX_PATH, "w", encoding="utf-8") as f:
     f.write(html)
