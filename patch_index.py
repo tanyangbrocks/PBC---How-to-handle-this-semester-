@@ -137,12 +137,21 @@ print("[patch_index] ✓ infobox 樣式替換成功")
 #      → 可能出現 1-2 個靜音 quantum（2.9ms）但無持續失真
 AUDIO_FIX_JS = """
 <script>
-// ── AudioWorklet proxy（大緩衝，減少 rAF 造成的音訊失真）──────────────
+// ── AudioWorklet proxy（穩定版）+ Page Visibility ─────────────────────
+// 架構說明：
+//   ScriptProcessorNode 必須「留在」音訊圖中（連接 destination），
+//   onaudioprocess 才會持續觸發（Web Audio spec 規定）。
+//   因此我們不 disconnect，改為在 onaudioprocess 中把 outputBuffer 填 0，
+//   讓 ScriptProcessorNode 輸出靜音；Worklet（獨立執行緒）輸出真實音訊。
+//   兩者在 destination 混合 = 靜音 + 音訊 = 正常播放。
+//
+// pre-buffer：2 packets（23ms @44100Hz）
+//   - 足以吸收正常幀時間（rAF ~16ms）
+//   - 不截斷短音效（< 93ms 的 SFX 在舊版 8-pkt 設定下會被吃掉）
+//   - underrun 時輸出靜音 quantum（2.9ms），不重置 ready，等新 packet 自動恢復
 (function(){
 'use strict';
 
-// Worklet：等待 MIN_PKTS 個 packet（93ms pre-buffer）後才開始輸出
-// underrun 時輸出靜音 quantum（2.9ms）不重置，等新 packet 自動恢復
 var WORKLET_SRC = [
   'class SDL2Proxy extends AudioWorkletProcessor {',
   '  constructor(){',
@@ -150,7 +159,7 @@ var WORKLET_SRC = [
   '    this._q=[];',
   '    this._pos=0;',
   '    this._ready=false;',
-  '    this._MIN=8;', // pre-buffer: 8×512=4096 samples = 93ms @44100Hz
+  '    this._MIN=2;', // pre-buffer: 2×512=1024 samples = 23ms @44100Hz
   '    this.port.onmessage=function(e){this._q.push(e.data);}.bind(this);',
   '  }',
   '  process(inp,out){',
@@ -200,15 +209,13 @@ AudioContext.prototype.createScriptProcessor = function(bufSz, inCh, outCh) {
     });
     _wNode.connect(ctx.destination);
     _wReady = true;
-    console.log('[audio-proxy] AudioWorklet ready (8-pkt pre-buffer)');
+    console.log('[audio-proxy] AudioWorklet ready (2-pkt pre-buffer, copy mode)');
   }).catch(function(e){
     console.warn('[audio-proxy] AudioWorklet failed, using ScriptProcessorNode fallback:', e.message);
     URL.revokeObjectURL(url);
   });
 
   var _sdl2fn = null;
-  var _destNode = null;
-  var _muted = false;
 
   return new Proxy(real, {
     set: function(t, p, v) {
@@ -219,15 +226,14 @@ AudioContext.prototype.createScriptProcessor = function(bufSz, inCh, outCh) {
           if (_wReady && _wNode) {
             var ob  = evt.outputBuffer;
             var nCh = ob.numberOfChannels;
+            // Copy（不 transfer）：確保 Worklet 端收到完整資料
+            // ScriptProcessorNode 不 disconnect，留在音訊圖中讓 onaudioprocess 持續觸發
             var pkt = [];
             for (var c = 0; c < nCh; c++) {
               pkt.push(ob.getChannelData(c).slice(0));
             }
-            _wNode.port.postMessage(pkt, pkt.map(function(a){return a.buffer;}));
-            if (!_muted && _destNode) {
-              try { real.disconnect(_destNode); } catch(e2){}
-              _muted = true;
-            }
+            _wNode.port.postMessage(pkt);
+            // outputBuffer 填 0：ScriptProcessorNode 輸出靜音，避免直通雙重出聲
             for (var c2 = 0; c2 < nCh; c2++) {
               ob.getChannelData(c2).fill(0);
             }
@@ -238,12 +244,6 @@ AudioContext.prototype.createScriptProcessor = function(bufSz, inCh, outCh) {
       return Reflect.set(t, p, v);
     },
     get: function(t, p) {
-      if (p === 'connect') {
-        return function(dest) {
-          _destNode = dest;
-          return Reflect.get(t,'connect').call(t, dest);
-        };
-      }
       var val = Reflect.get(t, p);
       return typeof val === 'function' ? val.bind(t) : val;
     }

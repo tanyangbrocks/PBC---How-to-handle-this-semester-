@@ -72,12 +72,22 @@
   3. **輔助修**：主迴圈 double yield（`asyncio.sleep(0)` × 2）——給瀏覽器更多機會執行任務
   4. **基礎修**：大量 SRCALPHA 快取——降低 GC 頻率，縮短每幀時間
 
-### 2-6a AudioWorklet proxy 實作踩坑
-- **AudioWorklet 送接 packet 大小不匹配**（第一版 bug）：  
+### 2-6a AudioWorklet proxy 實作踩坑（第一版 bug）
+- **AudioWorklet 送接 packet 大小不匹配**：  
   `ScriptProcessorNode` 每次 `onaudioprocess` 送出 4096 sample 的 packet；  
   `AudioWorkletProcessor.process()` 每次只有 128 個 sample 的 buffer。  
   初版直接 `ch[c].set(pkt[c])`，只複製前 128/4096 = **3.1%**，其餘 96.9% 丟棄 → 音樂「消失」。  
   **正確做法**：Worklet 內維護 `this._pos` cursor，跨多次 `process()` 呼叫連續消化完整 packet。
+
+### 2-6b AudioWorklet proxy 實作踩坑（第二版 bug）— Disconnect 後永久靜音
+- **根因**：Web Audio API spec 明確規定：`ScriptProcessorNode.onaudioprocess` **只在節點有路徑連接至 `AudioContext.destination` 時才觸發**。舊版程式碼在 Worklet 就緒後呼叫 `real.disconnect(destination)`，導致 `onaudioprocess` 立即停止觸發，Worklet 再也收不到新資料，93ms 後永久靜音。
+- **現象**：開場有短暫聲音（Worklet 就緒前 ~200ms 直通期），之後完全靜音；Console 顯示 `AudioWorklet ready` 且 `ctx=running`，沒有任何錯誤訊息（靜默失敗）。
+- **修法**：**不呼叫 disconnect**。ScriptProcessorNode 永遠留在音訊圖中（保持 onaudioprocess 持續觸發），改在每次 onaudioprocess 中把 `outputBuffer` 全部 fill(0)，讓 ScriptProcessorNode 輸出靜音；Worklet 另外連接 destination 輸出真實音訊，兩者在 destination 混合 = 正常播放。
+- **同步修正**：Transfer → Copy。原本使用 `postMessage(pkt, [transfer_list])` 轉移 ArrayBuffer 所有權，改為 `postMessage(pkt)`（複製模式），避免潛在的 detached buffer 問題，代價為每次多複製 512×2×4 = 4KB（可接受）。
+
+### 2-6c Pre-buffer 過大導致短音效被截斷
+- **根因**：pre-buffer = 8 packets × 512 samples = 93ms。SFX 音效若長度 < 100ms，在 Worklet 開始輸出前就已結束，玩家完全聽不到。
+- **修法**：降為 2 packets（23ms），足以吸收正常 rAF 幀時間（~16ms），且不截斷短音效。underrun 時輸出靜音 quantum 後自動恢復，無需重置 ready 狀態。
 
 ### 2-7 run_ui asyncio task 被例外 crash 後無法恢復
 - **根因**：`while _cmd_q:` 中的 tag handler 若拋出例外，整個 `run_ui` coroutine 終止 → 遊戲永久凍結
@@ -167,8 +177,11 @@ python -X utf8 patch_index.py
 
 | 問題 | 狀態 | 說明 |
 |------|------|------|
-| 音訊失真 | ✅ 已修（AudioWorklet proxy + cursor fix） | Worklet 就緒前（~200ms）有短暫直通；Worklet 就緒後完全離開主執行緒 |
+| 音訊失真（underrun） | ✅ 已修（AudioWorklet proxy + 2-pkt pre-buffer） | Worklet 獨立執行緒輸出，主執行緒堵塞不影響播放 |
+| AudioWorklet 永久靜音 | ✅ 已修（移除 disconnect，改 fill(0) 靜音） | 見 2-6b；ScriptProcessorNode 留在圖中維持事件觸發 |
+| 短音效被截斷 | ✅ 已修（pre-buffer 降為 2 packets = 23ms） | 見 2-6c |
 | 全螢幕 IME overlay | ✅ 已修（documentElement fullscreen） | 改用 html 根元素為全螢幕目標，overlay 自動可見 |
+| rAF Violation（368 次）| ⚠️ 持續觀察 | 主執行緒仍有大量幀超時，音訊透過 Worklet 隔離，視覺卡頓仍存在 |
 | CC 粒子 wisp 每幀小 Surface | ⚠️ 待優化 | ~30 個小 SRCALPHA/frame，影響較小但未快取 |
 | `_render_mixed` 每幀建立 Surface | ⚠️ 待優化 | 拉霸機可見時，每個 tile 都建立小 Surface |
 | `ui_draw.py`（死碼） | ℹ️ 無影響 | 原始未拆分的 4628 行巨型檔案，未被 `ui.py` import，不影響遊戲 |
