@@ -559,6 +559,28 @@ CRASH_HANDLER_JS = """
 html = html.replace("</body>", CRASH_HANDLER_JS, 1)
 print("[patch_index] ✓ JS 全域崩潰攔截注入成功（window.onerror + unhandledrejection）")
 
+# ── 行動裝置支援：viewport meta + canvas touch CSS ─────────────────────
+# 原理：SDL2/Emscripten 已自動將 touch → MOUSEBUTTONDOWN，
+#   此 CSS 的功能是：
+#   1. touch-action:none — 防止瀏覽器攔截觸控做滾動/縮放，確保 touch 正確送達 SDL2
+#   2. viewport meta    — 行動瀏覽器不自動縮放（避免座標換算錯位）
+#   3. media query      — 畫面寬度 < 960px 時，canvas 自動縮放至 100vw
+#   桌面瀏覽器：viewport meta 無效果；touch-action 及 media query 均不觸發
+MOBILE_SUPPORT = """<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<style>
+canvas { touch-action: none; }
+@media screen and (max-width: 960px) {
+  body { margin: 0; overflow: hidden; }
+  canvas { width: 100vw !important; height: auto !important; display: block; }
+}
+</style>"""
+
+if 'touch-action' in html:
+    print("[patch_index] ⚠️  行動裝置 CSS 已存在，跳過注入")
+else:
+    html = html.replace("</head>", MOBILE_SUPPORT + "\n</head>", 1)
+    print("[patch_index] ✓ 行動裝置 viewport + touch CSS 注入成功")
+
 with open(INDEX_PATH, "w", encoding="utf-8") as f:
     f.write(html)
 
