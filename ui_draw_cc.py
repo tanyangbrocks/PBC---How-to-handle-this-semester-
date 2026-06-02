@@ -18,6 +18,10 @@ _SLOT_TILE_H = 62
 # ── CC 標題 comp 表面快取（key = (text, active_idx)，最多 N×文字數 種狀態）──
 _cc_title_cache: dict = {}
 
+# ── 拉霸機 _render_mixed 快取（WASM 專用，key = (font_id_fc, font_id_fb, text, color)）
+# 拉霸機 tile 文字在旋轉過程中每幀重建 Surface，輸入空間有限（固定天賦名稱清單），快取效益高
+_render_mixed_cache: dict = {}
+
 def _cc_ptcl_new(full_screen: bool = False) -> dict:
     """生成一顆紫色螢光粒子（orb 光球 或 wisp 光絮）。"""
     kind = "orb" if random.random() < 0.55 else "wisp"
@@ -94,19 +98,29 @@ def _draw_cc_particles(surf: pygame.Surface, ms: int) -> None:
         else:  # wisp 光絮：細長橢圓（帶旋轉）
             ew = max(2, int(r_draw * 3))
             eh = max(4, int(r_draw * 9))
-            ws = pygame.Surface((ew + 2, eh + 2), pygame.SRCALPHA)
             outer_col = (*col, max(0, alp // 3))
             inner_col = (*col, alp)
-            pygame.draw.ellipse(ws, outer_col, ws.get_rect())
-            ir = ws.get_rect().inflate(-2, -4)
-            if ir.width > 0 and ir.height > 0:
-                pygame.draw.ellipse(ws, inner_col, ir)
-            # 旋轉橢圓（使用粒子本身的 angle；舊粒子無此欄位時 fallback 0）
-            angle = p.get("angle", 0.0)
-            if angle % 360 != 0.0:
-                ws = pygame.transform.rotate(ws, angle)
-            rw, rh = ws.get_size()
-            pt_surf.blit(ws, (px - rw // 2, py - rh // 2))
+            import sys as _sys_wisp
+            if _sys_wisp.platform == "emscripten":
+                # WASM：直接畫在 pt_surf，省去 Sub-Surface 分配與旋轉 transform
+                pygame.draw.ellipse(pt_surf, outer_col,
+                                    pygame.Rect(px - ew // 2, py - eh // 2, ew, eh))
+                iw, ih = max(1, ew - 2), max(1, eh - 4)
+                if iw > 0 and ih > 0:
+                    pygame.draw.ellipse(pt_surf, inner_col,
+                                        pygame.Rect(px - iw // 2, py - ih // 2, iw, ih))
+            else:
+                ws = pygame.Surface((ew + 2, eh + 2), pygame.SRCALPHA)
+                pygame.draw.ellipse(ws, outer_col, ws.get_rect())
+                ir = ws.get_rect().inflate(-2, -4)
+                if ir.width > 0 and ir.height > 0:
+                    pygame.draw.ellipse(ws, inner_col, ir)
+                # 旋轉橢圓（使用粒子本身的 angle；舊粒子無此欄位時 fallback 0）
+                angle = p.get("angle", 0.0)
+                if angle % 360 != 0.0:
+                    ws = pygame.transform.rotate(ws, angle)
+                rw, rh = ws.get_size()
+                pt_surf.blit(ws, (px - rw // 2, py - rh // 2))
 
         # ── 更新位置 + 旋轉角 ─────────────────────────────────────
         p["x"] += p["vx"]
@@ -1081,6 +1095,8 @@ def _spawn_confetti(ox: float, oy: float):
 
 def _update_confetti(surf):
     """更新並繪製所有彩帶粒子；自動清除已結束的粒子。"""
+    import sys as _sys_cf
+    _wasm_cf = _sys_cf.platform == "emscripten"
     keep = []
     for p in _cc_confetti:
         p["vy"] += 0.35
@@ -1088,10 +1104,16 @@ def _update_confetti(surf):
         p["y"]  += p["vy"]
         p["life"] -= 1
         if p["life"] > 0 and p["y"] < WIN_H + 20:
-            alpha = min(255, int(255 * p["life"] / p["max_life"]))
-            ps = pygame.Surface((p["w"], p["h"]), pygame.SRCALPHA)
-            ps.fill((*p["color"], alpha))
-            surf.blit(ps, (int(p["x"]), int(p["y"])))
+            if _wasm_cf:
+                # WASM：不建 SRCALPHA Surface，直接畫不透明矩形（省去 Surface 分配與 blit）
+                # 視覺差異：彩帶不淡出，但爆炸效果短暫，影響輕微
+                pygame.draw.rect(surf, p["color"],
+                                 (int(p["x"]), int(p["y"]), p["w"], p["h"]))
+            else:
+                alpha = min(255, int(255 * p["life"] / p["max_life"]))
+                ps = pygame.Surface((p["w"], p["h"]), pygame.SRCALPHA)
+                ps.fill((*p["color"], alpha))
+                surf.blit(ps, (int(p["x"]), int(p["y"])))
             keep.append(p)
     _cc_confetti[:] = keep
 
@@ -1136,11 +1158,23 @@ def _render_mixed(fc, fb, text: str, color) -> "pygame.Surface":
     逐字渲染 text：每個字先查 fc 的字形 advance；
     若 advance == 0（字型缺少該字形），改用 fb 渲染。
     回傳所有字元水平拼接後的 Surface。
+    WASM：結果按 (fc id, fb id, text, color) 快取，拉霸機旋轉期間避免每幀重建。
     """
+    import sys as _sys_rm
+    _wasm_rm = _sys_rm.platform == "emscripten"
+    if _wasm_rm:
+        _key = (id(fc), id(fb), text, color)
+        _hit = _render_mixed_cache.get(_key)
+        if _hit is not None:
+            return _hit
+
     _FORCE_FB = {"貓"}   # 強制使用備用字型（fb_lg）的字元集
 
     if not text:
-        return fc.render("", True, color)
+        out = fc.render("", True, color)
+        if _wasm_rm:
+            _render_mixed_cache[_key] = out
+        return out
     ch_surfs = []
     for ch in text:
         if ch in _FORCE_FB:
@@ -1157,6 +1191,8 @@ def _render_mixed(fc, fb, text: str, color) -> "pygame.Surface":
     for s in ch_surfs:
         out.blit(s, (x, (max_h - s.get_height()) // 2))
         x += s.get_width()
+    if _wasm_rm:
+        _render_mixed_cache[_key] = out
     return out
 
 
