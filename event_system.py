@@ -106,11 +106,11 @@ PHASE_EVENTS = [
     },
     {
         "id":       "drop_crisis",
-        "name":     "退選危機",
+        "name":     "停修已來不及",
         "prob":     0.10,
-        "week_range": (9, 16),
+        "week_range": (13, 16),
         "is_positive": False,
-        "desc":     "想退那堂爛課，結果查了一下——退選截止日上週就過了。幹。",
+        "desc":     "想停修那堂爛課，結果查了一下——停修截止日已經過了。幹。",
         "effect":   lambda p: _drop_crisis_effect(p),
     },
 ]
