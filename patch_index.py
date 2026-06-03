@@ -23,10 +23,21 @@ if not os.path.exists(INDEX_PATH):
 with open(INDEX_PATH, "r", encoding="utf-8") as f:
     html = f.read()
 
-# ── 1. 替換背景色（powderblue → 遊戲暖色）────────────────────────
+# ── 0. 複製載入畫面背景圖到 build/web/（HTML 無法直接讀 pygbag VFS）────
+import shutil as _shutil
+_bg_src = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "asset", "picture", "background", "outside_background.jpg")
+_bg_dst = os.path.join(os.path.dirname(INDEX_PATH), "outside_background.jpg")
+if os.path.exists(_bg_src):
+    _shutil.copy(_bg_src, _bg_dst)
+    print("[patch_index] ✓ outside_background.jpg 複製到 build/web/")
+else:
+    print("[patch_index] ⚠️  找不到 outside_background.jpg，載入畫面將無背景圖")
+
+# ── 1. 替換背景色（powderblue → 深色，避免背景圖顯示前的白色閃爍）────
 html = html.replace(
     "background-color:powderblue;",
-    "background:linear-gradient(160deg,#fff5e0 0%,#ffe4c0 60%,#ffd4a8 100%);"
+    "background:#1a0800;"
 )
 
 # ── 2. 替換整個 transfer div（含進度條）─────────────────────────
@@ -38,39 +49,52 @@ OLD_TRANSFER = re.compile(
 NEW_TRANSFER = """<div id="transfer" align="center" style="
     position:fixed;top:0;left:0;width:100%;height:100%;
     z-index:9998;">
-  <!-- 內層 wrapper 負責排版（transfer 本身不設 display，讓 hidden 屬性能正常隱藏） -->
-  <div style="width:100%;height:100%;
+  <!-- 背景圖（複製自 asset/picture/background/outside_background.jpg） -->
+  <div style="
+    position:absolute;top:0;left:0;width:100%;height:100%;
+    background:url('./outside_background.jpg') center/cover no-repeat;"></div>
+  <!-- 半透明暗色遮罩（確保文字可讀） -->
+  <div style="
+    position:absolute;top:0;left:0;width:100%;height:100%;
+    background:rgba(0,0,0,0.42);"></div>
+  <!-- 內層內容區 -->
+  <div style="
+    position:relative;z-index:1;
+    width:100%;height:100%;
     display:flex;flex-direction:column;align-items:center;justify-content:center;
-    background:linear-gradient(160deg,#fff5e0 0%,#ffe4c0 60%,#ffd4a8 100%);
     font-family:sans-serif;">
-  <!-- 遊戲標題 -->
-  <div style="font-size:32px;font-weight:bold;color:#5d4037;
-              margin-bottom:8px;letter-spacing:4px;
-              text-shadow:2px 2px 4px rgba(0,0,0,0.15);">
-    如何渡過這學期？
-  </div>
-  <div style="font-size:13px;color:#a08060;margin-bottom:32px;letter-spacing:2px;">
-    How to Survive This Semester
-  </div>
-  <!-- 進度條外框 -->
-  <div style="width:320px;height:16px;
-              background:#f0dcc0;border-radius:8px;
-              box-shadow:inset 0 2px 4px rgba(0,0,0,0.12);
-              overflow:hidden;">
-    <div id="pbc_bar" style="height:100%;width:0%;
-         background:linear-gradient(90deg,#ff9460,#ffc080);
-         border-radius:8px;
-         transition:width 0.4s ease;"></div>
-  </div>
-  <!-- 進度數字 -->
-  <div id="pbc_pct" style="font-size:13px;color:#a08060;
-                            margin-top:10px;">0%</div>
-  <!-- 狀態訊息（pygbag infobox 的替代位置） -->
-  <div id="status" style="font-size:12px;color:#c09070;
-                            margin-top:6px;">正在載入中...</div>
-  <progress id="progress" value="0" max="100"
-            style="display:none;"></progress>
-  </div><!-- end inner wrapper -->
+    <!-- 遊戲標題 -->
+    <div style="font-size:32px;font-weight:bold;color:#f5d9a8;
+                margin-bottom:8px;letter-spacing:4px;
+                text-shadow:2px 2px 6px rgba(0,0,0,0.7);">
+      如何渡過這學期？
+    </div>
+    <div style="font-size:13px;color:#e8d0a0;margin-bottom:40px;letter-spacing:2px;
+                text-shadow:1px 1px 4px rgba(0,0,0,0.7);">
+      How to Survive This Semester
+    </div>
+    <!-- 提示文字 -->
+    <div style="font-size:14px;color:#f0e0c0;margin-bottom:14px;
+                text-shadow:1px 1px 4px rgba(0,0,0,0.7);">
+      載入可能需要一點時間，請耐心等候……
+    </div>
+    <!-- 進度條 + 百分比（同一列） -->
+    <div style="display:flex;align-items:center;gap:10px;">
+      <div style="width:300px;height:14px;
+                  background:rgba(255,255,255,0.18);border-radius:7px;
+                  overflow:hidden;">
+        <div id="pbc_bar" style="height:100%;width:0%;
+             background:#e8bc55;border-radius:7px;
+             transition:width 0.4s ease;"></div>
+      </div>
+      <div id="pbc_pct" style="font-size:13px;color:#e8bc55;
+                                font-weight:bold;min-width:36px;
+                                text-shadow:1px 1px 4px rgba(0,0,0,0.7);">0%</div>
+    </div>
+    <!-- pygbag 內部使用的元素（不可移除，隱藏即可） -->
+    <div id="status" style="display:none;"></div>
+    <progress id="progress" value="0" max="100" style="display:none;"></progress>
+  </div><!-- end content -->
 </div><!-- end #transfer -->
 
 <script>
@@ -570,8 +594,22 @@ MOBILE_SUPPORT = """<meta name="viewport" content="width=device-width, initial-s
 <style>
 canvas { touch-action: none; }
 @media screen and (max-width: 960px) {
-  body { margin: 0; overflow: hidden; }
-  canvas { width: 100vw !important; height: auto !important; display: block; }
+  /* 同時限制寬高，等比縮放塞入螢幕（解決按鈕被裁到螢幕外的問題）
+     遊戲比例 4:3（960×720），min() 取寬或高的較小值保持整體可見 */
+  html, body {
+    margin: 0; padding: 0;
+    width: 100%; height: 100%;
+    overflow: hidden;
+    background: #1a0800;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  canvas {
+    display: block !important;
+    width: min(100vw, calc(100vh * 4 / 3)) !important;
+    height: min(100vh, calc(100vw * 3 / 4)) !important;
+  }
 }
 /* 直式手機：顯示轉向提示，隱藏遊戲畫面 */
 @media screen and (orientation: portrait) and (max-width: 960px) {
