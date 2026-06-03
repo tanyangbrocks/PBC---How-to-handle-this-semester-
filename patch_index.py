@@ -522,6 +522,58 @@ CRASH_HANDLER_JS = """
 html = html.replace("</body>", CRASH_HANDLER_JS, 1)
 print("[patch_index] ✓ JS 全域崩潰攔截注入成功（window.onerror + unhandledrejection）")
 
+# ── 行動裝置觸控修正 ─────────────────────────────────────────────────────
+# 問題：在 itch.io iframe 中，SDL2/Emscripten 的 touch→MOUSEBUTTONDOWN
+#   自動轉換可能失效，導致玩家觸控按鈕完全無反應。
+# 解法：JS 層明確攔截 touchstart/touchend，
+#   發出對應的 pointerdown/pointerup/click 合成事件給 canvas，
+#   讓 SDL2 即使無法接到原生 touch 也能收到合成 mouse 事件。
+# 防重複：用 _sdl2MouseSent flag 避免與 SDL2 自動轉換重疊造成雙擊。
+TOUCH_FIX_JS = """
+<script>
+(function(){
+'use strict';
+var _lastT = 0;
+function synth(type, touch, target) {
+  var now = Date.now();
+  // 短時間內已有合成事件，跳過（防 SDL2 自動轉換 + 我們的轉換雙重觸發）
+  if (type === 'mousedown' && now - _lastT < 80) return;
+  if (type === 'mousedown') _lastT = now;
+  var e = new MouseEvent(type, {
+    bubbles: true, cancelable: true, view: window,
+    clientX: touch.clientX, clientY: touch.clientY,
+    screenX: touch.screenX, screenY: touch.screenY,
+    button: 0, buttons: type === 'mousedown' ? 1 : 0
+  });
+  target.dispatchEvent(e);
+}
+function attach() {
+  var cv = document.getElementById('canvas') || document.querySelector('canvas');
+  if (!cv) { setTimeout(attach, 400); return; }
+  // 確保 canvas 可獲得焦點（SDL2 需要焦點才能接收部分事件）
+  if (!cv.getAttribute('tabindex')) cv.setAttribute('tabindex', '0');
+  cv.addEventListener('touchstart', function(e) {
+    cv.focus();
+    var t = e.changedTouches[0];
+    synth('mousedown', t, cv);
+  }, { passive: true });
+  cv.addEventListener('touchend', function(e) {
+    var t = e.changedTouches[0];
+    synth('mouseup', t, cv);
+    synth('click',   t, cv);
+  }, { passive: true });
+}
+attach();
+})();
+</script>
+</body>"""
+
+if 'sdl2MouseSent' in html or '_lastT' in html:
+    print("[patch_index] ⚠️  觸控修正已存在，跳過注入")
+else:
+    html = html.replace("</body>", TOUCH_FIX_JS, 1)
+    print("[patch_index] ✓ 行動裝置觸控修正注入成功（touch→mouse 明確轉換）")
+
 # ── 行動裝置支援：viewport meta + canvas touch CSS ─────────────────────
 # 原理：SDL2/Emscripten 已自動將 touch → MOUSEBUTTONDOWN，
 #   此 CSS 的功能是：
