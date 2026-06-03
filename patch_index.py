@@ -48,72 +48,11 @@ OLD_TRANSFER = re.compile(
 
 NEW_TRANSFER = """<div id="transfer" align="center" style="
     position:fixed;top:0;left:0;width:100%;height:100%;
-    z-index:9998;">
-  <!-- 背景圖（複製自 asset/picture/background/outside_background.jpg） -->
-  <div style="
-    position:absolute;top:0;left:0;width:100%;height:100%;
-    background:url('./outside_background.jpg') center/cover no-repeat;"></div>
-  <!-- 半透明暗色遮罩（確保文字可讀） -->
-  <div style="
-    position:absolute;top:0;left:0;width:100%;height:100%;
-    background:rgba(0,0,0,0.42);"></div>
-  <!-- 內層內容區 -->
-  <div style="
-    position:relative;z-index:1;
-    width:100%;height:100%;
-    display:flex;flex-direction:column;align-items:center;justify-content:center;
-    font-family:sans-serif;">
-    <!-- 遊戲標題 -->
-    <div style="font-size:32px;font-weight:bold;color:#f5d9a8;
-                margin-bottom:8px;letter-spacing:4px;
-                text-shadow:2px 2px 6px rgba(0,0,0,0.7);">
-      如何渡過這學期？
-    </div>
-    <div style="font-size:13px;color:#e8d0a0;margin-bottom:40px;letter-spacing:2px;
-                text-shadow:1px 1px 4px rgba(0,0,0,0.7);">
-      How to Survive This Semester
-    </div>
-    <!-- 提示文字 -->
-    <div style="font-size:14px;color:#f0e0c0;margin-bottom:14px;
-                text-shadow:1px 1px 4px rgba(0,0,0,0.7);">
-      載入可能需要一點時間，請耐心等候……
-    </div>
-    <!-- 進度條 + 百分比（同一列） -->
-    <div style="display:flex;align-items:center;gap:10px;">
-      <div style="width:300px;height:14px;
-                  background:rgba(255,255,255,0.18);border-radius:7px;
-                  overflow:hidden;">
-        <div id="pbc_bar" style="height:100%;width:0%;
-             background:#e8bc55;border-radius:7px;
-             transition:width 0.4s ease;"></div>
-      </div>
-      <div id="pbc_pct" style="font-size:13px;color:#e8bc55;
-                                font-weight:bold;min-width:36px;
-                                text-shadow:1px 1px 4px rgba(0,0,0,0.7);">0%</div>
-    </div>
-    <!-- pygbag 內部使用的元素（不可移除，隱藏即可） -->
-    <div id="status" style="display:none;"></div>
-    <progress id="progress" value="0" max="100" style="display:none;"></progress>
-  </div><!-- end content -->
-</div><!-- end #transfer -->
-
-<script>
-// 監聽隱藏 progress 元素的 value 變化，同步到自訂進度條
-(function(){
-  var bar  = document.getElementById('pbc_bar');
-  var pct  = document.getElementById('pbc_pct');
-  var prog = document.getElementById('progress');
-  if(!prog||!bar) return;
-  var obs = new MutationObserver(function(){
-    var v = parseInt(prog.value)||0;
-    var m = parseInt(prog.max)||100;
-    var p = m>0 ? Math.round(v/m*100) : 0;
-    bar.style.width = p+'%';
-    pct.textContent = p+'%';
-  });
-  obs.observe(prog, {attributes:true, attributeFilter:['value']});
-})();
-</script>"""
+    z-index:9998;background:#1a0800;">
+  <!-- pygbag 內部使用的元素（不可移除）；視覺內容由 #__pbc_screen 負責 -->
+  <div id="status" style="display:none;"></div>
+  <progress id="progress" value="0" max="100" style="display:none;"></progress>
+</div><!-- end #transfer -->"""
 
 if OLD_TRANSFER.search(html):
     html = OLD_TRANSFER.sub(NEW_TRANSFER, html, count=1)
@@ -641,6 +580,97 @@ else:
     html = html.replace("</head>", MOBILE_SUPPORT + "\n</head>", 1)
     html = html.replace("</body>", ROTATE_HINT_HTML + "\n</body>", 1)
     print("[patch_index] ✓ 行動裝置 viewport + touch CSS + 直式轉向提示注入成功")
+
+# ── 6. 注入持久載入覆蓋層 #__pbc_screen ────────────────────────────────
+# 問題：pygbag 在載入 Python 直譯器時會把 #transfer 隱藏（設定 hidden 屬性），
+#       導致我們的自訂載入畫面消失，露出灰色 canvas + "Loading, please wait..."。
+# 解法：將視覺內容移到獨立的 #__pbc_screen（z-index:9999），
+#       pygbag 無法管理它，覆蓋層持續顯示；
+#       以 JS 輪詢 canvas 中心像素，偵測到顏色變化（=遊戲開始繪製）後淡出。
+LOADING_OVERLAY = """<div id="__pbc_screen" style="
+    position:fixed;top:0;left:0;width:100%;height:100%;
+    z-index:9999;pointer-events:none;
+    transition:opacity 0.6s ease;">
+  <div style="position:absolute;inset:0;
+    background:url('./outside_background.jpg') center/cover no-repeat;"></div>
+  <div style="position:absolute;inset:0;background:rgba(0,0,0,0.42);"></div>
+  <div style="position:relative;z-index:1;width:100%;height:100%;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    font-family:sans-serif;">
+    <div style="font-size:32px;font-weight:bold;color:#f5d9a8;
+                margin-bottom:8px;letter-spacing:4px;
+                text-shadow:2px 2px 6px rgba(0,0,0,.7);">
+      如何渡過這學期？
+    </div>
+    <div style="font-size:13px;color:#e8d0a0;margin-bottom:40px;letter-spacing:2px;
+                text-shadow:1px 1px 4px rgba(0,0,0,.7);">
+      How to Survive This Semester
+    </div>
+    <div style="font-size:14px;color:#f0e0c0;margin-bottom:14px;
+                text-shadow:1px 1px 4px rgba(0,0,0,.7);">
+      載入可能需要一點時間，請耐心等候……
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;">
+      <div style="width:300px;height:14px;
+                  background:rgba(255,255,255,.18);border-radius:7px;overflow:hidden;">
+        <div id="pbc_bar" style="height:100%;width:0%;
+             background:#e8bc55;border-radius:7px;
+             transition:width .4s ease;"></div>
+      </div>
+      <div id="pbc_pct" style="font-size:13px;color:#e8bc55;
+                                font-weight:bold;min-width:36px;
+                                text-shadow:1px 1px 4px rgba(0,0,0,.7);">0%</div>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+  // 進度條：輪詢等 #progress 出現後掛 MutationObserver
+  var bar=document.getElementById('pbc_bar');
+  var pct=document.getElementById('pbc_pct');
+  function hookProgress(){
+    var prog=document.getElementById('progress');
+    if(!prog){ setTimeout(hookProgress,500); return; }
+    new MutationObserver(function(){
+      var v=parseInt(prog.value)||0, m=parseInt(prog.max)||100;
+      var p=m>0?Math.round(v/m*100):0;
+      if(bar) bar.style.width=p+'%';
+      if(pct) pct.textContent=p+'%';
+    }).observe(prog,{attributes:true,attributeFilter:['value']});
+  }
+  hookProgress();
+
+  // 淡出覆蓋層：偵測 canvas 中心像素顏色變化（=遊戲開始繪製首幀）
+  var scr=document.getElementById('__pbc_screen');
+  var _done=false;
+  function hideScreen(){
+    if(_done) return; _done=true;
+    scr.style.opacity='0';
+    setTimeout(function(){ scr.style.display='none'; },650);
+  }
+  var _initCol=null, _n=0;
+  function poll(){
+    if(_done) return;
+    if(++_n>180){ hideScreen(); return; } // 90 秒超時保底
+    var cv=document.getElementById('canvas')||document.querySelector('canvas');
+    if(!cv||!cv.width){ setTimeout(poll,500); return; }
+    try{
+      var d=cv.getContext('2d').getImageData(cv.width>>1,cv.height>>1,1,1).data;
+      var col=d[0]+','+d[1]+','+d[2]+','+d[3];
+      if(_initCol===null){ _initCol=col; }
+      else if(col!==_initCol){ hideScreen(); return; }
+    }catch(e){}
+    setTimeout(poll,500);
+  }
+  setTimeout(poll,2000); // 2 秒後開始輪詢（等 canvas 初始化）
+})();
+</script>"""
+
+if '__pbc_screen' in html:
+    print("[patch_index] ⚠️  載入覆蓋層已存在，跳過注入")
+else:
+    html = html.replace("</body>", LOADING_OVERLAY + "\n</body>", 1)
+    print("[patch_index] ✓ 持久載入覆蓋層注入成功（canvas 像素偵測淡出）")
 
 with open(INDEX_PATH, "w", encoding="utf-8") as f:
     f.write(html)
