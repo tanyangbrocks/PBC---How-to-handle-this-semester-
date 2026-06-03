@@ -1,0 +1,37 @@
+name: Build macOS 安裝檔
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:   # 允許在 GitHub 網頁手動觸發
+
+jobs:
+  build-mac:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout 原始碼
+        uses: actions/checkout@v4
+
+      - name: 設定 Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 安裝相依套件
+        run: pip install pygame-ce pyinstaller
+
+      - name: PyInstaller 打包
+        run: pyinstaller main.spec
+
+      - name: 壓縮輸出
+        run: |
+          cd dist
+          zip -r ../pbc_mac.zip main/
+
+      - name: 上傳成品
+        uses: actions/upload-artifact@v4
+        with:
+          name: pbc-mac-build
+          path: pbc_mac.zip
+          retention-days: 14
