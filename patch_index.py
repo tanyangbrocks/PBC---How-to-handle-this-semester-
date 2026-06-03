@@ -283,7 +283,7 @@ IME_OVERLAY = """
     border:2px solid #e8c898;">
     <p id="__cc_prm" style="font-size:17px;margin:0 0 8px;color:#4a3020;font-weight:bold;"></p>
     <p style="font-size:12px;margin:0 0 10px;color:#a08060;display:none;"></p>
-    <input type="text" id="__cc_inp" lang="zh-TW" autocomplete="off" spellcheck="false"
+    <input type="text" id="__cc_inp" autocomplete="off" spellcheck="false"
       style="font-size:18px;width:220px;padding:8px 12px;border:2px solid #d0a870;
       border-radius:8px;background:#fffdf6;color:#3a2010;outline:none;
       font-family:sans-serif;letter-spacing:2px;">
@@ -692,7 +692,10 @@ LOADING_OVERLAY = """<div id="__pbc_screen" style="
   }
   hookProgress();
 
-  // 淡出覆蓋層：偵測 canvas 中心像素顏色變化（=遊戲開始繪製首幀）
+  // 淡出覆蓋層：監聽 #transfer 被 pygbag 隱藏（= Python 已啟動），
+  // 再等 2 秒讓遊戲繪製第一幀後才收起覆蓋層。
+  // 舊做法（canvas 像素偵測）的缺陷：canvas 初始為透明(0,0,0,0)，
+  // SDL2 init 把它填成灰色時即被誤判為「遊戲已繪製」，覆蓋層 2.5 秒就消失。
   var scr=document.getElementById('__pbc_screen');
   var _done=false;
   function hideScreen(){
@@ -700,21 +703,20 @@ LOADING_OVERLAY = """<div id="__pbc_screen" style="
     scr.style.opacity='0';
     setTimeout(function(){ scr.style.display='none'; },650);
   }
-  var _initCol=null, _n=0;
-  function poll(){
-    if(_done) return;
-    if(++_n>180){ hideScreen(); return; } // 90 秒超時保底
-    var cv=document.getElementById('canvas')||document.querySelector('canvas');
-    if(!cv||!cv.width){ setTimeout(poll,500); return; }
-    try{
-      var d=cv.getContext('2d').getImageData(cv.width>>1,cv.height>>1,1,1).data;
-      var col=d[0]+','+d[1]+','+d[2]+','+d[3];
-      if(_initCol===null){ _initCol=col; }
-      else if(col!==_initCol){ hideScreen(); return; }
-    }catch(e){}
-    setTimeout(poll,500);
+  function watchTransfer(){
+    var tr=document.getElementById('transfer');
+    if(!tr){ setTimeout(watchTransfer,500); return; }
+    var obs=new MutationObserver(function(){
+      if(tr.hasAttribute('hidden')){
+        obs.disconnect();
+        // #transfer 隱藏 = Python 已開始執行；等 2 秒讓首幀繪製完成
+        setTimeout(hideScreen, 2000);
+      }
+    });
+    obs.observe(tr,{attributes:true,attributeFilter:['hidden']});
   }
-  setTimeout(poll,2000); // 2 秒後開始輪詢（等 canvas 初始化）
+  watchTransfer();
+  setTimeout(hideScreen, 90000); // 90 秒超時保底
 })();
 </script>"""
 
