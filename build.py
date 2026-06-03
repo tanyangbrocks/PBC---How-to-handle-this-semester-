@@ -59,7 +59,7 @@ def _run_patch_and_switch(pygbag_proc):
     # ── 步驟 2.5：打包 itch.io 上傳用 zip ────────────────────────
     import zipfile
     web_dir  = os.path.join(ROOT, "build", "web")
-    zip_path = os.path.join(ROOT, "build", "pbc_web.zip")
+    zip_path = os.path.join(ROOT, "build", "【build】How to handle this semester.zip")
     print("[build] 打包 itch.io 用 zip...")
     try:
         with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -69,7 +69,7 @@ def _run_patch_and_switch(pygbag_proc):
                     arc_name = os.path.relpath(abs_path, web_dir)
                     zf.write(abs_path, arc_name)
         size_mb = os.path.getsize(zip_path) / 1024 / 1024
-        print(f"[build] ✅  pbc_web.zip（{size_mb:.1f} MB）→ build/pbc_web.zip")
+        print(f"[build] ✅  【build】How to handle this semester.zip（{size_mb:.1f} MB）→ build/")
     except Exception as _ze:
         print(f"[build] ⚠  打包失敗（不影響後續）：{_ze}")
 

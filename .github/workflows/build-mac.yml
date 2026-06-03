@@ -35,11 +35,11 @@ jobs:
       - name: 壓縮輸出
         run: |
           cd dist
-          zip -r ../pbc_mac_${{ matrix.arch }}.zip main/
+          zip -r "../【Mac ${{ matrix.arch }}】How to handle this semester.zip" main/
 
       - name: 上傳成品
         uses: actions/upload-artifact@v4
         with:
-          name: pbc-mac-${{ matrix.arch }}
-          path: pbc_mac_${{ matrix.arch }}.zip
+          name: 【Mac ${{ matrix.arch }}】How to handle this semester
+          path: "【Mac ${{ matrix.arch }}】How to handle this semester.zip"
           retention-days: 14
