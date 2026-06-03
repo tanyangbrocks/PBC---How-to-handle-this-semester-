@@ -533,46 +533,87 @@ TOUCH_FIX_JS = """
 <script>
 (function(){
 'use strict';
-var _lastT = 0;
-function synth(type, touch, target) {
-  var now = Date.now();
-  // 短時間內已有合成事件，跳過（防 SDL2 自動轉換 + 我們的轉換雙重觸發）
-  if (type === 'mousedown' && now - _lastT < 80) return;
-  if (type === 'mousedown') _lastT = now;
-  var e = new MouseEvent(type, {
+// touch→pointer/mouse 合成事件 v2
+// ─────────────────────────────────────────────────────────────────────────────
+// 修正項目：
+//   1. passive:false + preventDefault()：阻止瀏覽器把 touch 當滾動手勢吃掉
+//   2. 同時發送 PointerEvent + MouseEvent：覆蓋 SDL2/Emscripten 新舊版監聽方式
+//      (新版 Emscripten 優先用 pointerdown；舊版用 mousedown；都送確保相容)
+//   3. iOS Safari cross-origin iframe 解鎖：
+//      - canvas.style.cursor = 'pointer'（讓 iOS 認為 canvas 是可互動元素）
+//      - canvas.onclick = function(){}（iframe 內 touch 事件解鎖 trick）
+//   4. 先送 mousemove 更新 SDL2 的 mouse position，再送 mousedown
+//      （部分 SDL2 build 要求位置先更新才能正確換算遊戲座標）
+// ─────────────────────────────────────────────────────────────────────────────
+var _lastTouch = 0;
+
+function fire(cv, mtype, t) {
+  var base = {
     bubbles: true, cancelable: true, view: window,
-    clientX: touch.clientX, clientY: touch.clientY,
-    screenX: touch.screenX, screenY: touch.screenY,
-    button: 0, buttons: type === 'mousedown' ? 1 : 0
-  });
-  target.dispatchEvent(e);
+    clientX: t.clientX, clientY: t.clientY,
+    screenX: t.screenX, screenY: t.screenY
+  };
+  // PointerEvent（SDL2 新版 Emscripten 優先監聽）
+  if (window.PointerEvent && mtype !== 'click') {
+    var ptype = mtype === 'mousedown' ? 'pointerdown'
+              : mtype === 'mouseup'   ? 'pointerup'
+              : mtype === 'mousemove' ? 'pointermove'
+              : null;
+    if (ptype) {
+      cv.dispatchEvent(new PointerEvent(ptype, Object.assign({}, base, {
+        pointerId: 1, pointerType: 'mouse', isPrimary: true,
+        button: 0, buttons: mtype === 'mousedown' ? 1 : 0
+      })));
+    }
+  }
+  // MouseEvent（SDL2 舊版 Emscripten 相容）
+  cv.dispatchEvent(new MouseEvent(mtype, Object.assign({}, base, {
+    button: 0, buttons: mtype === 'mousedown' ? 1 : 0
+  })));
 }
+
 function attach() {
   var cv = document.getElementById('canvas') || document.querySelector('canvas');
   if (!cv) { setTimeout(attach, 400); return; }
-  // 確保 canvas 可獲得焦點（SDL2 需要焦點才能接收部分事件）
+
   if (!cv.getAttribute('tabindex')) cv.setAttribute('tabindex', '0');
+  cv.style.cursor = 'pointer';         // iOS Safari：canvas 需此樣式才接收觸控
+  if (!cv.onclick) cv.onclick = function(){};  // iOS iframe 觸控解鎖
+
   cv.addEventListener('touchstart', function(e) {
+    var now = Date.now();
+    if (now - _lastTouch < 100) return;  // 100ms 內防重複觸發
+    _lastTouch = now;
+    e.preventDefault();   // 阻止瀏覽器滾動/縮放干擾
     cv.focus();
     var t = e.changedTouches[0];
-    synth('mousedown', t, cv);
-  }, { passive: true });
+    fire(cv, 'mousemove', t);  // 先更新 SDL2 mouse 位置
+    fire(cv, 'mousedown', t);  // 再按下
+  }, { passive: false });
+
   cv.addEventListener('touchend', function(e) {
+    e.preventDefault();
     var t = e.changedTouches[0];
-    synth('mouseup', t, cv);
-    synth('click',   t, cv);
+    fire(cv, 'mouseup', t);
+    fire(cv, 'click',   t);
+  }, { passive: false });
+
+  cv.addEventListener('touchcancel', function(e) {
+    if (e.changedTouches[0]) fire(cv, 'mouseup', e.changedTouches[0]);
   }, { passive: true });
+
+  console.log('[touch-fix v2] ready on #' + (cv.id || 'canvas'));
 }
 attach();
 })();
 </script>
 </body>"""
 
-if 'sdl2MouseSent' in html or '_lastT' in html:
+if '_lastT' in html or '_lastTouch' in html:
     print("[patch_index] ⚠️  觸控修正已存在，跳過注入")
 else:
     html = html.replace("</body>", TOUCH_FIX_JS, 1)
-    print("[patch_index] ✓ 行動裝置觸控修正注入成功（touch→mouse 明確轉換）")
+    print("[patch_index] ✓ 行動裝置觸控修正注入成功（v2：PointerEvent + preventDefault + iOS unlock）")
 
 # ── 行動裝置支援：viewport meta + canvas touch CSS ─────────────────────
 # 原理：SDL2/Emscripten 已自動將 touch → MOUSEBUTTONDOWN，
@@ -583,7 +624,7 @@ else:
 #   桌面瀏覽器：viewport meta 無效果；touch-action 及 media query 均不觸發
 MOBILE_SUPPORT = """<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <style>
-canvas { touch-action: none; }
+canvas { touch-action: none; cursor: pointer; }
 @media screen and (max-width: 960px) {
   /* 同時限制寬高，等比縮放塞入螢幕（解決按鈕被裁到螢幕外的問題）
      遊戲比例 4:3（960×720），min() 取寬或高的較小值保持整體可見 */
