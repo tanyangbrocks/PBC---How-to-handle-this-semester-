@@ -110,7 +110,7 @@ PHASE_EVENTS = [
         "prob":     0.10,
         "week_range": (14, 16),
         "is_positive": False,
-        "desc":     "想停修那堂爛課，結果查了一下——停修截止日已經過了。幹。",
+        "desc":     "想停修那堂爛課，結果突然想到——停修截止日已經過了。幹。",
         "effect":   lambda p: _drop_crisis_effect(p),
     },
 ]
