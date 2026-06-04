@@ -34,6 +34,19 @@ if os.path.exists(_bg_src):
 else:
     print("[patch_index] ⚠️  找不到 outside_background.jpg，載入畫面將無背景圖")
 
+# ── 0.5. DPR=1 強制修正（注入到 <head> 最前面）────────────────────────
+# 問題：pygbag 0.9.x 不支援 devicePixelRatio≠1（console 顯示 "Unsupported"）
+#   若 DPR=1.2，pygbag/SDL2 可能把 canvas.width 設成 1280×1.2=1536，
+#   導致 SDL2 座標換算放大 1.2 倍，點擊位置全部偏移，按鈕點不到。
+# 修法：在 pygbag JS 執行前強制 DPR=1，確保 canvas 固定在遊戲解析度（1280×720）。
+DPR_FIX = '<script>(function(){try{Object.defineProperty(window,"devicePixelRatio",{get:function(){return 1;},configurable:true});console.log("[dpr-fix] forced DPR=1");}catch(e){}})()</script>'
+
+if 'dpr-fix' in html:
+    print("[patch_index] ⚠️  DPR 修正已存在，跳過注入")
+else:
+    html = html.replace('<head>', '<head>\n' + DPR_FIX, 1)
+    print("[patch_index] ✓ DPR=1 強制修正注入成功（防 Unsupported device pixel ratio 座標偏移）")
+
 # ── 1. 替換背景色（powderblue → 深色，避免背景圖顯示前的白色閃爍）────
 html = html.replace(
     "background-color:powderblue;",
@@ -585,17 +598,25 @@ function attach() {
     if (now - _lastTouch < 100) return;  // 100ms 內防重複觸發
     _lastTouch = now;
     e.preventDefault();   // 阻止瀏覽器滾動/縮放干擾
-    cv.focus();
+    // 只在 canvas 未取得焦點時才呼叫 focus，
+    // 避免觸發 blur→focus 循環導致 SDL2 丟棄後續事件（console 的 221: DISCARD）
+    if (document.activeElement !== cv) cv.focus();
     var t = e.changedTouches[0];
-    fire(cv, 'mousemove', t);  // 先更新 SDL2 mouse 位置
-    fire(cv, 'mousedown', t);  // 再按下
+    // 延遲 16ms（一幀）讓 focus 穩定後再發事件，
+    // 防止 SDL2 在「剛取得 focus」狀態下因尚未就緒而 discard mousedown
+    setTimeout(function() {
+      fire(cv, 'mousemove', t);  // 先更新 SDL2 mouse 位置
+      fire(cv, 'mousedown', t);  // 再按下
+    }, 16);
   }, { passive: false });
 
   cv.addEventListener('touchend', function(e) {
     e.preventDefault();
     var t = e.changedTouches[0];
-    fire(cv, 'mouseup', t);
-    fire(cv, 'click',   t);
+    setTimeout(function() {
+      fire(cv, 'mouseup', t);
+      fire(cv, 'click',   t);
+    }, 16);
   }, { passive: false });
 
   cv.addEventListener('touchcancel', function(e) {
@@ -624,7 +645,7 @@ else:
 #   桌面瀏覽器：viewport meta 無效果；touch-action 及 media query 均不觸發
 MOBILE_SUPPORT = """<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <style>
-canvas { touch-action: none; cursor: pointer; }
+canvas { touch-action: none; cursor: pointer; -webkit-tap-highlight-color: transparent; }
 @media screen and (max-width: 960px) {
   /* 同時限制寬高，等比縮放塞入螢幕（解決按鈕被裁到螢幕外的問題）
      遊戲比例 4:3（960×720），min() 取寬或高的較小值保持整體可見 */
@@ -750,8 +771,10 @@ LOADING_OVERLAY = """<div id="__pbc_screen" style="
     var obs=new MutationObserver(function(){
       if(tr.hasAttribute('hidden')){
         obs.disconnect();
-        // #transfer 隱藏 = Python 已開始執行；等 2 秒讓首幀繪製完成
-        setTimeout(hideScreen, 2000);
+        // #transfer 隱藏 = Python 已開始執行
+        // 但 SDL2 init + pygame.display.set_mode + 第一幀約需 3~8 秒，
+        // 等 5 秒確保遊戲畫面真正出現後再收起覆蓋層。
+        setTimeout(hideScreen, 5000);
       }
     });
     obs.observe(tr,{attributes:true,attributeFilter:['hidden']});
