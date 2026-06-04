@@ -885,13 +885,6 @@ async def run_ui():
 
     screen = pygame.display.set_mode((WIN_W, WIN_H))
     pygame.display.set_caption("如何渡過這學期？")
-    # WASM 載入訊號：display.set_mode 完成後通知 JS 覆蓋層可以收起來了
-    if sys.platform == "emscripten":
-        try:
-            import js
-            js.eval("window.__pbc_game_ready = true")
-        except Exception:
-            pass
     clock  = pygame.time.Clock()
 
     # ── 自訂游標（pen_mouse.png）────────────────────────────────
@@ -1064,6 +1057,7 @@ async def run_ui():
         return (pos[0] - _fs_off[0], pos[1] - _fs_off[1])
 
     running = True
+    _wasm_ready_sent = False      # WASM 首幀訊號：只發一次，防重複
     _prev_hov_btns: set = set()   # 上一幀 hover 中的按鈕 key 集合（用於首次進入偵測）
     _prev_tick = pygame.time.get_ticks()
     _ime_arrow_prev    = {"left": False, "right": False}  # 上一幀 ←/→ 按壓狀態（邊緣偵測用）
@@ -2343,6 +2337,16 @@ async def run_ui():
                         else:
                             _tvalue[0] = _tvalue[0][:-1]
 
+        # WASM 首幀訊號（只發一次）：
+        # 在第一個 await 前發訊號，確保 display.flip() 已執行，
+        # 瀏覽器在本次 yield 後就能渲染出第一幀，覆蓋層消失時畫面已準備好。
+        if sys.platform == "emscripten" and not _wasm_ready_sent:
+            _wasm_ready_sent = True
+            try:
+                import js
+                js.eval("window.__pbc_game_ready = true")
+            except Exception:
+                pass
         await asyncio.sleep(0)   # yield #1：讓瀏覽器跑 onaudioprocess / 其他 task
         clock.tick(30)
         # yield #2（WASM only）：clock.tick 結束後再讓一次，確保 ScriptProcessorNode
