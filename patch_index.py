@@ -23,15 +23,20 @@ if not os.path.exists(INDEX_PATH):
 with open(INDEX_PATH, "r", encoding="utf-8") as f:
     html = f.read()
 
-# ── 0. 複製載入畫面背景圖到 build/web/（HTML 無法直接讀 pygbag VFS）────
-import shutil as _shutil
+# ── 0. 載入畫面背景圖 → base64 嵌入 HTML（避免額外 HTTP 請求失敗）────
+# 圖片直接編碼進 HTML，載入時不需要另外的網路請求，100% 不會因為圖片載入失敗而露出 canvas。
+import base64 as _b64
 _bg_src = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                         "asset", "picture", "background", "outside_background.jpg")
-_bg_dst = os.path.join(os.path.dirname(INDEX_PATH), "outside_background.jpg")
 if os.path.exists(_bg_src):
-    _shutil.copy(_bg_src, _bg_dst)
-    print("[patch_index] ✓ outside_background.jpg 複製到 build/web/")
+    with open(_bg_src, "rb") as _f:
+        _bg_data_url = "data:image/jpeg;base64," + _b64.b64encode(_f.read()).decode("ascii")
+    # 仍複製一份到 build/web/（作為備份，不再用於主要載入路徑）
+    import shutil as _shutil
+    _shutil.copy(_bg_src, os.path.join(os.path.dirname(INDEX_PATH), "outside_background.jpg"))
+    print("[patch_index] ✓ outside_background.jpg base64 嵌入 HTML（18KB → 零網路依賴）")
 else:
+    _bg_data_url = ""
     print("[patch_index] ⚠️  找不到 outside_background.jpg，載入畫面將無背景圖")
 
 # ── 0.5. DPR=1 強制修正（注入到 <head> 最前面）────────────────────────
@@ -706,7 +711,7 @@ LOADING_OVERLAY = """<div id="__pbc_screen" style="
     z-index:9999;pointer-events:none;background:#1a0800;
     transition:opacity 0.6s ease;">
   <div style="position:absolute;inset:0;
-    background:url('./outside_background.jpg') center/cover no-repeat;"></div>
+    background:url('""" + _bg_data_url + """') center/cover no-repeat;"></div>
   <div style="position:absolute;inset:0;background:rgba(0,0,0,0.42);"></div>
   <div style="position:relative;z-index:1;width:100%;height:100%;
     display:flex;flex-direction:column;align-items:center;justify-content:center;
