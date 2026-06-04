@@ -885,6 +885,13 @@ async def run_ui():
 
     screen = pygame.display.set_mode((WIN_W, WIN_H))
     pygame.display.set_caption("如何渡過這學期？")
+    # WASM 載入訊號：display.set_mode 完成後通知 JS 覆蓋層可以收起來了
+    if sys.platform == "emscripten":
+        try:
+            import js
+            js.eval("window.__pbc_game_ready = true")
+        except Exception:
+            pass
     clock  = pygame.time.Clock()
 
     # ── 自訂游標（pen_mouse.png）────────────────────────────────

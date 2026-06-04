@@ -765,22 +765,34 @@ LOADING_OVERLAY = """<div id="__pbc_screen" style="
     scr.style.opacity='0';
     setTimeout(function(){ scr.style.display='none'; },650);
   }
+  // 精確時機：等 Python 呼叫 pygame.display.set_mode() 後設定的旗標
+  // ui.py 在 display.set_mode 完成後執行 js.eval("window.__pbc_game_ready = true")
+  // 此處輪詢該旗標，旗標出現即代表遊戲視窗已建立，再等 500ms 讓首幀繪製完成後隱藏覆蓋層
+  function waitGameReady(){
+    if(window.__pbc_game_ready){
+      setTimeout(hideScreen, 500);
+    } else {
+      setTimeout(waitGameReady, 100);
+    }
+  }
+  // 同時保留 #transfer hidden 作為備援（萬一 js.eval 失敗）
   function watchTransfer(){
     var tr=document.getElementById('transfer');
     if(!tr){ setTimeout(watchTransfer,500); return; }
     var obs=new MutationObserver(function(){
       if(tr.hasAttribute('hidden')){
         obs.disconnect();
-        // #transfer 隱藏 = Python 已開始執行
-        // 但 SDL2 init + pygame.display.set_mode + 第一幀約需 3~8 秒，
-        // 等 5 秒確保遊戲畫面真正出現後再收起覆蓋層。
-        setTimeout(hideScreen, 5000);
+        // js.eval 備援：Python 已啟動但 __pbc_game_ready 可能延遲，等 6 秒
+        setTimeout(function(){
+          if(!window.__pbc_game_ready) hideScreen();
+        }, 6000);
       }
     });
     obs.observe(tr,{attributes:true,attributeFilter:['hidden']});
   }
+  waitGameReady();
   watchTransfer();
-  setTimeout(hideScreen, 90000); // 90 秒超時保底
+  setTimeout(hideScreen, 120000); // 2 分鐘超時保底
 })();
 </script>"""
 
