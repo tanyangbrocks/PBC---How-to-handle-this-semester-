@@ -413,7 +413,11 @@ function __cc_show(prompt) {
   // 延遲 focus：讓 canvas 先完成當前幀再移交焦點，避免搶佔時序問題
   setTimeout(function(){
     inp.focus();
-    inp.click();   // 在部分瀏覽器觸發 IME 啟動
+    // inp.click() 只在觸控裝置需要（觸發行動端虛擬鍵盤 IME 彈出）；
+    // 桌面端呼叫 click() 會強制啟動 OS 中文 IME，導致無法切換為英文輸入
+    if(navigator.maxTouchPoints > 0 || 'ontouchstart' in window){
+      inp.click();
+    }
     inp.select();
   }, 50);
 }
@@ -725,26 +729,47 @@ LOADING_OVERLAY = """<div id="__pbc_screen" style="
                 text-shadow:1px 1px 4px rgba(0,0,0,.7);">
       How to Survive This Semester
     </div>
-    <div style="font-size:14px;color:#f0e0c0;margin-bottom:14px;
-                text-shadow:1px 1px 4px rgba(0,0,0,.7);">
-      載入可能需要一點時間，請耐心等候……
-    </div>
-    <div style="display:flex;align-items:center;gap:10px;">
-      <div style="width:300px;height:14px;
-                  background:rgba(255,255,255,.18);border-radius:7px;overflow:hidden;">
-        <div id="pbc_bar" style="height:100%;width:0%;
-             background:#e8bc55;border-radius:7px;
-             transition:width .4s ease;"></div>
+    <!-- 載入中狀態 -->
+    <div id="pbc_load_area">
+      <div style="font-size:14px;color:#f0e0c0;margin-bottom:14px;
+                  text-shadow:1px 1px 4px rgba(0,0,0,.7);">
+        載入可能需要一點時間，請耐心等候……
       </div>
-      <div id="pbc_pct" style="font-size:13px;color:#e8bc55;
-                                font-weight:bold;min-width:36px;
-                                text-shadow:1px 1px 4px rgba(0,0,0,.7);">0%</div>
+      <div style="display:flex;align-items:center;gap:10px;">
+        <div style="width:300px;height:14px;
+                    background:rgba(255,255,255,.18);border-radius:7px;overflow:hidden;">
+          <div id="pbc_bar" style="height:100%;width:0%;
+               background:#e8bc55;border-radius:7px;
+               transition:width .4s ease;"></div>
+        </div>
+        <div id="pbc_pct" style="font-size:13px;color:#e8bc55;
+                                  font-weight:bold;min-width:36px;
+                                  text-shadow:1px 1px 4px rgba(0,0,0,.7);">0%</div>
+      </div>
+    </div>
+    <!-- 遊戲就緒：點擊開始 -->
+    <div id="pbc_start_area" style="display:none;flex-direction:column;
+         align-items:center;gap:14px;">
+      <div style="font-size:20px;font-weight:bold;color:#f5d9a8;letter-spacing:3px;
+                  text-shadow:2px 2px 6px rgba(0,0,0,.7);
+                  animation:pbc_pulse 1.6s ease-in-out infinite;">
+        點擊畫面開始遊玩
+      </div>
+      <div style="font-size:13px;color:#e8d0a0;letter-spacing:1px;
+                  text-shadow:1px 1px 4px rgba(0,0,0,.7);">
+        Click anywhere to start
+      </div>
     </div>
   </div>
 </div>
+<style>
+@keyframes pbc_pulse {
+  0%,100%{ opacity:1; transform:scale(1); }
+  50%    { opacity:0.65; transform:scale(1.04); }
+}
+</style>
 <script>
 (function(){
-  // 進度條：輪詢等 #progress 出現後掛 MutationObserver
   var bar=document.getElementById('pbc_bar');
   var pct=document.getElementById('pbc_pct');
   function hookProgress(){
@@ -759,35 +784,57 @@ LOADING_OVERLAY = """<div id="__pbc_screen" style="
   }
   hookProgress();
 
-  // 淡出覆蓋層：監聽 #transfer 被 pygbag 隱藏（= Python 已啟動），
-  // 再等 2 秒讓遊戲繪製第一幀後才收起覆蓋層。
-  // 舊做法（canvas 像素偵測）的缺陷：canvas 初始為透明(0,0,0,0)，
-  // SDL2 init 把它填成灰色時即被誤判為「遊戲已繪製」，覆蓋層 2.5 秒就消失。
   var scr=document.getElementById('__pbc_screen');
   var _done=false;
+
   function hideScreen(){
     if(_done) return; _done=true;
+    scr.style.pointerEvents='none';
+    scr.style.cursor='';
     scr.style.opacity='0';
-    setTimeout(function(){ scr.style.display='none'; },650);
+    setTimeout(function(){
+      scr.style.display='none';
+      // 覆蓋層消失後 focus canvas：
+      // 玩家已在覆蓋層上做了真實點擊，此時再 focus canvas
+      // 可確保 itch.io iframe 的滑鼠事件正式啟動
+      var cv=document.getElementById('canvas')||document.querySelector('canvas');
+      if(cv) cv.focus();
+    }, 650);
   }
-  // 精確時機：等 Python 呼叫 pygame.display.set_mode() 後設定的旗標
-  // ui.py 在 display.set_mode 完成後執行 js.eval("window.__pbc_game_ready = true")
-  // 此處輪詢該旗標，旗標出現即代表遊戲視窗已建立，再等 500ms 讓首幀繪製完成後隱藏覆蓋層
+
+  function showStartPrompt(){
+    // 切換到「點擊開始」狀態
+    var la=document.getElementById('pbc_load_area');
+    var sa=document.getElementById('pbc_start_area');
+    if(la) la.style.display='none';
+    if(sa) sa.style.display='flex';
+    // 覆蓋層改為可點擊
+    scr.style.pointerEvents='auto';
+    scr.style.cursor='pointer';
+    scr.addEventListener('click', hideScreen, {once:true});
+  }
+
+  // waitGameReady：
+  //   偵測到 __pbc_game_ready 後用兩個 rAF 等待，
+  //   確保遊戲第一幀已真正渲染到螢幕再顯示「點擊開始」，
+  //   這樣玩家點下去後覆蓋層淡出時底層是遊戲畫面而非灰色 canvas。
   function waitGameReady(){
     if(window.__pbc_game_ready){
-      hideScreen();
+      requestAnimationFrame(function(){
+        requestAnimationFrame(showStartPrompt);
+      });
     } else {
       setTimeout(waitGameReady, 100);
     }
   }
-  // 同時保留 #transfer hidden 作為備援（萬一 js.eval 失敗）
+
+  // 備援：#transfer hidden 後 6 秒仍未就緒，直接強制隱藏
   function watchTransfer(){
     var tr=document.getElementById('transfer');
     if(!tr){ setTimeout(watchTransfer,500); return; }
     var obs=new MutationObserver(function(){
       if(tr.hasAttribute('hidden')){
         obs.disconnect();
-        // js.eval 備援：Python 已啟動但 __pbc_game_ready 可能延遲，等 6 秒
         setTimeout(function(){
           if(!window.__pbc_game_ready) hideScreen();
         }, 6000);
@@ -795,9 +842,10 @@ LOADING_OVERLAY = """<div id="__pbc_screen" style="
     });
     obs.observe(tr,{attributes:true,attributeFilter:['hidden']});
   }
+
   waitGameReady();
   watchTransfer();
-  setTimeout(hideScreen, 120000); // 2 分鐘超時保底
+  setTimeout(hideScreen, 120000);
 })();
 </script>"""
 
