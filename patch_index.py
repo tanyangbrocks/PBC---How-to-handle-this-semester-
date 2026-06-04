@@ -703,7 +703,7 @@ else:
 #       以 JS 輪詢 canvas 中心像素，偵測到顏色變化（=遊戲開始繪製）後淡出。
 LOADING_OVERLAY = """<div id="__pbc_screen" style="
     position:fixed;top:0;left:0;width:100%;height:100%;
-    z-index:9999;pointer-events:none;
+    z-index:9999;pointer-events:none;background:#1a0800;
     transition:opacity 0.6s ease;">
   <div style="position:absolute;inset:0;
     background:url('./outside_background.jpg') center/cover no-repeat;"></div>
