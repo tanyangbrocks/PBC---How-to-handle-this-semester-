@@ -775,7 +775,7 @@ LOADING_OVERLAY = """<div id="__pbc_screen" style="
   // 此處輪詢該旗標，旗標出現即代表遊戲視窗已建立，再等 500ms 讓首幀繪製完成後隱藏覆蓋層
   function waitGameReady(){
     if(window.__pbc_game_ready){
-      setTimeout(hideScreen, 1000);
+      hideScreen();
     } else {
       setTimeout(waitGameReady, 100);
     }
