@@ -90,16 +90,7 @@ html = html.replace(
             z-index: 999999;
         }""",
     """    #infobox {
-            position: fixed;
-            background: rgba(255,244,224,0.95);
-            color: #5d4037;
-            font-weight: bold;
-            font-size: 13px;
-            padding: 10px 20px;
-            border-radius: 8px;
-            border: 1px solid #e0c090;
-            box-shadow: 0 2px 12px rgba(0,0,0,0.15);
-            z-index: 999999;
+            display: none !important;
         }"""
 )
 print("[patch_index] ✓ infobox 樣式替換成功")
@@ -628,6 +619,13 @@ function attach() {
     if (e.changedTouches[0]) fire(cv, 'mouseup', e.changedTouches[0]);
   }, { passive: true });
 
+  // itch.io 已知問題：頁面上的 UI 元素（收藏、追蹤按鈕）疊在 iframe 上方，
+  // 滑鼠移過去時 iframe 失去 focus，SDL2 就收不到滑鼠事件（游標不動、點擊無效）。
+  // 解法：滑鼠進入 canvas 時立刻呼叫 window.focus()，強制把 focus 搶回來。
+  // 參考：github.com/pygame-web/pygbag/issues/33
+  cv.addEventListener('mouseenter', function(){ window.focus(); }, { passive: true });
+  cv.addEventListener('mousemove',  function(){ window.focus(); }, { passive: true, once: true });
+
   console.log('[touch-fix v2] ready on #' + (cv.id || 'canvas'));
 }
 attach();
@@ -708,12 +706,12 @@ else:
 #       以 JS 輪詢 canvas 中心像素，偵測到顏色變化（=遊戲開始繪製）後淡出。
 LOADING_OVERLAY = """<div id="__pbc_screen" style="
     position:fixed;top:0;left:0;width:100%;height:100%;
-    z-index:9999;pointer-events:none;background:#1a0800;
+    z-index:9999;pointer-events:none;
+    background:linear-gradient(rgba(0,0,0,0.42),rgba(0,0,0,0.42)),
+               url('""" + _bg_data_url + """') center/cover no-repeat,
+               #1a0800;
     transition:opacity 0.6s ease;">
-  <div style="position:absolute;inset:0;
-    background:url('""" + _bg_data_url + """') center/cover no-repeat;"></div>
-  <div style="position:absolute;inset:0;background:rgba(0,0,0,0.42);"></div>
-  <div style="position:relative;z-index:1;width:100%;height:100%;
+  <div style="position:absolute;inset:0;width:100%;height:100%;
     display:flex;flex-direction:column;align-items:center;justify-content:center;
     font-family:sans-serif;">
     <div style="font-size:32px;font-weight:bold;color:#f5d9a8;
@@ -773,9 +771,13 @@ LOADING_OVERLAY = """<div id="__pbc_screen" style="
   // 精確時機：等 Python 呼叫 pygame.display.set_mode() 後設定的旗標
   // ui.py 在 display.set_mode 完成後執行 js.eval("window.__pbc_game_ready = true")
   // 此處輪詢該旗標，旗標出現即代表遊戲視窗已建立，再等 500ms 讓首幀繪製完成後隱藏覆蓋層
+  // 用兩個 rAF 確保遊戲第一幀已渲染到螢幕，再隱藏覆蓋層，
+  // 避免淡出期間底層仍是 SDL2 init 的灰色 canvas
   function waitGameReady(){
     if(window.__pbc_game_ready){
-      hideScreen();
+      requestAnimationFrame(function(){
+        requestAnimationFrame(hideScreen);
+      });
     } else {
       setTimeout(waitGameReady, 100);
     }
